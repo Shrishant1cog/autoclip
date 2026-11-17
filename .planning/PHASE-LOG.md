@@ -78,3 +78,21 @@ Baseline (Phase 0 checkpoint): commit `54d6288` on `main`, pushed to `origin/mai
 ## Implementation phases (running log)
 
 Each phase: implement → test → typecheck/build → commit → push. Log updated per phase.
+
+### Phase 2 — Workflow engine foundation (COMPLETE — commit `b07e759`)
+
+- Migration v4: `workflows` (versioned, active flag), `workflow_runs`, `workflow_node_runs`.
+- `workflow/engine.py`: `NodeSpec` registry (6 pipeline stages + `util.condition` + `util.log`),
+  graph validation (types/dupes/edges/cycles), topological execution, retry policy,
+  disabled-node passthrough, cancellation, start/finish hooks.
+- `workflow/store.py`: CRUD with versioning (old versions retained), run + node history.
+- `api/workflows.py`: `/api/workflows` CRUD + validate + run + runs/{id}; `/nodes` registry.
+- Tests: 18 new (`tests/test_workflow.py`); suite 380 passed; ruff + tsc + build clean.
+- Live-verified: registry lists 8 node types, workflow create → run → history over HTTP.
+- Defects found & fixed during the phase (each has a regression test): eager runner binding
+  (made lazy), spec-vs-factory registry resolution, double-resolution bug, disabled-node
+  data passthrough, `api.engine` name collision.
+- Known limitation (deliberate): pipeline-stage nodes require a runner binding which the
+  HTTP run endpoint does not yet construct; stage execution through workflows lands with
+  the batch/execution phase (the engine, history, and validation paths are complete).
+
