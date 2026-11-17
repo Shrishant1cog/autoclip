@@ -6,7 +6,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from .. import paths
@@ -25,6 +25,7 @@ from .schemas import (
     ClipPatchIn,
     ExportOut,
     ExportRequestIn,
+    LibraryClipOut,
     WordOut,
 )
 
@@ -36,7 +37,8 @@ router = APIRouter(prefix="/api", tags=["clips"])
 def _clip_out(clip) -> ClipOut:
     edit = store.get_clip_edit(clip.id)
     exports = store.list_exports(clip.id)
-    return ClipOut.of(clip, edit=edit, exports=exports)
+    uploads = {u.export_id: u for u in store.list_uploads_for_clip(clip.id)}
+    return ClipOut.of(clip, edit=edit, exports=exports, uploads=uploads)
 
 
 async def list_clips_for_job(job_id: str) -> list[ClipOut]:
@@ -45,6 +47,42 @@ async def list_clips_for_job(job_id: str) -> list[ClipOut]:
         raise HTTPException(status_code=404, detail="Job not found.")
     clips = await asyncio.to_thread(store.list_clips, job_id)
     return [await asyncio.to_thread(_clip_out, clip) for clip in clips]
+
+
+@router.get("/clips", response_model=list[LibraryClipOut])
+async def list_all_clips(limit: int = Query(default=200, ge=1, le=1000)) -> list[LibraryClipOut]:
+    """Every clip the library has produced, newest first.
+
+    The library screen needs the source title and the job's status alongside
+    each clip — the status is what tells the UI whether exporting is safe yet.
+    Both are fetched once and shared, rather than joined per clip.
+    """
+    clips = await asyncio.to_thread(store.list_all_clips, limit)
+
+    jobs = {}
+    sources = {}
+    for job_id in {clip.job_id for clip in clips}:
+        job = await asyncio.to_thread(store.get_job, job_id)
+        if job is None:
+            continue
+        jobs[job_id] = job
+        source = await asyncio.to_thread(store.get_source, job.source_id)
+        if source is not None:
+            sources[source.id] = source
+
+    library: list[LibraryClipOut] = []
+    for clip in clips:
+        job = jobs.get(clip.job_id)
+        source = sources.get(job.source_id) if job else None
+        base = await asyncio.to_thread(_clip_out, clip)
+        library.append(
+            LibraryClipOut(
+                **base.model_dump(),
+                source_title=source.title if source else "",
+                job_status=job.status if job else "",
+            )
+        )
+    return library
 
 
 @router.get("/clips/{clip_id}", response_model=ClipOut)
@@ -234,7 +272,18 @@ async def export_clip(clip_id: str, payload: ExportRequestIn) -> ExportOut:
     await asyncio.to_thread(store.create_export, record)
     await asyncio.to_thread(store.update_clip, clip_id, status="exported")
 
-    return ExportOut.of(record)
+    upload = None
+    try:
+        from ..youtube import uploads as youtube_uploads
+        from ..youtube.queue import upload_queue
+
+        upload = await asyncio.to_thread(youtube_uploads.enqueue_export, record.id, settings)
+        if upload is not None:
+            upload_queue.notify()
+    except Exception:  # the export succeeded; a queue failure is not fatal
+        log.exception("Could not queue a YouTube upload for export %s.", record.id)
+
+    return ExportOut.of(record, upload)
 
 
 @router.get("/exports/{export_id}/download")

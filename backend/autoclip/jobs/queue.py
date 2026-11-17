@@ -17,6 +17,8 @@ import contextlib
 import logging
 from dataclasses import dataclass
 
+from ..config import Settings
+from ..config import load as load_settings
 from ..db import store
 from ..db.models import Job
 from ..pipeline.runner import JobCancelled, PipelineRunner
@@ -136,6 +138,7 @@ class JobQueue:
         runner = PipelineRunner(
             job,
             source,
+            settings=_job_settings(job),
             on_progress=on_progress,
             is_cancelled=lambda: self.is_cancelled(job.id),
         )
@@ -154,6 +157,29 @@ class JobQueue:
         finally:
             self._running_job_id = None
             self._cancel_requested.discard(job.id)
+
+
+def _job_settings(job: Job) -> Settings:
+    """Rebuild the settings snapshot a job was created with.
+
+    The API stores the fully merged settings on the job, so the worker must use
+    them rather than re-reading ``config.json`` — otherwise per-job choices such
+    as ``max_clips`` and the Whisper model are silently ignored.
+    """
+    current = load_settings()
+    if not job.settings:
+        return current
+
+    try:
+        resolved = Settings.model_validate(job.settings)
+    except Exception:
+        log.warning("Job %s has unreadable settings; using saved settings.", job.id)
+        return current
+
+    # Secrets live in the keyring and are deliberately absent from the job
+    # snapshot, so keep the in-memory fallback from the on-disk settings.
+    resolved._fallback_secrets = current._fallback_secrets
+    return resolved
 
 
 def _run_blocking(runner: PipelineRunner):

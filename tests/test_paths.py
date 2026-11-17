@@ -95,7 +95,12 @@ class TestLegacyHomeAdoption:
 def test_ensure_layout_creates_the_tree(autoclip_home: Path) -> None:
     paths.ensure_layout()
 
-    for directory in (paths.media_dir(), paths.work_dir(), paths.exports_dir()):
+    for directory in (
+        paths.raw_dir(),
+        paths.media_dir(),
+        paths.work_dir(),
+        paths.exports_dir(),
+    ):
         assert directory.is_dir()
 
 
@@ -112,6 +117,7 @@ def test_ensure_layout_is_idempotent(autoclip_home: Path) -> None:
 def test_all_artifacts_live_under_the_root(autoclip_home: Path) -> None:
     root = paths.root()
     derived = [
+        paths.raw_dir(),
         paths.media_dir(),
         paths.work_dir(),
         paths.exports_dir(),
@@ -119,6 +125,7 @@ def test_all_artifacts_live_under_the_root(autoclip_home: Path) -> None:
         paths.config_path(),
         paths.job_work_dir("job123"),
         paths.source_media_dir("src456"),
+        paths.source_raw_dir("src456"),
     ]
 
     for path in derived:
@@ -129,3 +136,4 @@ def test_per_job_and_per_source_directories_are_namespaced(autoclip_home: Path) 
     assert paths.job_work_dir("job123").name == "job123"
     assert paths.job_work_dir("job123").parent == paths.work_dir()
     assert paths.source_media_dir("src456").parent == paths.media_dir()
+    assert paths.source_raw_dir("src456").parent == paths.raw_dir()

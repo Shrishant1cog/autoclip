@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { api, type ProviderStatus, type Settings as SettingsData, type SystemStatus } from '../api'
+import { api, type ProviderStatus, type Settings as SettingsData, type SystemStatus, type YouTubeStatus } from '../api'
 import { ErrorNote } from '../components/ErrorNote'
 
 const SECRET_LABELS: Record<string, string> = {
@@ -14,6 +14,7 @@ export function Settings() {
   const [settings, setSettings] = useState<SettingsData | null>(null)
   const [providers, setProviders] = useState<ProviderStatus[]>([])
   const [system, setSystem] = useState<SystemStatus | null>(null)
+  const [youtube, setYoutube] = useState<YouTubeStatus | null>(null)
   const [error, setError] = useState<Error | null>(null)
   const [saved, setSaved] = useState(false)
 
@@ -21,6 +22,7 @@ export function Settings() {
     void api.getSettings().then(setSettings).catch((e) => setError(e as Error))
     void api.providerStatus().then(setProviders).catch(() => undefined)
     void api.system().then(setSystem).catch(() => undefined)
+    void api.youtubeStatus().then(setYoutube).catch(() => undefined)
   }
 
   useEffect(reload, [])
@@ -267,6 +269,166 @@ export function Settings() {
           />
           Also write an .srt sidecar
         </label>
+      </Section>
+
+      <Section
+        title="YouTube"
+        note="Uploads use your own Google Cloud OAuth client. Tokens stay in your OS keyring."
+      >
+        <div className="space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 border border-ink-800 p-4">
+            <div>
+              <p className="text-sm text-ink-100">
+                {youtube?.connected
+                  ? `Connected to ${youtube.channel_title || 'your channel'}`
+                  : 'No channel connected'}
+              </p>
+              <p className="mt-1 text-xs text-ink-500">
+                {youtube?.connected
+                  ? `Auto-upload is ${youtube.auto_upload ? 'on' : 'off'} — visible by default as ${youtube.privacy}.`
+                  : 'Press Connect YouTube channel in the header after adding the client below.'}
+              </p>
+            </div>
+            {youtube?.connected ? (
+              <div className="flex items-center gap-2">
+                {youtube.channel_url && (
+                  <a
+                    href={youtube.channel_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn btn-ghost"
+                  >
+                    Open channel
+                  </a>
+                )}
+                <button
+                  className="btn btn-quiet"
+                  onClick={async () => {
+                    setError(null)
+                    try {
+                      const next = await api.youtubeDisconnect()
+                      setYoutube(next)
+                      reload()
+                    } catch (err) {
+                      setError(err as Error)
+                    }
+                  }}
+                >
+                  Disconnect
+                </button>
+              </div>
+            ) : (
+              <button
+                className="btn btn-primary"
+                disabled={!youtube?.configured}
+                onClick={async () => {
+                  setError(null)
+                  try {
+                    const { auth_url } = await api.youtubeConnect()
+                    window.location.href = auth_url
+                  } catch (err) {
+                    setError(err as Error)
+                  }
+                }}
+              >
+                Connect YouTube channel
+              </button>
+            )}
+          </div>
+
+          <Field
+            label="OAuth client ID"
+            hint="Google Cloud Console — APIs & Services — Credentials — OAuth client."
+            value={settings.youtube.client_id}
+            placeholder="...apps.googleusercontent.com"
+            onCommit={(value) => patch({ youtube: { ...settings.youtube, client_id: value } })}
+          />
+
+          <SecretField
+            secretKey="youtube_client_secret"
+            label="OAuth client secret"
+            present={settings.youtube_secret_present}
+            onChanged={reload}
+            onError={setError}
+          />
+
+          <div className="grid gap-5 sm:grid-cols-2">
+            <Field
+              label="Redirect URI"
+              hint="Must match the URI registered on the OAuth client exactly."
+              value={settings.youtube.redirect_uri}
+              onCommit={(value) =>
+                patch({ youtube: { ...settings.youtube, redirect_uri: value } })
+              }
+            />
+            <Select
+              label="Default visibility"
+              hint="New Google Cloud projects can only upload Private until YouTube audits the project."
+              value={settings.youtube.privacy}
+              onChange={async (value) => {
+                setError(null)
+                try {
+                  await api.setYouTubePrivacy(value as 'private' | 'unlisted' | 'public')
+                  reload()
+                } catch (err) {
+                  setError(err as Error)
+                }
+              }}
+              options={['public', 'unlisted', 'private']}
+              labels={{ public: 'Public', unlisted: 'Unlisted', private: 'Private' }}
+            />
+          </div>
+
+          <label className="flex items-start gap-3 text-sm text-ink-200">
+            <input
+              type="checkbox"
+              checked={settings.youtube.auto_upload}
+              disabled={!youtube?.connected}
+              onChange={async (e) => {
+                setError(null)
+                try {
+                  const next = await api.setYouTubeAuto(e.target.checked)
+                  setYoutube(next)
+                  reload()
+                } catch (err) {
+                  setError(err as Error)
+                }
+              }}
+              className="mt-0.5 size-4 accent-sodium-500"
+            />
+            <span>
+              Upload every finished clip automatically
+              <span className="mt-1 block text-xs leading-snug text-ink-500">
+                Each successful export is queued, titled, described, and tagged by the active
+                AI model from its own subtitles. Uploads cost 1,600 of the 10,000 daily YouTube
+                API quota units, so roughly six clips a day.
+              </span>
+            </span>
+          </label>
+
+          <details className="border border-ink-800 p-4 text-sm text-ink-300">
+            <summary className="cursor-pointer text-ink-200">Google Cloud setup</summary>
+            <ol className="mt-3 list-decimal space-y-2 pl-5 text-xs leading-relaxed text-ink-400">
+              <li>
+                Create a project at console.cloud.google.com and enable{' '}
+                <span className="text-ink-200">YouTube Data API v3</span>.
+              </li>
+              <li>
+                Configure the OAuth consent screen. Add the scopes{' '}
+                <code className="text-ink-200">youtube.upload</code> and{' '}
+                <code className="text-ink-200">youtube.readonly</code>, and add your Google
+                account as a test user.
+              </li>
+              <li>
+                Create an OAuth client. A <span className="text-ink-200">Web application</span>{' '}
+                client needs this exact redirect URI:{' '}
+                <code className="text-ink-200">{settings.youtube.redirect_uri}</code>. A{' '}
+                <span className="text-ink-200">Desktop app</span> client needs none.
+              </li>
+              <li>Paste the client ID and secret above, then connect from the header.</li>
+            </ol>
+          </details>
+        </div>
       </Section>
 
       {system && (

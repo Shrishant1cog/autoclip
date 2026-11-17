@@ -114,6 +114,67 @@ class WordOut(BaseModel):
     speaker: str | None = None
 
 
+class UploadOut(BaseModel):
+    """One YouTube upload attempt attached to an export."""
+
+    id: str
+    export_id: str
+    clip_id: str
+    status: str
+    video_id: str | None = None
+    title: str = ""
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
+    privacy: str = "public"
+    error: str | None = None
+    watch_url: str = ""
+    created_at: str
+    updated_at: str
+
+    @classmethod
+    def of(cls, upload: models.YouTubeUpload) -> UploadOut:
+        return cls(
+            id=upload.id,
+            export_id=upload.export_id,
+            clip_id=upload.clip_id,
+            status=upload.status,
+            video_id=upload.video_id,
+            title=upload.title,
+            description=upload.description,
+            tags=upload.tags,
+            privacy=upload.privacy,
+            error=upload.error,
+            watch_url=(f"https://youtu.be/{upload.video_id}" if upload.video_id else ""),
+            created_at=upload.created_at,
+            updated_at=upload.updated_at,
+        )
+
+
+class YouTubeStatusOut(BaseModel):
+    configured: bool
+    connected: bool
+    auto_upload: bool
+    client_id: str = ""
+    redirect_uri: str = ""
+    privacy: str = "public"
+    channel_id: str = ""
+    channel_title: str = ""
+    channel_url: str = ""
+    connected_at: str = ""
+
+
+class YouTubeConnectOut(BaseModel):
+    auth_url: str
+
+
+class YouTubeAutoIn(BaseModel):
+    enabled: bool
+
+
+class YouTubePrivacyIn(BaseModel):
+    privacy: Literal["private", "unlisted", "public"]
+
+
 class ExportOut(BaseModel):
     id: str
     clip_id: str
@@ -122,9 +183,12 @@ class ExportOut(BaseModel):
     size_bytes: int
     created_at: str
     download_url: str
+    #: Present when this export was queued for YouTube, so the UI can show
+    #: progress or a retry button next to the download link.
+    upload: UploadOut | None = None
 
     @classmethod
-    def of(cls, export: models.Export) -> ExportOut:
+    def of(cls, export: models.Export, upload: models.YouTubeUpload | None = None) -> ExportOut:
         return cls(
             id=export.id,
             clip_id=export.clip_id,
@@ -133,6 +197,7 @@ class ExportOut(BaseModel):
             size_bytes=export.size_bytes,
             created_at=export.created_at,
             download_url=f"/api/exports/{export.id}/download",
+            upload=UploadOut.of(upload) if upload else None,
         )
 
 
@@ -162,7 +227,9 @@ class ClipOut(BaseModel):
         *,
         edit: models.ClipEdit | None = None,
         exports: list[models.Export] | None = None,
+        uploads: dict[str, models.YouTubeUpload] | None = None,
     ) -> ClipOut:
+        uploads = uploads or {}
         return cls(
             id=clip.id,
             job_id=clip.job_id,
@@ -180,8 +247,15 @@ class ClipOut(BaseModel):
             user_trimmed=clip.user_trimmed,
             caption_style=edit.caption_style if edit else "bold_pop",
             ratio=edit.ratio if edit else "9:16",
-            exports=[ExportOut.of(e) for e in (exports or [])],
+            exports=[ExportOut.of(e, uploads.get(e.id)) for e in (exports or [])],
         )
+
+
+class LibraryClipOut(ClipOut):
+    """A clip plus the context the all-clips library needs to group it."""
+
+    source_title: str = ""
+    job_status: str = ""
 
 
 class ClipPatchIn(BaseModel):
@@ -229,10 +303,13 @@ class SettingsOut(BaseModel):
     clips: dict[str, Any]
     ingest: dict[str, Any]
     export: dict[str, Any]
+    youtube: dict[str, Any]
     insecure_secret_storage: bool
     #: Which providers have a key stored. The keys themselves never leave the
     #: keyring, so the UI shows presence, not value.
     keys_present: dict[str, bool] = Field(default_factory=dict)
+    #: YouTube OAuth client secret presence (never the value).
+    youtube_secret_present: bool = False
 
 
 class SettingsIn(BaseModel):
@@ -242,6 +319,7 @@ class SettingsIn(BaseModel):
     clips: dict[str, Any] | None = None
     ingest: dict[str, Any] | None = None
     export: dict[str, Any] | None = None
+    youtube: dict[str, Any] | None = None
 
 
 class SecretIn(BaseModel):

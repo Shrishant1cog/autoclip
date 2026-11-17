@@ -24,14 +24,28 @@ from ..config import load as load_settings
 from ..db import store
 from ..db.models import Clip, Export, Job, Source, new_id, utcnow
 from ..db.models import Transcript as TranscriptRow
-from ..providers import build_provider, detection_config
-from . import Stage, captions, export, ffmpeg, highlights, prepare, transcribe
+from ..providers import LLMProvider, build_provider, detection_config
+from ..providers.base import looks_like_auth_failure
+from . import Stage, captions, export, ffmpeg, highlights, ingest, prepare, transcribe
 from .prepare import Silence
 from .reframe import ReframeConfig, build_crop_path
 from .reframe.croppath import CropPath
 from .transcript import Transcript
 
 log = logging.getLogger(__name__)
+
+
+def _maybe_enqueue_upload(export_id: str, settings: Settings) -> None:
+    """Queue a YouTube upload when automation is on. Never raises."""
+    try:
+        from ..youtube.queue import upload_queue
+        from ..youtube.uploads import enqueue_export
+
+        if enqueue_export(export_id, settings) is not None:
+            upload_queue.notify()
+    except Exception:  # an upload must never fail the pipeline
+        log.exception("Could not queue a YouTube upload for export %s.", export_id)
+
 
 #: Weight of each stage in the overall progress bar. Rough proportions of wall
 #: time on a mid-range machine — transcription and export dominate.
@@ -120,6 +134,8 @@ class PipelineRunner:
         self._is_cancelled = is_cancelled or (lambda: False)
         self.workspace = JobWorkspace(job.id)
         self._completed_weight = 0.0
+        self._notices: dict[Stage, str] = {}
+        self._last_overall = 0.0
 
     # -- progress ----------------------------------------------------------
 
@@ -138,16 +154,34 @@ class PipelineRunner:
         if overall is None:
             overall = self._completed_weight + STAGE_WEIGHTS[stage] * stage_progress
         overall = min(1.0, overall)
+        # The bar must never run backwards. Progress reported by a stage is not
+        # guaranteed to be monotonic — ffmpeg's output clock can tick back by a
+        # frame when a filter reorders frames, and a provider that reports
+        # window-by-window can repeat a fraction. Clamping to the high-water
+        # mark keeps the invariant regardless of what the stage hands us.
+        overall = max(overall, self._last_overall)
+        self._last_overall = overall
         store.update_job(self.job.id, current_stage=stage.value, progress=round(overall, 4))
+        if not message:
+            message = self._notices.get(stage, stage.label)
         if self.on_progress:
             self.on_progress(
                 ProgressEvent(
                     stage=stage,
                     stage_progress=stage_progress,
                     overall=overall,
-                    message=message or stage.label,
+                    message=message,
                 )
             )
+
+    def _set_notice(self, stage: Stage, message: str) -> None:
+        """Show ``message`` for every progress update until the stage finishes.
+
+        Used for things the user must not miss — an API key failing and the
+        pipeline switching to a local model — even as per-window progress
+        events keep arriving with no message of their own.
+        """
+        self._notices[stage] = message
 
     def _finish_stage(self, stage: Stage) -> None:
         """Mark a stage complete.
@@ -159,6 +193,7 @@ class PipelineRunner:
         """
         self._completed_weight += STAGE_WEIGHTS[stage]
         self._emit(stage, 1.0, overall=self._completed_weight)
+        self._notices.pop(stage, None)
 
     def _stage_progress(self, stage: Stage) -> Callable[[float], None]:
         def report(fraction: float) -> None:
@@ -196,17 +231,32 @@ class PipelineRunner:
     def _stage_prepare(self) -> Path:
         stage = Stage.PREPARE
         self._check_cancelled()
+
+        # YouTube sources are inserted as pending rows so the API can return
+        # immediately. The actual download happens here, on the background
+        # worker, before any audio work starts.
+        downloaded = False
+        if not self._source_is_ready():
+            self._download_source(stage)
+            downloaded = True
+
         source_path = Path(self.source.path)
+        report = self._stage_progress(stage)
+        # Reserve the first 90% of the stage for the download, when there is one,
+        # so extraction continues from where the download left off instead of
+        # snapping the bar back to zero.
+        base = 0.9 if downloaded else 0.0
+        scale = 0.1 if downloaded else 1.0
 
         if self.workspace.audio.exists() and self.workspace.audio.stat().st_size > 0:
             log.info("Reusing existing audio for job %s.", self.job.id)
         else:
-            self._emit(stage, 0.0, "Extracting audio")
+            self._emit(stage, base, "Extracting audio")
             prepare.extract_audio(
                 source_path,
                 self.workspace.audio,
                 duration_s=self.source.duration_s,
-                on_progress=self._stage_progress(stage),
+                on_progress=lambda fraction: report(base + scale * fraction),
             )
 
         if self.source.has_video and not self.workspace.thumbnails.exists():
@@ -214,6 +264,27 @@ class PipelineRunner:
 
         self._finish_stage(stage)
         return self.workspace.audio
+
+    def _source_is_ready(self) -> bool:
+        """A source is downloadable/ready once its media file exists on disk."""
+        return bool(self.source.path) and Path(self.source.path).is_file()
+
+    def _download_source(self, stage: Stage) -> None:
+        """Download a pending YouTube source with yt-dlp, then persist its metadata."""
+        self._check_cancelled()
+        self._emit(stage, 0.0, "Downloading video")
+
+        def on_download_progress(fraction: float) -> None:
+            self._emit(stage, min(0.9, fraction * 0.9), "Downloading video")
+
+        log.info("Downloading pending source %s for job %s.", self.source.id, self.job.id)
+        ingest.download_youtube(
+            self.source,
+            self.settings.ingest,
+            on_progress=on_download_progress,
+        )
+        store.update_source(self.source)
+        self._emit(stage, 0.9, "Download complete")
 
     def _stage_transcribe(self, audio: Path) -> Transcript:
         stage = Stage.TRANSCRIBE
@@ -285,18 +356,60 @@ class PipelineRunner:
         config = detection_config(self.settings)
 
         self._emit(stage, 0.0, f"Finding highlights with {provider.name}")
-        clips = await highlights.detect(
-            transcript,
-            provider,
-            config,
-            job_id=self.job.id,
-            silences=silences,
-            on_progress=self._stage_progress(stage),
-        )
+        try:
+            clips = await highlights.detect(
+                transcript,
+                provider,
+                config,
+                job_id=self.job.id,
+                silences=silences,
+                on_progress=self._stage_progress(stage),
+            )
+        except highlights.HighlightError as exc:
+            fallback = self._ollama_fallback(provider_name, exc)
+            if fallback is None:
+                raise
+            provider, notice = fallback
+            log.warning("Falling back to %s: %s", provider.name, notice)
+            self._set_notice(stage, notice)
+            self._emit(stage, 0.0, notice)
+            clips = await highlights.detect(
+                transcript,
+                provider,
+                config,
+                job_id=self.job.id,
+                silences=silences,
+                on_progress=self._stage_progress(stage),
+            )
 
         store.replace_clips(self.job.id, clips)
         self._finish_stage(stage)
         return clips
+
+    def _ollama_fallback(
+        self, provider_name: str, error: BaseException
+    ) -> tuple[LLMProvider, str] | None:
+        """Return a local Ollama provider when a hosted API key was rejected.
+
+        Only credential failures trigger a switch: a rate limit or an outage
+        should surface as itself rather than silently changing the model and
+        producing worse clips.
+        """
+        if provider_name == "ollama" or not looks_like_auth_failure(error):
+            return None
+
+        try:
+            fallback = build_provider("ollama", self.settings)
+        except Exception as exc:  # provider misconfigured or unreachable
+            log.warning("Could not build the Ollama fallback: %s", exc)
+            return None
+
+        model = fallback.model or "local model"
+        notice = (
+            f"{provider_name.capitalize()} API key failed — switched to local "
+            f"Ollama ({model}). Check the API key in Settings."
+        )
+        return fallback, notice
 
     def _stage_reframe(self, clips: list[Clip], transcript: Transcript) -> dict[str, CropPath]:
         stage = Stage.REFRAME
@@ -320,6 +433,11 @@ class PipelineRunner:
 
         for index, clip in enumerate(clips):
             self._check_cancelled()
+            self._emit(
+                stage,
+                index / len(clips),
+                f"Reframing clip {index + 1}/{len(clips)}",
+            )
             cached = self.workspace.crop_path(clip.id)
             if cached.exists():
                 crop_paths[clip.id] = CropPath.load(cached)
@@ -332,8 +450,6 @@ class PipelineRunner:
                     config=config,
                 )
                 crop_paths[clip.id].save(cached)
-
-            self._emit(stage, (index + 1) / len(clips), f"Reframing clip {index + 1}")
 
         self._finish_stage(stage)
         return crop_paths
@@ -393,17 +509,17 @@ class PipelineRunner:
                 cancelled=self._is_cancelled,
             )
 
-            store.create_export(
-                Export(
-                    id=new_id(),
-                    clip_id=clip.id,
-                    path=str(destination),
-                    ratio=ratio,
-                    style=style.key,
-                    size_bytes=destination.stat().st_size,
-                )
+            record = Export(
+                id=new_id(),
+                clip_id=clip.id,
+                path=str(destination),
+                ratio=ratio,
+                style=style.key,
+                size_bytes=destination.stat().st_size,
             )
+            store.create_export(record)
             store.update_clip(clip.id, status="exported")
+            _maybe_enqueue_upload(record.id, self.settings)
 
         self._finish_stage(stage)
 

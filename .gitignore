@@ -30,6 +30,9 @@ backend/autoclip/static/
 *.db
 *.sqlite3
 
+# Local source downloads (`ingest.download_dir`)
+materials/
+
 # Test media (large binaries stay out of git; see tests/fixtures/README.md)
 tests/fixtures/media/
 tests/fixtures/**/*.mp4

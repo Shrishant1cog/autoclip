@@ -104,9 +104,75 @@ def _migration_v1(conn: sqlite3.Connection) -> None:
     conn.executescript(_V1)
 
 
+_V2 = """
+CREATE TABLE youtube_uploads (
+    id          TEXT PRIMARY KEY,
+    export_id   TEXT NOT NULL REFERENCES exports(id) ON DELETE CASCADE,
+    clip_id     TEXT NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+    status      TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','uploading','done','failed')),
+    video_id    TEXT,
+    title       TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    tags_json   TEXT NOT NULL DEFAULT '[]',
+    privacy     TEXT NOT NULL DEFAULT 'public',
+    error       TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE UNIQUE INDEX idx_youtube_uploads_export ON youtube_uploads(export_id);
+CREATE INDEX idx_youtube_uploads_status ON youtube_uploads(status);
+"""
+
+
+def _migration_v2(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V2)
+
+
+#: SQLite cannot widen a CHECK constraint in place, so the table is rebuilt.
+#: ``skipped`` is a deliberate end state: the worker found this row would
+#: duplicate an existing upload and stopped before touching YouTube.
+_V3 = """
+CREATE TABLE youtube_uploads_v3 (
+    id          TEXT PRIMARY KEY,
+    export_id   TEXT NOT NULL REFERENCES exports(id) ON DELETE CASCADE,
+    clip_id     TEXT NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+    status      TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','uploading','done','failed','skipped')),
+    video_id    TEXT,
+    title       TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    tags_json   TEXT NOT NULL DEFAULT '[]',
+    privacy     TEXT NOT NULL DEFAULT 'public',
+    error       TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+INSERT INTO youtube_uploads_v3 (
+    id, export_id, clip_id, status, video_id, title, description,
+    tags_json, privacy, error, created_at, updated_at
+)
+SELECT id, export_id, clip_id, status, video_id, title, description,
+       tags_json, privacy, error, created_at, updated_at
+FROM youtube_uploads;
+DROP TABLE youtube_uploads;
+ALTER TABLE youtube_uploads_v3 RENAME TO youtube_uploads;
+CREATE UNIQUE INDEX idx_youtube_uploads_export ON youtube_uploads(export_id);
+CREATE INDEX idx_youtube_uploads_status ON youtube_uploads(status);
+"""
+
+
+def _migration_v3(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V3)
+
+
 #: Ordered migrations. Index + 1 is the resulting ``user_version``.
 #: Append only — never edit a migration that has shipped.
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_migration_v1]
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
+    _migration_v1,
+    _migration_v2,
+    _migration_v3,
+]
 
 SCHEMA_VERSION = len(MIGRATIONS)
 

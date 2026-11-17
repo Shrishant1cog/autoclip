@@ -11,9 +11,14 @@ to fix it, rather than surfacing a raw yt-dlp traceback.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import re
 import shutil
+import subprocess
+import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -39,6 +44,17 @@ _BOT_CHECK_MARKERS = (
     "this content isn't available",
     "player response",
 )
+
+#: A yt-dlp progress line, e.g. ``[download]  42.3% of 393.24MiB ...``.
+_DOWNLOAD_PROGRESS = re.compile(r"\[download\]\s+(\d+(?:\.\d+)?)%")
+
+#: Restart a download that yt-dlp gave up on. Partial files are kept between
+#: attempts, so each restart resumes rather than downloading from zero.
+_DOWNLOAD_ATTEMPTS = 5
+
+#: Seconds between restarts. DNS and CDN hiccups usually clear in this window;
+#: yt-dlp's own retries are immediate, so they all fail together without this.
+_DOWNLOAD_RETRY_DELAY_S = 20.0
 
 
 class IngestError(RuntimeError):
@@ -75,83 +91,211 @@ def slugify(text: str, *, max_length: int = 60) -> str:
 # --------------------------------------------------------------------------
 
 
+def new_youtube_source(url: str) -> Source:
+    """Create the pending source row used while YouTube downloads in the background."""
+    return Source(
+        id=new_id(),
+        type="youtube",
+        url=url,
+        path="",
+        title=url,
+        has_audio=True,
+        has_video=True,
+    )
+
+
+def download_target_dir(source_id: str, settings: IngestSettings) -> Path:
+    """Return the folder where a source's complete download is stored.
+
+    ``ingest.download_dir`` points downloads at a chosen folder (for example a
+    project's ``materials/input``); every link gets its own subdirectory so two
+    videos never overwrite each other. When unset, downloads stay under
+    ``<root>/raw/<source_id>``.
+    """
+    base = Path(settings.download_dir).expanduser() if settings.download_dir else paths.raw_dir()
+    return base / source_id
+
+
+def download_youtube(
+    source: Source,
+    settings: IngestSettings | None = None,
+    *,
+    on_progress: Callable[[float], None] | None = None,
+) -> Source:
+    """Download the highest-quality video/audio into the source's raw directory.
+
+    The complete video is written to ``<root>/raw/<source_id>/`` first and only
+    then handed to the rest of the pipeline (audio extraction, transcription,
+    highlights, reframe, export). Keeping the full file there means a later
+    retry resumes from the video instead of downloading it again.
+
+    The web flow creates a pending source before queueing the job. This function
+    fills that source in once yt-dlp finishes, then the existing pipeline
+    continues with preparation and transcription.
+
+    Preconditions:
+        source is a YouTube source with a URL; the URL points at content the user
+        owns or has the rights to process.
+    """
+    if source.type != "youtube" or not source.url:
+        raise IngestError("A YouTube source needs a URL before it can be downloaded.")
+
+    settings = settings or IngestSettings()
+    target_dir = download_target_dir(source.id, settings)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    # No height cap or format filter: yt-dlp's default selection is the best
+    # available video plus the best available audio.
+    command = [
+        *_ytdlp_command(),
+        "--newline",
+        "--no-playlist",
+        "--write-info-json",
+        # Keep trying through transient CDN/DNS failures. The default retry
+        # delay is zero, which makes all retries fail instantly during a short
+        # resolver outage, so space them out.
+        "--retries",
+        "50",
+        "--fragment-retries",
+        "50",
+        "--retry-sleep",
+        "5",
+        "--socket-timeout",
+        "30",
+        "--format",
+        "bestvideo*+bestaudio/best",
+        "--output",
+        str(target_dir / "source.%(ext)s"),
+    ]
+    if settings.cookies_from_browser:
+        command += ["--cookies-from-browser", settings.cookies_from_browser]
+    if settings.prefer_youtube_captions:
+        command += [
+            "--write-auto-subs",
+            "--sub-langs",
+            "en.*",
+            "--sub-format",
+            "json3",
+        ]
+    command.append(source.url)
+
+    log.info("Downloading YouTube source %s with yt-dlp.", source.id)
+    output: list[str] = []
+
+    for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except OSError as exc:
+            raise IngestError(
+                "Could not start yt-dlp.",
+                hint="Install or repair yt-dlp, then retry the job.",
+            ) from exc
+
+        assert process.stdout is not None
+        for line in process.stdout:
+            output.append(line.rstrip())
+            if len(output) > 200:
+                del output[:50]
+            if on_progress and (match := _DOWNLOAD_PROGRESS.search(line)):
+                on_progress(min(1.0, float(match.group(1)) / 100.0))
+
+        return_code = process.wait()
+        if return_code == 0:
+            break
+
+        detail = "\n".join(output[-30:]) or f"yt-dlp exited with code {return_code}."
+        if attempt == _DOWNLOAD_ATTEMPTS:
+            # Leave the .part file in place so a later retry resumes from here.
+            raise _translate_ytdlp_error(RuntimeError(detail), settings)
+
+        log.warning(
+            "yt-dlp attempt %d/%d for source %s failed; resuming in %.0fs.",
+            attempt,
+            _DOWNLOAD_ATTEMPTS,
+            source.id,
+            _DOWNLOAD_RETRY_DELAY_S,
+        )
+        time.sleep(_DOWNLOAD_RETRY_DELAY_S)
+
+    try:
+        downloaded = _find_downloaded_file(target_dir)
+        if downloaded is None:
+            raise IngestError("yt-dlp reported success but produced no media file.")
+
+        info = _probe_and_validate(downloaded)
+        metadata = _read_youtube_metadata(target_dir)
+    except Exception:
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise
+
+    source.path = str(downloaded)
+    source.filename = downloaded.name
+    source.title = metadata.get("title") or source.title or downloaded.stem
+    source.channel = metadata.get("uploader") or metadata.get("channel")
+    source.duration_s = info.duration_s or float(metadata.get("duration") or 0.0)
+    source.width = info.width
+    source.height = info.height
+    source.fps = info.fps
+    source.has_audio = info.has_audio
+    source.has_video = info.has_video
+
+    if on_progress:
+        on_progress(1.0)
+
+    return source
+
+
 def ingest_youtube(
     url: str,
     settings: IngestSettings | None = None,
     *,
     on_progress: Callable[[float], None] | None = None,
 ) -> Source:
-    """Download a YouTube video and return a validated source record.
+    """Download a YouTube video and return a completed source record.
 
-    Preconditions:
-        url points at content the user owns or has the rights to process.
+    Retained for the synchronous CLI path; the web app creates the pending
+    source first and lets the background pipeline call :func:`download_youtube`.
     """
-    import yt_dlp
-
-    settings = settings or IngestSettings()
-    source_id = new_id()
-    target_dir = paths.source_media_dir(source_id)
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    def hook(status: dict) -> None:
-        if not on_progress or status.get("status") != "downloading":
-            return
-        total = status.get("total_bytes") or status.get("total_bytes_estimate")
-        done = status.get("downloaded_bytes")
-        if total and done:
-            on_progress(min(1.0, done / total))
-
-    options: dict = {
-        "format": settings.ytdlp_format,
-        "outtmpl": str(target_dir / "source.%(ext)s"),
-        "merge_output_format": "mp4",
-        "quiet": True,
-        "no_warnings": True,
-        "noprogress": True,
-        "progress_hooks": [hook],
-        "retries": 3,
-        "fragment_retries": 3,
-    }
-    if settings.cookies_from_browser:
-        # yt-dlp expects a tuple; only the browser name is required.
-        options["cookiesfrombrowser"] = (settings.cookies_from_browser,)
-    if settings.prefer_youtube_captions:
-        options["writeautomaticsub"] = True
-        options["subtitleslangs"] = ["en.*"]
-        options["subtitlesformat"] = "json3"
-
-    try:
-        with yt_dlp.YoutubeDL(options) as ydl:
-            metadata = ydl.extract_info(url, download=True)
-    except yt_dlp.utils.DownloadError as exc:
-        shutil.rmtree(target_dir, ignore_errors=True)
-        raise _translate_ytdlp_error(exc, settings) from exc
-    except Exception as exc:
-        shutil.rmtree(target_dir, ignore_errors=True)
-        raise IngestError(f"Could not download {url}: {exc}") from exc
-
-    downloaded = _find_downloaded_file(target_dir)
-    if downloaded is None:
-        shutil.rmtree(target_dir, ignore_errors=True)
-        raise IngestError("yt-dlp reported success but produced no media file.")
-
-    info = _probe_and_validate(downloaded)
-
-    return Source(
-        id=source_id,
-        type="youtube",
-        url=url,
-        path=str(downloaded),
-        filename=downloaded.name,
-        title=(metadata or {}).get("title") or downloaded.stem,
-        channel=(metadata or {}).get("uploader") or (metadata or {}).get("channel"),
-        duration_s=info.duration_s or float((metadata or {}).get("duration") or 0.0),
-        width=info.width,
-        height=info.height,
-        fps=info.fps,
-        has_audio=info.has_audio,
-        has_video=info.has_video,
+    return download_youtube(
+        new_youtube_source(url),
+        settings,
+        on_progress=on_progress,
     )
+
+
+def _ytdlp_command() -> list[str]:
+    """Find yt-dlp, preferring the executable installed beside this Python."""
+    executable = shutil.which("yt-dlp")
+    if executable:
+        return [executable]
+
+    script_name = "yt-dlp.exe" if os.name == "nt" else "yt-dlp"
+    beside_python = Path(sys.executable).with_name(script_name)
+    if beside_python.is_file():
+        return [str(beside_python)]
+
+    return [sys.executable, "-m", "yt_dlp"]
+
+
+def _read_youtube_metadata(directory: Path) -> dict:
+    """Load the metadata sidecar yt-dlp writes beside the downloaded media."""
+    candidates = sorted(directory.glob("*.info.json"), key=lambda path: path.stat().st_size)
+    for path in reversed(candidates):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            log.warning("Could not read yt-dlp metadata from %s.", path)
+            continue
+        if isinstance(data, dict):
+            return data
+    return {}
 
 
 def _translate_ytdlp_error(exc: Exception, settings: IngestSettings) -> IngestError:

@@ -545,6 +545,95 @@ def jobs(limit: int = typer.Option(15, "--limit", "-n")) -> None:
 
 
 @app.command()
+def duplicates(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Only report duplicates; do not skip them.",
+    ),
+    by_title: bool = typer.Option(
+        False, "--by-title", help="Also flag repeated titles across different clips."
+    ),
+    include_failed: bool = typer.Option(
+        False, "--include-failed", help="Treat failed uploads as duplicate candidates."
+    ),
+    no_hash: bool = typer.Option(
+        False, "--no-hash", help="Skip byte-for-byte file comparison (faster)."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Print machine-readable output."),
+) -> None:
+    """Detect and skip uploads that would put the same clip on YouTube twice."""
+    import json
+
+    from . import db
+    from .youtube import duplicates as dup
+
+    db.init()
+    groups = dup.find_duplicates(
+        include_failed=include_failed,
+        by_title=by_title,
+        check_files=not no_hash,
+    )
+
+    skipped = in_flight = 0
+    if not dry_run and groups:
+        skipped, in_flight = dup.skip_duplicates(groups)
+
+    if as_json:
+        payload = {
+            "groups": dup.as_json(groups),
+            "total_groups": len(groups),
+            "duplicate_rows": sum(len(group.duplicates) for group in groups),
+            "skipped": skipped,
+            "left_in_flight": in_flight,
+        }
+        console.print_json(json.dumps(payload))
+        return
+
+    if not groups:
+        console.print("[green]No duplicate uploads found. Nothing to skip.[/green]")
+        return
+
+    table = Table(title="Duplicate uploads", header_style="bold", title_justify="left")
+    table.add_column("Reason", width=24)
+    table.add_column("Keep", width=14)
+    table.add_column("Duplicate", width=14)
+    table.add_column("Status", width=10)
+    table.add_column("Title")
+
+    for group in groups:
+        keep = group.keep.video_id or group.keep.id[:8]
+        for row in group.duplicates:
+            colour = {"pending": "yellow", "uploading": "cyan", "failed": "red"}.get(
+                row.status, "white"
+            )
+            table.add_row(
+                dup.REASON_LABELS[group.reason],
+                keep,
+                row.video_id or row.id[:8],
+                f"[{colour}]{row.status}[/{colour}]",
+                (row.title or "(no metadata yet)")[:60],
+            )
+
+    console.print()
+    console.print(table)
+    console.print(
+        f"\n[yellow]{len(groups)}[/yellow] duplicate group(s), "
+        f"[yellow]{sum(len(group.duplicates) for group in groups)}[/yellow] extra row(s)."
+    )
+
+    if dry_run:
+        console.print("[dim]Dry run: nothing was changed.[/dim]")
+    else:
+        console.print(f"[green]Skipped {skipped} queued upload(s).[/green]")
+        if in_flight:
+            console.print(
+                f"[yellow]{in_flight} upload(s) were already in flight and left alone; "
+                "run again after they finish.[/yellow]"
+            )
+
+
+@app.command()
 def providers() -> None:
     """Check which LLM providers are reachable right now."""
     import asyncio

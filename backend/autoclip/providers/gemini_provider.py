@@ -9,12 +9,13 @@ from .base import DetectionConfig, LLMProvider, ProviderError, ProviderStatus
 
 log = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "gemini-2.0-flash"
+DEFAULT_MODEL = "gemini-3.5-flash"
 
 SUGGESTED_MODELS = [
-    "gemini-2.0-flash",
-    "gemini-2.0-pro",
-    "gemini-1.5-flash",
+    "gemini-3.5-flash",
+    "gemini-3.8-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
 ]
 
 
@@ -53,18 +54,38 @@ class GeminiProvider(LLMProvider):
             max_output_tokens=8192,
         )
 
-        try:
-            # The SDK's async surface has moved between releases; running the
-            # sync call in a thread works across all of them and keeps the event
-            # loop free.
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model=self.model,
-                contents=user,
-                config=request_config,
-            )
-        except Exception as exc:
-            raise _translate(exc, self.name, self.model) from exc
+        last_error: Exception | None = None
+        response = None
+        for attempt in range(3):
+            try:
+                # The SDK's async surface has moved between releases; running the
+                # sync call in a thread works across all of them and keeps the
+                # event loop free.
+                response = await asyncio.to_thread(
+                    client.models.generate_content,
+                    model=self.model,
+                    contents=user,
+                    config=request_config,
+                )
+                break
+            except Exception as exc:
+                last_error = exc
+                # A busy model (503) is temporary; retrying is much better than
+                # dropping this window's clips from an otherwise good video.
+                if attempt < 2 and _is_transient(exc):
+                    log.warning(
+                        "Gemini attempt %d failed (%s); retrying in %ds.",
+                        attempt + 1,
+                        exc,
+                        5 * (attempt + 1),
+                    )
+                    await asyncio.sleep(5 * (attempt + 1))
+                    continue
+                raise _translate(exc, self.name, self.model) from exc
+
+        if response is None:
+            assert last_error is not None
+            raise _translate(last_error, self.name, self.model) from last_error
 
         return getattr(response, "text", "") or ""
 
@@ -115,3 +136,20 @@ def _translate(exc: Exception, provider: str, model: str) -> ProviderError:
             hint="This can happen on transcripts with strong language. Try another provider.",
         )
     return ProviderError(f"Gemini request failed: {message}", provider=provider)
+
+
+#: Errors that usually clear on their own within a few seconds.
+_TRANSIENT_MARKERS = (
+    "503",
+    "unavailable",
+    "high demand",
+    "overloaded",
+    "deadline exceeded",
+    "timed out",
+    "timeout",
+)
+
+
+def _is_transient(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in _TRANSIENT_MARKERS)

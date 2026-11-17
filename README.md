@@ -142,10 +142,25 @@ Everything the UI does is also on the CLI:
 | `autoclip serve` | start the web app |
 | `autoclip clip <url\|file>` | run the whole pipeline and export |
 | `autoclip jobs` | list recent jobs |
+| `autoclip duplicates` | skip repeat YouTube uploads (`--dry-run` to only report) |
 | `autoclip providers` | check which providers are reachable |
 | `autoclip styles` | list caption presets |
 | `autoclip config show` | print settings |
 | `autoclip update-ytdlp` | update yt-dlp after a YouTube change |
+
+### Duplicate upload protection
+
+AutoClip never publishes the same clip twice. Every upload is checked against
+the others before it reaches YouTube:
+
+- the worker checks each upload against the other rows for the same clip, so a
+  re-export, a second "Export again", or a retried job is skipped automatically;
+- `autoclip duplicates` (or `python scripts/detect_duplicate_uploads.py`) finds
+  the wider set — byte-identical exported files and, with `--by-title`, repeated
+  titles — and **skips** them by default. Use `--dry-run` to only report.
+
+Skipped uploads stay visible in the clip library with the badge
+`skipped (duplicate)`; nothing is deleted and nothing is published.
 
 ### Caption styles
 
@@ -198,6 +213,12 @@ Each stage writes artifacts to `~/.autoclip/work/{job_id}/`, so a retry resumes 
 AUTOCLIP_E2E_MEDIA=/path/to/clip.mp4 pytest -m e2e
 ```
 
+Those 24 tests are skipped without that variable — the gate is deliberate, because synthetic colour bars pass where real footage fails. `scripts/make_e2e_media.py` cuts a suitable three-minute segment out of a video already in your media library and runs the suite against it, so the skip count can be driven to zero with one command:
+
+```bash
+python scripts/make_e2e_media.py --run
+```
+
 **Hasn't been:** the §6.4 reframe acceptance bar — no visible jitter, no cut-off faces, speaker on screen ≥95% of speaking time — against a fixed three-video golden set. The mechanics have unit coverage, but "looks right on footage I picked" isn't the bar. This is the gate for v0.1.0.
 
 Also unverified: whether the clip *picks* are good. That's a judgement call about your material and your model, and no test settles it.
@@ -206,7 +227,7 @@ Also unverified: whether the clip *picks* are good. That's a judgement call abou
 
 Deliberate, not oversights:
 
-- **No direct posting** to TikTok/Instagram/YouTube. Their APIs are approval-gated; AutoClip exports files.
+- **No direct posting** to TikTok/Instagram. Their APIs are approval-gated; AutoClip exports files for those. YouTube is the exception: AutoClip can publish to a channel you connect, with duplicate protection enabled by default.
 - **No cloud version, no accounts, no telemetry.**
 - **No timeline editor** beyond trim handles and caption edits.
 - **No DRM circumvention**, ever.

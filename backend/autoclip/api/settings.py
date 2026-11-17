@@ -26,11 +26,15 @@ def _settings_out(settings: config.Settings) -> SettingsOut:
         clips=payload["clips"],
         ingest=payload["ingest"],
         export=payload["export"],
+        youtube=payload["youtube"],
         insecure_secret_storage=payload["insecure_secret_storage"],
         keys_present={
             name: config.get_secret(name, settings) is not None for name in config.KEYED_PROVIDERS
         }
         | {config.HF_TOKEN_KEY: config.get_secret(config.HF_TOKEN_KEY, settings) is not None},
+        youtube_secret_present=(
+            config.get_secret(config.YOUTUBE_CLIENT_SECRET_KEY, settings) is not None
+        ),
     )
 
 
@@ -53,7 +57,7 @@ async def put_settings(payload: SettingsIn) -> SettingsOut:
             )
         settings.active_provider = updates["active_provider"]
 
-    for section in ("whisper", "clips", "ingest", "export"):
+    for section in ("whisper", "clips", "ingest", "export", "youtube"):
         if section in updates:
             current = getattr(settings, section)
             try:
@@ -79,6 +83,15 @@ async def put_settings(payload: SettingsIn) -> SettingsOut:
             status_code=400, detail="Minimum clip length must be below the maximum."
         )
 
+    if settings.youtube.auto_upload:
+        from ..youtube import oauth
+
+        if not oauth.is_connected(settings):
+            raise HTTPException(
+                status_code=400,
+                detail="Connect a YouTube channel before turning automation on.",
+            )
+
     config.save(settings)
     return _settings_out(settings)
 
@@ -86,7 +99,7 @@ async def put_settings(payload: SettingsIn) -> SettingsOut:
 @router.put("/settings/secrets", status_code=204)
 async def put_secret(payload: SecretIn) -> None:
     """Store an API key or token. Values are write-only — never read back."""
-    valid = (*config.KEYED_PROVIDERS, config.HF_TOKEN_KEY)
+    valid = (*config.KEYED_PROVIDERS, config.HF_TOKEN_KEY, config.YOUTUBE_CLIENT_SECRET_KEY)
     if payload.key not in valid:
         raise HTTPException(
             status_code=400, detail=f"Unknown secret. Expected one of: {', '.join(valid)}"

@@ -21,6 +21,7 @@ from . import __version__, db, paths
 from .api import api_router
 from .jobs.events import broker
 from .jobs.queue import queue
+from .youtube.queue import upload_queue
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     worker_enabled = os.environ.get(ENV_NO_WORKER) != "1"
     if worker_enabled:
         await queue.start()
+        await upload_queue.start()
     else:
         log.info("Job worker disabled by %s=1.", ENV_NO_WORKER)
 
@@ -65,6 +67,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         if worker_enabled:
+            await upload_queue.stop()
             await queue.stop()
 
 

@@ -47,6 +47,26 @@ class ProviderError(RuntimeError):
         return f"{base}\n\n{self.hint}" if self.hint else base
 
 
+#: Phrases that mean a provider rejected the credentials rather than the
+#: content — the signal that falling back to a local model is worthwhile.
+_AUTH_FAILURE_MARKERS = (
+    "api key",
+    "api_key",
+    "invalid key",
+    "unauthorized",
+    "unauthenticated",
+    "permission",
+    "401",
+    "403",
+)
+
+
+def looks_like_auth_failure(error: BaseException | str) -> bool:
+    """Return True when a provider error is about credentials, not content."""
+    message = str(error).lower()
+    return any(marker in message for marker in _AUTH_FAILURE_MARKERS)
+
+
 # --------------------------------------------------------------------------
 # Contracts
 # --------------------------------------------------------------------------
@@ -155,6 +175,15 @@ class LLMProvider(ABC):
         """Report whether this provider is usable right now."""
 
     # -- shared behaviour --------------------------------------------------
+
+    async def generate_text(self, system: str, user: str, *, temperature: float = 0.4) -> str:
+        """Send one free-form prompt and return the raw reply.
+
+        Used for tasks that are not clip detection (e.g. YouTube metadata).
+        Providers only see a system/user pair, so no extra implementations are
+        needed.
+        """
+        return await self._complete(system, user, DetectionConfig(temperature=temperature))
 
     async def detect_highlights(
         self, window: TranscriptWindow, config: DetectionConfig

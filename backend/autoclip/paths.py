@@ -7,7 +7,8 @@ who keep media on another drive — can relocate it without touching code.
 Layout::
 
     <root>/
-      media/            source videos, one directory per source id
+      raw/              full downloaded videos, kept for re-runs and inspection
+      media/            uploaded source files, one directory per source id
       work/<job_id>/    stage intermediates (audio, transcript, crop path)
       exports/          finished clips
       autoclip.db       SQLite database
@@ -62,6 +63,11 @@ def media_dir() -> Path:
     return root() / "media"
 
 
+def raw_dir() -> Path:
+    """Return the directory holding complete downloaded source videos."""
+    return root() / "raw"
+
+
 def work_dir() -> Path:
     return root() / "work"
 
@@ -99,8 +105,13 @@ def job_work_dir(job_id: str) -> Path:
 
 
 def source_media_dir(source_id: str) -> Path:
-    """Return the directory holding a source's downloaded/uploaded media."""
+    """Return the directory holding an uploaded source's media."""
     return media_dir() / source_id
+
+
+def source_raw_dir(source_id: str) -> Path:
+    """Return the directory holding a source's full downloaded video."""
+    return raw_dir() / source_id
 
 
 def ensure_layout() -> Path:
@@ -109,6 +120,6 @@ def ensure_layout() -> Path:
     Safe to call repeatedly; used on startup and at the top of each CLI command.
     """
     base = root()
-    for path in (base, media_dir(), work_dir(), exports_dir()):
+    for path in (base, raw_dir(), media_dir(), work_dir(), exports_dir()):
         path.mkdir(parents=True, exist_ok=True)
     return base

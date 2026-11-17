@@ -20,6 +20,8 @@ from .models import (
     JobStatus,
     Source,
     Transcript,
+    UploadStatus,
+    YouTubeUpload,
     utcnow,
 )
 
@@ -55,6 +57,38 @@ def create_source(source: Source) -> Source:
             ),
         )
     return source
+
+
+def update_source(source: Source) -> None:
+    """Persist a source after ingestion fills in its downloaded file and metadata.
+
+    The web flow inserts a pending YouTube source immediately, then the job's
+    prepare stage downloads the media and writes the probed fields back here.
+    """
+    with connection() as conn:
+        conn.execute(
+            """
+            UPDATE sources SET
+                url = ?, filename = ?, path = ?, title = ?, channel = ?,
+                duration_s = ?, width = ?, height = ?, fps = ?,
+                has_audio = ?, has_video = ?
+            WHERE id = ?
+            """,
+            (
+                source.url,
+                source.filename,
+                source.path,
+                source.title,
+                source.channel,
+                source.duration_s,
+                source.width,
+                source.height,
+                source.fps,
+                int(source.has_audio),
+                int(source.has_video),
+                source.id,
+            ),
+        )
 
 
 def get_source(source_id: str) -> Source | None:
@@ -284,6 +318,15 @@ def list_clips(job_id: str) -> list[Clip]:
     return [Clip.from_row(r) for r in rows]
 
 
+def list_all_clips(limit: int = 200) -> list[Clip]:
+    """Every clip, newest job first — the library view's source of truth."""
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM clips ORDER BY created_at DESC, rank ASC LIMIT ?", (limit,)
+        ).fetchall()
+    return [Clip.from_row(r) for r in rows]
+
+
 def update_clip(
     clip_id: str,
     *,
@@ -391,3 +434,137 @@ def list_exports(clip_id: str) -> list[Export]:
             "SELECT * FROM exports WHERE clip_id = ? ORDER BY created_at DESC", (clip_id,)
         ).fetchall()
     return [Export.from_row(r) for r in rows]
+
+
+def list_all_exports() -> list[Export]:
+    """Every exported clip, oldest first. Used when backfilling uploads."""
+    with connection() as conn:
+        rows = conn.execute("SELECT * FROM exports ORDER BY created_at ASC").fetchall()
+    return [Export.from_row(r) for r in rows]
+
+
+# --------------------------------------------------------------------------
+# YouTube uploads
+# --------------------------------------------------------------------------
+
+
+def create_upload(upload: YouTubeUpload) -> YouTubeUpload:
+    """Insert an upload row. An existing row for the export is returned instead.
+
+    Exports are enqueued from two places (the pipeline and the manual export
+    endpoint); the unique index makes double-enqueue a no-op rather than an
+    error.
+    """
+    with connection() as conn:
+        existing = conn.execute(
+            "SELECT * FROM youtube_uploads WHERE export_id = ?", (upload.export_id,)
+        ).fetchone()
+        if existing:
+            return YouTubeUpload.from_row(existing)
+        conn.execute(
+            """
+            INSERT INTO youtube_uploads (
+                id, export_id, clip_id, status, video_id, title, description,
+                tags_json, privacy, error, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                upload.id,
+                upload.export_id,
+                upload.clip_id,
+                upload.status,
+                upload.video_id,
+                upload.title,
+                upload.description,
+                json.dumps(upload.tags),
+                upload.privacy,
+                upload.error,
+                upload.created_at,
+                upload.updated_at,
+            ),
+        )
+    return upload
+
+
+def get_upload(upload_id: str) -> YouTubeUpload | None:
+    with connection() as conn:
+        row = conn.execute("SELECT * FROM youtube_uploads WHERE id = ?", (upload_id,)).fetchone()
+    return YouTubeUpload.from_row(row) if row else None
+
+
+def get_upload_for_export(export_id: str) -> YouTubeUpload | None:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM youtube_uploads WHERE export_id = ?", (export_id,)
+        ).fetchone()
+    return YouTubeUpload.from_row(row) if row else None
+
+
+def list_uploads_for_clip(clip_id: str) -> list[YouTubeUpload]:
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM youtube_uploads WHERE clip_id = ? ORDER BY created_at DESC",
+            (clip_id,),
+        ).fetchall()
+    return [YouTubeUpload.from_row(r) for r in rows]
+
+
+def next_pending_upload() -> YouTubeUpload | None:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM youtube_uploads WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1"
+        ).fetchone()
+    return YouTubeUpload.from_row(row) if row else None
+
+
+def list_all_uploads() -> list[YouTubeUpload]:
+    """Every upload row, oldest first. Used by the duplicate report."""
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM youtube_uploads ORDER BY created_at ASC, id ASC"
+        ).fetchall()
+    return [YouTubeUpload.from_row(r) for r in rows]
+
+
+def update_upload(
+    upload_id: str,
+    *,
+    status: UploadStatus | None = None,
+    video_id: str | None = None,
+    title: str | None = None,
+    description: str | None = None,
+    tags: list[str] | None = None,
+    privacy: str | None = None,
+    error: str | None = None,
+    clear_error: bool = False,
+) -> None:
+    fields: dict[str, Any] = {"updated_at": utcnow()}
+    for name, value in (
+        ("status", status),
+        ("video_id", video_id),
+        ("title", title),
+        ("description", description),
+        ("privacy", privacy),
+        ("error", error),
+    ):
+        if value is not None:
+            fields[name] = value
+    if tags is not None:
+        fields["tags_json"] = json.dumps(tags)
+    if clear_error:
+        fields["error"] = None
+
+    assignments = ", ".join(f"{name} = ?" for name in fields)
+    with connection() as conn:
+        conn.execute(
+            f"UPDATE youtube_uploads SET {assignments} WHERE id = ?",
+            (*fields.values(), upload_id),
+        )
+
+
+def requeue_interrupted_uploads() -> None:
+    """Turn rows left mid-upload by a crash back into pending work."""
+    with connection() as conn:
+        conn.execute(
+            "UPDATE youtube_uploads SET status = 'pending', error = NULL WHERE status = 'uploading'"
+        )

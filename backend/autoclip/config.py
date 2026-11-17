@@ -42,6 +42,10 @@ KEYED_PROVIDERS: tuple[str, ...] = ("anthropic", "openai", "gemini")
 #: Extra secrets that aren't tied to a provider.
 HF_TOKEN_KEY = "huggingface_token"
 
+#: YouTube OAuth client secret and the long-lived refresh token.
+YOUTUBE_CLIENT_SECRET_KEY = "youtube_client_secret"
+YOUTUBE_REFRESH_TOKEN_KEY = "youtube_refresh_token"
+
 
 class ProviderSettings(BaseModel):
     """Per-provider configuration. The API key itself is never stored here."""
@@ -80,6 +84,9 @@ class IngestSettings(BaseModel):
     cookies_from_browser: str = ""
     #: Offer YouTube's own auto-captions as a fast path, skipping Whisper.
     prefer_youtube_captions: bool = False
+    #: Where complete downloads are kept. Empty means ``<root>/raw/<source_id>``.
+    #: Every link gets its own subdirectory, so downloads never collide.
+    download_dir: str = ""
 
 
 class ExportSettings(BaseModel):
@@ -94,6 +101,30 @@ class ExportSettings(BaseModel):
     write_srt: bool = False
 
 
+class YouTubeSettings(BaseModel):
+    """Upload destination and automation policy.
+
+    The OAuth client secret and refresh token are secrets, stored in the OS
+    keyring; only non-sensitive identifiers live here.
+    """
+
+    #: OAuth client id from a Google Cloud "Desktop app" credential.
+    client_id: str = ""
+    #: Must exactly match a redirect URI registered on the OAuth client.
+    redirect_uri: str = "http://localhost:8000/api/youtube/callback"
+    #: Upload automatically whenever a clip finishes exporting.
+    auto_upload: bool = False
+    privacy: Literal["private", "unlisted", "public"] = "public"
+    #: YouTube category id. 24 = Entertainment, 20 = Gaming.
+    category_id: str = "24"
+    #: Filled by the OAuth callback so the header can name the channel
+    #: without a network round trip on every page load.
+    channel_id: str = ""
+    channel_title: str = ""
+    channel_url: str = ""
+    connected_at: str = ""
+
+
 class Settings(BaseModel):
     """Top-level persisted settings."""
 
@@ -102,7 +133,7 @@ class Settings(BaseModel):
         default_factory=lambda: {
             "anthropic": ProviderSettings(model="claude-sonnet-5"),
             "openai": ProviderSettings(model="gpt-4o"),
-            "gemini": ProviderSettings(model="gemini-2.0-flash"),
+            "gemini": ProviderSettings(model="gemini-3.5-flash"),
             "ollama": ProviderSettings(model="", base_url="http://localhost:11434"),
         }
     )
@@ -110,6 +141,7 @@ class Settings(BaseModel):
     clips: ClipSettings = Field(default_factory=ClipSettings)
     ingest: IngestSettings = Field(default_factory=IngestSettings)
     export: ExportSettings = Field(default_factory=ExportSettings)
+    youtube: YouTubeSettings = Field(default_factory=YouTubeSettings)
 
     #: Set when secrets had to be written to config.json because no keyring
     #: backend was usable. Surfaced as a warning in the UI and in `doctor`.

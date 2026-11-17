@@ -282,6 +282,20 @@ class TestClips:
         assert [c["rank"] for c in clips] == [1, 2, 3]
         assert clips[0]["duration_s"] == pytest.approx(40.0)
 
+    def test_library_lists_clips_with_their_source_and_job_status(
+        self, client: TestClient, job_with_clips: Job, source: Source
+    ) -> None:
+        body = client.get("/api/clips").json()
+
+        assert len(body) == 3
+        assert {clip["source_title"] for clip in body} == {source.title}
+        assert {clip["job_status"] for clip in body} == {"done"}
+        assert {clip["job_id"] for clip in body} == {job_with_clips.id}
+        assert all(isinstance(clip["exports"], list) for clip in body)
+
+    def test_library_respects_limit(self, client: TestClient, job_with_clips: Job) -> None:
+        assert len(client.get("/api/clips?limit=2").json()) == 2
+
     def test_patch_title_and_status(self, client: TestClient, job_with_clips: Job) -> None:
         clip_id = client.get(f"/api/jobs/{job_with_clips.id}/clips").json()[0]["id"]
 

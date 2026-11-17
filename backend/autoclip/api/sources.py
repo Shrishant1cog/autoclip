@@ -10,7 +10,6 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from ..config import load as load_settings
 from ..db import store
 from ..pipeline import ingest
 from .schemas import SourceOut, YouTubeIngestIn
@@ -40,25 +39,16 @@ async def get_source(source_id: str) -> SourceOut:
 
 @router.post("/youtube", response_model=SourceOut, status_code=201)
 async def ingest_youtube(payload: YouTubeIngestIn) -> SourceOut:
-    """Download a YouTube video and register it as a source."""
+    """Register a YouTube URL; the background job downloads it in its prepare stage.
+
+    Returning immediately keeps the request fast even for long or very
+    high-quality downloads. The job's prepare stage runs ``yt-dlp`` before audio
+    extraction, so progress and failures surface through the normal job stream.
+    """
     if not ingest.is_youtube_url(payload.url):
         raise HTTPException(status_code=400, detail="That is not a YouTube URL.")
 
-    settings = load_settings().ingest
-    if payload.cookies_from_browser is not None:
-        settings = settings.model_copy(
-            update={"cookies_from_browser": payload.cookies_from_browser}
-        )
-
-    try:
-        source = await asyncio.to_thread(ingest.ingest_youtube, payload.url, settings)
-    except ingest.IngestError as exc:
-        # 422 rather than 500: the request was well-formed, but the content
-        # can't be fetched, and the hint tells the user what to change.
-        raise HTTPException(
-            status_code=422, detail={"message": str(exc), "hint": exc.hint}
-        ) from exc
-
+    source = ingest.new_youtube_source(payload.url)
     await asyncio.to_thread(store.create_source, source)
     return SourceOut.of(source)
 

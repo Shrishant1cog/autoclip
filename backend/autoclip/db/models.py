@@ -207,3 +207,45 @@ class Export:
             size_bytes=row["size_bytes"],
             created_at=row["created_at"],
         )
+
+
+UploadStatus = Literal["pending", "uploading", "done", "failed", "skipped"]
+
+
+@dataclass
+class YouTubeUpload:
+    """One upload attempt for one export.
+
+    The generated title/description/tags are persisted before the network call
+    so a retry reuses the same metadata rather than paying for another LLM pass.
+    """
+
+    id: str
+    export_id: str
+    clip_id: str
+    status: UploadStatus = "pending"
+    video_id: str | None = None
+    title: str = ""
+    description: str = ""
+    tags: list[str] = field(default_factory=list)
+    privacy: str = "public"
+    error: str | None = None
+    created_at: str = field(default_factory=utcnow)
+    updated_at: str = field(default_factory=utcnow)
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> YouTubeUpload:
+        return cls(
+            id=row["id"],
+            export_id=row["export_id"],
+            clip_id=row["clip_id"],
+            status=row["status"],
+            video_id=row["video_id"],
+            title=row["title"],
+            description=row["description"],
+            tags=json.loads(row["tags_json"] or "[]"),
+            privacy=row["privacy"],
+            error=row["error"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )

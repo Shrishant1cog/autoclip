@@ -38,6 +38,22 @@ export interface Job {
   source: Source | null
 }
 
+export interface UploadRecord {
+  id: string
+  export_id: string
+  clip_id: string
+  status: 'pending' | 'uploading' | 'done' | 'failed' | 'skipped'
+  video_id: string | null
+  title: string
+  description: string
+  tags: string[]
+  privacy: string
+  error: string | null
+  watch_url: string
+  created_at: string
+  updated_at: string
+}
+
 export interface ExportRecord {
   id: string
   clip_id: string
@@ -46,6 +62,7 @@ export interface ExportRecord {
   size_bytes: number
   created_at: string
   download_url: string
+  upload: UploadRecord | null
 }
 
 export type ClipStatus = 'candidate' | 'kept' | 'discarded' | 'exported'
@@ -68,6 +85,12 @@ export interface Clip {
   caption_style: string
   ratio: string
   exports: ExportRecord[]
+}
+
+/** A clip in the cross-job library, with the context needed to group it. */
+export interface LibraryClip extends Clip {
+  source_title: string
+  job_status: JobStatus
 }
 
 export interface Word {
@@ -147,8 +170,33 @@ export interface Settings {
     crf: number
     write_srt: boolean
   }
+  youtube: {
+    client_id: string
+    redirect_uri: string
+    auto_upload: boolean
+    privacy: 'private' | 'unlisted' | 'public'
+    category_id: string
+    channel_id: string
+    channel_title: string
+    channel_url: string
+    connected_at: string
+  }
   insecure_secret_storage: boolean
   keys_present: Record<string, boolean>
+  youtube_secret_present: boolean
+}
+
+export interface YouTubeStatus {
+  configured: boolean
+  connected: boolean
+  auto_upload: boolean
+  client_id: string
+  redirect_uri: string
+  privacy: 'private' | 'unlisted' | 'public'
+  channel_id: string
+  channel_title: string
+  channel_url: string
+  connected_at: string
 }
 
 export interface SystemStatus {
@@ -254,6 +302,7 @@ export const api = {
   retryJob: (id: string) => request<Job>(`/api/jobs/${id}/retry`, { method: 'POST' }),
 
   listClips: (jobId: string) => request<Clip[]>(`/api/jobs/${jobId}/clips`),
+  listAllClips: (limit = 200) => request<LibraryClip[]>(`/api/clips?limit=${limit}`),
   getClip: (clipId: string) => request<Clip>(`/api/clips/${clipId}`),
 
   getCropPath: (clipId: string) => request<CropPath>(`/api/clips/${clipId}/crop-path`),
@@ -281,6 +330,24 @@ export const api = {
 
   captionStyles: () => request<CaptionStyle[]>('/api/caption-styles'),
   providerStatus: () => request<ProviderStatus[]>('/api/providers/status'),
+
+  youtubeStatus: () => request<YouTubeStatus>('/api/youtube/status'),
+  youtubeConnect: () =>
+    request<{ auth_url: string }>('/api/youtube/connect', { method: 'POST' }),
+  youtubeDisconnect: () =>
+    request<YouTubeStatus>('/api/youtube/disconnect', { method: 'POST' }),
+  setYouTubeAuto: (enabled: boolean) =>
+    request<YouTubeStatus>('/api/youtube/auto-upload', {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    }),
+  setYouTubePrivacy: (privacy: 'private' | 'unlisted' | 'public') =>
+    request<YouTubeStatus>('/api/youtube/privacy', {
+      method: 'POST',
+      body: JSON.stringify({ privacy }),
+    }),
+  retryUpload: (uploadId: string) =>
+    request<UploadRecord>(`/api/youtube/uploads/${uploadId}/retry`, { method: 'POST' }),
 
   getSettings: () => request<Settings>('/api/settings'),
   putSettings: (patch: Partial<Settings>) =>

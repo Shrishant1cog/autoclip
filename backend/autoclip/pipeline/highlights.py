@@ -138,10 +138,12 @@ async def detect(
     concurrency = LOCAL_CONCURRENCY if provider.name == "ollama" else HOSTED_CONCURRENCY
     semaphore = asyncio.Semaphore(concurrency)
     completed = 0
+    failures = 0
+    last_error: Exception | None = None
     lock = asyncio.Lock()
 
     async def run_window(window: TranscriptWindow) -> list[ClipCandidate]:
-        nonlocal completed
+        nonlocal completed, failures, last_error
         async with semaphore:
             try:
                 result = await provider.detect_highlights(window, config)
@@ -155,6 +157,9 @@ async def detect(
                     exc,
                 )
                 candidates = []
+                async with lock:
+                    failures += 1
+                    last_error = exc
             async with lock:
                 completed += 1
                 if on_progress:
@@ -165,6 +170,12 @@ async def detect(
     candidates = [c for group in results for c in group]
 
     if not candidates:
+        # Reporting "no clips" when every request actually failed hides the real
+        # cause (bad model, revoked key, outage) behind a misleading suggestion.
+        if failures == len(windows) and last_error is not None:
+            raise HighlightError(
+                f"Highlight detection failed in every window. Original error: {last_error}"
+            )
         raise HighlightError(
             "No clips were found. This can mean the video genuinely has no "
             "self-contained highlights, or that the model struggled with the "
