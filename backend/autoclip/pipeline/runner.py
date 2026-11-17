@@ -25,7 +25,9 @@ from ..db import store
 from ..db.models import Clip, Export, Job, Source, new_id, utcnow
 from ..db.models import Transcript as TranscriptRow
 from ..providers import LLMProvider, build_provider, detection_config
-from ..providers.base import looks_like_auth_failure
+from ..providers.base import looks_like_auth_failure, looks_like_transient_failure
+from ..speech import LocalWhisperSTT
+from ..speech import base as speech
 from . import Stage, captions, export, ffmpeg, highlights, ingest, prepare, transcribe
 from .prepare import Silence
 from .reframe import ReframeConfig, build_crop_path
@@ -296,16 +298,49 @@ class PipelineRunner:
             self._finish_stage(stage)
             return transcript
 
-        self._emit(stage, 0.0, "Transcribing")
-        transcript = transcribe.transcribe(
-            audio,
-            self.settings.whisper,
-            duration_s=self.source.duration_s,
-            on_progress=self._stage_progress(stage),
-            cancelled=self._is_cancelled,
-        )
+        engine, notice = speech.resolve_engine(self.settings)
+        if notice:
+            self._set_notice(stage, notice)
 
-        if self.settings.whisper.diarization:
+        # External-first with automatic local fallback: a dead external
+        # service slows a job down, it never kills it. Pinned engines
+        # (transcription.engine != "auto") surface their own errors instead.
+        pinned = self.settings.transcription.engine != "auto"
+        self._emit(stage, 0.0, f"Transcribing with {engine.name}")
+        try:
+            transcript = engine.transcribe(
+                audio,
+                self.settings.transcription,
+                language=self.settings.whisper.language,
+                duration_s=self.source.duration_s,
+                on_progress=self._stage_progress(stage),
+                cancelled=self._is_cancelled,
+            )
+        except speech.SpeechError as exc:
+            if pinned:
+                raise
+            fallback = LocalWhisperSTT()
+            log.warning(
+                "Transcription engine %s failed (%s); falling back to local.", engine.name, exc
+            )
+            self._emit(stage, 0.0, f"{engine.name} unavailable — using local Whisper")
+            self._set_notice(
+                stage, f"{engine.name} transcription failed — used local Whisper instead."
+            )
+            transcript = fallback.transcribe(
+                audio,
+                self.settings.transcription,
+                language=self.settings.whisper.language,
+                duration_s=self.source.duration_s,
+                on_progress=self._stage_progress(stage),
+                cancelled=self._is_cancelled,
+            )
+
+        if (
+            transcript.source == "whisper"
+            and self.settings.whisper.diarization
+            and not transcript.has_diarization
+        ):
             from ..config import HF_TOKEN_KEY, get_secret
 
             self._emit(stage, 0.95, "Identifying speakers")
@@ -389,13 +424,19 @@ class PipelineRunner:
     def _ollama_fallback(
         self, provider_name: str, error: BaseException
     ) -> tuple[LLMProvider, str] | None:
-        """Return a local Ollama provider when a hosted API key was rejected.
+        """Return a local Ollama provider when the hosted provider is unusable.
 
-        Only credential failures trigger a switch: a rate limit or an outage
-        should surface as itself rather than silently changing the model and
-        producing worse clips.
+        Triggers on credential failures *and* transient outages — rate limits,
+        503s, timeouts. A transient failure used to kill the whole job; now it
+        degrades to the local model the same way a rejected key does. Before
+        switching, the fallback is health-checked so a dormant Ollama install
+        doesn't trade a clear error for a vaguer one.
         """
-        if provider_name == "ollama" or not looks_like_auth_failure(error):
+        if provider_name == "ollama":
+            return None
+        if not (
+            looks_like_auth_failure(error) or looks_like_transient_failure(error)
+        ):
             return None
 
         try:
@@ -404,12 +445,38 @@ class PipelineRunner:
             log.warning("Could not build the Ollama fallback: %s", exc)
             return None
 
+        if not self._provider_healthy(fallback):
+            log.info("Ollama fallback is not reachable; keeping the original error.")
+            return None
+
         model = fallback.model or "local model"
-        notice = (
-            f"{provider_name.capitalize()} API key failed — switched to local "
-            f"Ollama ({model}). Check the API key in Settings."
-        )
+        if looks_like_auth_failure(error):
+            notice = (
+                f"{provider_name.capitalize()} API key failed — switched to local "
+                f"Ollama ({model}). Check the API key in Settings."
+            )
+        else:
+            notice = (
+                f"{provider_name.capitalize()} was rate-limited or unavailable — "
+                f"switched to local Ollama ({model})."
+            )
         return fallback, notice
+
+    @staticmethod
+    def _provider_healthy(provider: LLMProvider) -> bool:
+        """Probe a provider once; a fallback that can't answer is not a fallback."""
+
+        async def _check() -> bool:
+            try:
+                status = await provider.health_check()
+            except Exception:
+                return False
+            return status.available
+
+        try:
+            return asyncio.run(_check())
+        except Exception:  # pragma: no cover - defensive
+            return False
 
     def _stage_reframe(self, clips: list[Clip], transcript: Transcript) -> dict[str, CropPath]:
         stage = Stage.REFRAME
@@ -509,6 +576,8 @@ class PipelineRunner:
                 cancelled=self._is_cancelled,
             )
 
+            destination = self._maybe_narrate(destination, clip, index, len(clips), stage)
+
             record = Export(
                 id=new_id(),
                 clip_id=clip.id,
@@ -522,6 +591,47 @@ class PipelineRunner:
             _maybe_enqueue_upload(record.id, self.settings)
 
         self._finish_stage(stage)
+
+    def _maybe_narrate(
+        self, destination: Path, clip: Clip, index: int, total: int, stage: Stage
+    ) -> Path:
+        """Overlay an ElevenLabs voiceover on a finished export, when enabled.
+
+        Narration is optional and must never fail an export: a TTS outage costs
+        one clip's voiceover, not the job. The upload row was already created
+        with the pre-narration file, so the narrated file replaces it in place.
+        """
+        if self.settings.transcription.voiceover != "muxed":
+            return destination
+
+        self._emit(
+            stage, (index + 0.5) / total, f"Narrating clip {index + 1}"
+        )
+        try:
+            from ..speech import tts
+
+            narration_text = (clip.hook or clip.title or "").strip()
+            if not narration_text:
+                return destination
+
+            narration_path = destination.with_suffix(".narration.mp3")
+            voice_id = (
+                self.settings.transcription.voice_id.strip() or tts.DEFAULT_VOICE_ID
+            )
+            tts.synthesize_speech(
+                narration_text, narration_path, voice_id=voice_id
+            )
+            final = destination.with_suffix(".narrated.mp4")
+            tts.mux_voiceover(destination, narration_path, final)
+            final.replace(destination)
+            narration_path.unlink(missing_ok=True)
+            log.info("Added voiceover to %s.", destination.name)
+            return destination
+        except Exception as exc:
+            log.warning(
+                "Voiceover failed for %s (%s); keeping the plain export.", destination.name, exc
+            )
+            return destination
 
     def _fallback_crop_path(self, clip: Clip, ratio: str) -> CropPath:
         """Centre crop for sources with no reframe data (audio-only, or a failure)."""

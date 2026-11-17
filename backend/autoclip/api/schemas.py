@@ -300,6 +300,7 @@ class SettingsOut(BaseModel):
     active_provider: str
     providers: dict[str, dict[str, Any]]
     whisper: dict[str, Any]
+    transcription: dict[str, Any]
     clips: dict[str, Any]
     ingest: dict[str, Any]
     export: dict[str, Any]
@@ -316,6 +317,7 @@ class SettingsIn(BaseModel):
     active_provider: str | None = None
     providers: dict[str, dict[str, Any]] | None = None
     whisper: dict[str, Any] | None = None
+    transcription: dict[str, Any] | None = None
     clips: dict[str, Any] | None = None
     ingest: dict[str, Any] | None = None
     export: dict[str, Any] | None = None

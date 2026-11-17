@@ -7,7 +7,18 @@ const SECRET_LABELS: Record<string, string> = {
   anthropic: 'Anthropic API key',
   openai: 'OpenAI-compatible API key',
   gemini: 'Google Gemini API key',
+  elevenlabs: 'ElevenLabs API key',
   huggingface_token: 'HuggingFace token',
+}
+
+/** Mirrors backend TranscriptionSettings defaults; used when an older server
+ * response predates the field. */
+const DEFAULT_TRANSCRIPTION = {
+  engine: 'auto' as 'auto' | 'elevenlabs' | 'local',
+  elevenlabs_model: 'scribe_v2',
+  diarize: true,
+  voiceover: 'off' as 'off' | 'muxed',
+  voice_id: '',
 }
 
 export function Settings() {
@@ -152,6 +163,69 @@ export function Settings() {
       <Section title="Transcription">
         <div className="grid gap-5 sm:grid-cols-2">
           <Select
+            label="Engine"
+            hint="Auto prefers ElevenLabs and falls back to local Whisper if it fails."
+            value={settings.transcription?.engine ?? 'auto'}
+            onChange={(value) =>
+              patch({
+                transcription: {
+                  ...DEFAULT_TRANSCRIPTION,
+                  ...settings.transcription,
+                  engine: value as 'auto' | 'elevenlabs' | 'local',
+                },
+              })
+            }
+            options={['auto', 'elevenlabs', 'local']}
+            labels={{
+              auto: 'Auto (external first)',
+              elevenlabs: 'ElevenLabs Scribe only',
+              local: 'Local Whisper only',
+            }}
+          />
+          {settings.transcription?.engine !== 'local' && (
+            <>
+              <Select
+                label="Scribe model"
+                value={settings.transcription?.elevenlabs_model ?? 'scribe_v2'}
+                onChange={(value) =>
+                  patch({
+                    transcription: {
+                      ...DEFAULT_TRANSCRIPTION,
+                      ...settings.transcription,
+                      elevenlabs_model: value,
+                    },
+                  })
+                }
+                options={['scribe_v2', 'scribe_v3']}
+              />
+              <label className="flex items-start gap-3 text-sm text-ink-200 sm:col-span-2">
+                <input
+                  type="checkbox"
+                  checked={settings.transcription?.diarize ?? true}
+                  onChange={(e) =>
+                    patch({
+                      transcription: {
+                        ...DEFAULT_TRANSCRIPTION,
+                        ...settings.transcription,
+                        diarize: e.target.checked,
+                      },
+                    })
+                  }
+                  className="mt-0.5 size-4 accent-sodium-500"
+                />
+                <span>
+                  Identify speakers with Scribe
+                  <span className="mt-1 block text-xs text-ink-500">
+                    Included in the transcription call — no HuggingFace token needed.
+                  </span>
+                </span>
+              </label>
+            </>
+          )}
+        </div>
+
+        <div className="mt-8 grid gap-5 sm:grid-cols-2">
+          <Select
             label="Whisper model"
             value={settings.whisper.model}
             onChange={(value) => patch({ whisper: { ...settings.whisper, model: value } })}
@@ -206,6 +280,49 @@ export function Settings() {
             onCommit={(value) => patch({ clips: { ...settings.clips, max_clips: value } })}
           />
         </div>
+      </Section>
+
+      <Section
+        title="Voiceover"
+        note="ElevenLabs narration, off by default. Billed per character by ElevenLabs."
+      >
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Select
+            label="Narration"
+            value={settings.transcription?.voiceover ?? 'off'}
+            onChange={(value) =>
+              patch({
+                transcription: {
+                  ...DEFAULT_TRANSCRIPTION,
+                  ...settings.transcription,
+                  voiceover: value as 'off' | 'muxed',
+                },
+              })
+            }
+            options={['off', 'muxed']}
+            labels={{ off: 'Off (default)', muxed: 'Narrate over the original audio' }}
+          />
+          <Field
+            label="Voice ID"
+            hint="Empty = Rachel (ElevenLabs default). Find IDs under voices in your ElevenLabs dashboard."
+            value={settings.transcription?.voice_id ?? ''}
+            placeholder="JBFqnCBsd6RMkjVDRZzb"
+            onCommit={(value) =>
+              patch({
+                transcription: {
+                  ...DEFAULT_TRANSCRIPTION,
+                  ...settings.transcription,
+                  voice_id: value,
+                },
+              })
+            }
+          />
+        </div>
+        {settings.transcription?.voiceover === 'muxed' && !settings.keys_present.elevenlabs && (
+          <p className="mt-4 border-l-2 border-sodium-600 pl-4 text-sm text-ink-300">
+            Voiceover needs an ElevenLabs API key — add it under Keys above.
+          </p>
+        )}
       </Section>
 
       <Section title="Ingest">

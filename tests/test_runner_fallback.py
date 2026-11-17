@@ -44,10 +44,13 @@ def test_other_errors_do_not_look_like_auth_failures(message: str) -> None:
     assert not looks_like_auth_failure(message)
 
 
-def test_fallback_switches_to_ollama_on_a_rejected_key() -> None:
+def test_fallback_switches_to_ollama_on_a_rejected_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     settings = Settings()
     settings.providers["ollama"].model = "llama3.1:8b"
     runner = _runner(settings)
+    monkeypatch.setattr(PipelineRunner, "_provider_healthy", staticmethod(lambda _p: True))
 
     result = runner._ollama_fallback("gemini", RuntimeError("Google rejected the API key."))
 
@@ -65,10 +68,49 @@ def test_no_fallback_when_the_provider_is_already_ollama() -> None:
     assert runner._ollama_fallback("ollama", RuntimeError("No API key is set.")) is None
 
 
-def test_no_fallback_on_transient_errors() -> None:
+def test_no_fallback_when_the_local_fallback_is_unhealthy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A transient error is worth retrying elsewhere, but only if 'elsewhere' answers.
+
+    With Ollama not running, the 503 must surface as itself rather than being
+    swapped for a vaguer local failure.
+    """
     runner = _runner(Settings())
+    monkeypatch.setattr(PipelineRunner, "_provider_healthy", staticmethod(lambda _p: False))
 
     assert runner._ollama_fallback("gemini", RuntimeError("Gemini returned 503.")) is None
+
+
+def test_fallback_switches_to_ollama_on_transient_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rate limits and outages degrade to the local model instead of failing the job."""
+    settings = Settings()
+    runner = _runner(settings)
+    monkeypatch.setattr(PipelineRunner, "_provider_healthy", staticmethod(lambda _p: True))
+
+    for error in (
+        RuntimeError("Gemini request failed: 503 UNAVAILABLE."),
+        RuntimeError("Gemini rate limit or quota reached."),
+        RuntimeError("Request timed out after 30s."),
+    ):
+        result = runner._ollama_fallback("gemini", error)
+        assert result is not None, f"no fallback for {error}"
+        provider, notice = result
+        assert provider.name == "ollama"
+        assert "rate-limited or unavailable" in notice or "unavailable" in notice
+
+
+def test_malformed_requests_still_surfaced() -> None:
+    """A bad request is a bug, not an outage — no fallback, no retry."""
+    runner = _runner(Settings())
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(PipelineRunner, "_provider_healthy", staticmethod(lambda _p: True))
+        assert runner._ollama_fallback("gemini", RuntimeError("Invalid JSON in request.")) is None
+    finally:
+        monkeypatch.undo()
 
 
 def test_stage_notice_is_reused_by_later_progress_updates(autoclip_home: Path) -> None:

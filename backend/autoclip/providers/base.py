@@ -67,6 +67,41 @@ def looks_like_auth_failure(error: BaseException | str) -> bool:
     return any(marker in message for marker in _AUTH_FAILURE_MARKERS)
 
 
+#: Markers for transient provider failures — overload, quota, timeouts,
+#: connection errors. These are worth retrying on another provider rather
+#: than failing the whole job, unlike a malformed request or bad content.
+_TRANSIENT_FAILURE_MARKERS = (
+    "rate limit",
+    "rate_limit",
+    "ratelimit",
+    "quota",
+    "resource_exhausted",
+    "overloaded",
+    "high demand",
+    "unavailable",
+    "timeout",
+    "timed out",
+    "connection",
+    "temporarily",
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+)
+
+
+def looks_like_transient_failure(error: BaseException | str) -> bool:
+    """Return True when a provider error looks temporary (429, 503, timeout…).
+
+    Deliberately broad: the fallback path re-checks that the alternative
+    provider is actually healthy before switching, so a false positive here
+    costs one failed health check, not a bad transcript.
+    """
+    message = str(error).lower()
+    return any(marker in message for marker in _TRANSIENT_FAILURE_MARKERS)
+
+
 # --------------------------------------------------------------------------
 # Contracts
 # --------------------------------------------------------------------------

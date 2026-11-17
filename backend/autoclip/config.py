@@ -37,10 +37,16 @@ LEGACY_KEYRING_SERVICE = "clipforge"
 ProviderName = Literal["anthropic", "openai", "gemini", "ollama"]
 
 #: Providers that authenticate with an API key. Ollama runs locally and needs none.
-KEYED_PROVIDERS: tuple[str, ...] = ("anthropic", "openai", "gemini")
+#: ElevenLabs is keyed too (speech STT/TTS) even though it is not an LLM highlight
+#: provider — the Settings API uses this list for its secret endpoints.
+KEYED_PROVIDERS: tuple[str, ...] = ("anthropic", "openai", "gemini", "elevenlabs")
 
 #: Extra secrets that aren't tied to a provider.
 HF_TOKEN_KEY = "huggingface_token"
+
+#: ElevenLabs API key. Read through the same keyring as the provider keys, plus
+#: the aliases the ElevenLabs CLI itself writes (keyring entry and .env file).
+ELEVENLABS_API_KEY = "elevenlabs"
 
 #: YouTube OAuth client secret and the long-lived refresh token.
 YOUTUBE_CLIENT_SECRET_KEY = "youtube_client_secret"
@@ -67,6 +73,28 @@ class WhisperSettings(BaseModel):
     #: Run WhisperX diarization to label words by speaker. Needs the
     #: ``diarization`` extra and a HuggingFace token.
     diarization: bool = False
+
+
+class TranscriptionSettings(BaseModel):
+    """Which speech-to-text engine runs, and how.
+
+    ``auto`` prefers the external engine (ElevenLabs Scribe) and falls back to
+    local faster-whisper on any failure — auth, rate limit, outage, timeout, or
+    an unusable result. ``elevenlabs`` and ``local`` pin the engine and disable
+    fallback between them.
+    """
+
+    engine: Literal["auto", "elevenlabs", "local"] = "auto"
+    #: Scribe model id. ``scribe_v2`` is the stable general model.
+    elevenlabs_model: str = "scribe_v2"
+    #: Ask Scribe for speaker labels (replaces the local WhisperX path when the
+    #: external engine runs). Free of extra charge, included in the call.
+    diarize: bool = True
+    #: Clip narration. ``off`` keeps today's behaviour exactly; ``muxed``
+    #: synthesizes a voiceover per clip and mixes it over the original audio.
+    voiceover: Literal["off", "muxed"] = "off"
+    #: ElevenLabs voice for narration. Empty = the CLI default (Rachel).
+    voice_id: str = ""
 
 
 class ClipSettings(BaseModel):
@@ -138,6 +166,7 @@ class Settings(BaseModel):
         }
     )
     whisper: WhisperSettings = Field(default_factory=WhisperSettings)
+    transcription: TranscriptionSettings = Field(default_factory=TranscriptionSettings)
     clips: ClipSettings = Field(default_factory=ClipSettings)
     ingest: IngestSettings = Field(default_factory=IngestSettings)
     export: ExportSettings = Field(default_factory=ExportSettings)
@@ -242,6 +271,17 @@ def get_secret(key: str, settings: Settings | None = None) -> str | None:
                     return value
             except Exception as exc:  # pragma: no cover - backend dependent
                 log.warning("Keyring read failed for %s: %s", key, exc)
+
+        # The ElevenLabs CLI stores the key under its own service name when you
+        # run `elevenlabs auth login`; read that rather than asking for a
+        # second copy of the same key.
+        if key == ELEVENLABS_API_KEY:
+            try:
+                value = kr.get_password("elevenlabs", "OAuth")
+                if value:
+                    return value
+            except Exception as exc:  # pragma: no cover - backend dependent
+                log.debug("ElevenLabs CLI keyring read failed: %s", exc)
 
     settings = settings if settings is not None else load()
     return settings._fallback_secrets.get(key) or None

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+import httpx
 from fastapi import APIRouter, HTTPException
 
 from .. import config, models, system
@@ -23,6 +24,7 @@ def _settings_out(settings: config.Settings) -> SettingsOut:
         active_provider=payload["active_provider"],
         providers=payload["providers"],
         whisper=payload["whisper"],
+        transcription=payload["transcription"],
         clips=payload["clips"],
         ingest=payload["ingest"],
         export=payload["export"],
@@ -57,7 +59,7 @@ async def put_settings(payload: SettingsIn) -> SettingsOut:
             )
         settings.active_provider = updates["active_provider"]
 
-    for section in ("whisper", "clips", "ingest", "export", "youtube"):
+    for section in ("whisper", "transcription", "clips", "ingest", "export", "youtube"):
         if section in updates:
             current = getattr(settings, section)
             try:
@@ -141,6 +143,47 @@ async def providers_status() -> list[ProviderStatusOut]:
         )
 
     return list(await asyncio.gather(*(check(name) for name in PROVIDERS)))
+
+
+@router.get("/speech/status")
+async def speech_status() -> dict:
+    """Health of the speech services: the ElevenLabs key and API reachability."""
+    settings = config.load()
+    has_key = config.get_secret(config.ELEVENLABS_API_KEY, settings) is not None
+    if not has_key:
+        return {
+            "elevenlabs": {"available": False, "has_key": False, "detail": "No API key configured."}
+        }
+
+    def _check() -> dict:
+        try:
+            response = httpx.get(
+                "https://api.elevenlabs.io/v1/user/subscription",
+                headers={
+                    "xi-api-key": config.get_secret(config.ELEVENLABS_API_KEY, settings) or ""
+                },
+                timeout=15.0,
+            )
+        except httpx.HTTPError as exc:
+            return {"available": False, "has_key": True, "detail": f"Unreachable: {exc}"}
+        if response.status_code == 401:
+            return {"available": False, "has_key": True, "detail": "API key rejected (401)."}
+        if response.status_code >= 400:
+            return {
+                "available": False,
+                "has_key": True,
+                "detail": f"API error {response.status_code}.",
+            }
+        data = response.json()
+        characters = data.get("character_count", 0)
+        limit = data.get("character_limit", 0)
+        return {
+            "available": True,
+            "has_key": True,
+            "detail": f"Connected. {max(0, limit - characters)} chars left this period.",
+        }
+
+    return {"elevenlabs": await asyncio.to_thread(_check)}
 
 
 @router.get("/system", response_model=SystemOut)

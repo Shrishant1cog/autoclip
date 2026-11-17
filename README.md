@@ -20,8 +20,9 @@ Two ways to run it:
 
 - **Fully local** — Whisper + Ollama. Nothing leaves your machine, no API costs.
 - **Bring your own key** — Anthropic, OpenAI, Gemini, or any OpenAI-compatible endpoint (OpenRouter, Groq, DeepSeek, LM Studio) for better clip selection.
+- **External speech** — an ElevenLabs key (Settings → Keys) switches transcription to Scribe: a 4-hour video transcribes in minutes instead of hours (~$0.20/hour). `auto` engine prefers it and falls back to local Whisper on any failure. Optional ElevenLabs voiceover can narrate clips.
 
-Only transcript *text* is ever sent to a provider — never video or audio. With Ollama, nothing is sent at all.
+Only transcript *text* is ever sent to a text provider — never video or audio. Audio is sent to ElevenLabs only when its transcription (or voiceover) is enabled; with `engine: local` and voiceover off, nothing is sent at all.
 
 ## Status
 

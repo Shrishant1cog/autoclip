@@ -37,6 +37,18 @@ being validated against a fixed golden video set — see
   the title is known so the picture and the video always say the same thing, and
   a duplicate guard that skips a clip already published rather than uploading it
   twice. Credentials live in the OS keyring, never in the config file.
+- **ElevenLabs speech services.** With a key in Settings → Keys, transcription
+  runs on Scribe (a 4-hour video takes minutes instead of hours, ~$0.20/hour);
+  the `auto` engine prefers it and falls back to local Whisper on any failure.
+  The word list Scribe returns is mapped onto AutoClip's transcript — non-word
+  entries dropped, speaker labels normalised, segments synthesised — so clip
+  boundaries and captions are unchanged. Optional voiceover narrates clips over
+  a ducked original track; off by default.
+- **Highlight fallback covers transient outages.** A provider 503, rate limit,
+  or timeout used to fail the whole job because only credential errors
+  triggered the local fallback. Transient failures now degrade to a
+  health-checked Ollama fallback, and transcription got the same
+  external-first treatment.
 
 ### Notable fixes during development
 

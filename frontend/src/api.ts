@@ -156,6 +156,13 @@ export interface Settings {
   active_provider: string
   providers: Record<string, { model: string; base_url: string | null }>
   whisper: { model: string; compute_type: string; language: string; diarization: boolean }
+  transcription?: {
+    engine: 'auto' | 'elevenlabs' | 'local'
+    elevenlabs_model: string
+    diarize: boolean
+    voiceover: 'off' | 'muxed'
+    voice_id: string
+  }
   clips: { min_duration_s: number; max_duration_s: number; max_clips: number }
   ingest: {
     ytdlp_format: string
