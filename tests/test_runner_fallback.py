@@ -1,4 +1,4 @@
-"""Tests for provider-failure fallback and stage notices."""
+"""Tests for provider-failure fallback, stage notices and progress reporting."""
 
 from __future__ import annotations
 
@@ -88,3 +88,42 @@ def test_stage_notice_is_reused_by_later_progress_updates(autoclip_home: Path) -
     runner._emit(Stage.HIGHLIGHTS, 0.75)
 
     assert events[-1].message == Stage.HIGHLIGHTS.label
+
+
+def test_progress_never_goes_backwards(autoclip_home: Path) -> None:
+    """A stage that reports a lower fraction must not drag the bar backwards.
+
+    ffmpeg's output clock can tick back by a frame when a filter reorders
+    frames, and a provider that reports window-by-window can repeat a
+    fraction. The progress bar is a promise to the user, so it only ever
+    moves forward.
+    """
+    from autoclip import db
+
+    db.init()
+    runner = _runner(Settings())
+    events = []
+    runner.on_progress = events.append
+
+    runner._emit(Stage.EXPORT, 0.6)
+    runner._emit(Stage.EXPORT, 0.55)  # a frame out of order
+    runner._emit(Stage.EXPORT, 0.7)
+
+    overall = [event.overall for event in events]
+
+    assert overall == sorted(overall)
+    # No stage has finished yet, so the bar is this stage's own weight only.
+    assert overall[-1] == pytest.approx(0.23 * 0.7)
+
+
+def test_progress_does_not_exceed_one(autoclip_home: Path) -> None:
+    from autoclip import db
+
+    db.init()
+    runner = _runner(Settings())
+    events = []
+    runner.on_progress = events.append
+
+    runner._emit(Stage.EXPORT, 5.0)
+
+    assert events[-1].overall == 1.0

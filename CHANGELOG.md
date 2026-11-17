@@ -31,6 +31,12 @@ being validated against a fixed golden video set — see
   support, and provider reachability, and explains what to do about each.
 - **End-to-end test** against real media, covering every stage with only the
   language model's answer scripted.
+- **YouTube publishing.** AutoClip can publish exported clips to a connected
+  channel: a title, description and tags generated from the clip's own
+  subtitles, a custom thumbnail drawn locally with ffmpeg and rendered *after*
+  the title is known so the picture and the video always say the same thing, and
+  a duplicate guard that skips a clip already published rather than uploading it
+  twice. Credentials live in the OS keyring, never in the config file.
 
 ### Notable fixes during development
 
@@ -54,6 +60,9 @@ Each of these was found by running the thing, not by reading it:
   skipped `None` values.
 - **Progress ran backwards** at every stage boundary, double-counting each
   completed stage.
+- **Progress could still tick backwards** mid-stage, when a stage reported a
+  lower fraction than the one before it. The bar is now clamped to its
+  high-water mark, so it only ever moves forward.
 - **A 9:16 preview rendered nearly square.** A max-height clamp shortened the box
   without narrowing it, silently violating the declared aspect ratio.
 - **The preview showed different framing from the export**, centre-cropping while
