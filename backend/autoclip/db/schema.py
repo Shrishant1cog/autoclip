@@ -166,12 +166,72 @@ def _migration_v3(conn: sqlite3.Connection) -> None:
     conn.executescript(_V3)
 
 
+# --------------------------------------------------------------------------
+# V4 — workflow engine (Phase 2, autonomous-platform)
+# --------------------------------------------------------------------------
+
+_V4 = """
+-- Persisted workflow definitions. A workflow is a graph of nodes; the
+-- existing six-stage pipeline is exposed as the built-in "autoclip_job"
+-- workflow. Versioning: a new row with the same key and version+1.
+CREATE TABLE workflows (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    definition  TEXT NOT NULL DEFAULT '{}',
+    version     INTEGER NOT NULL DEFAULT 1,
+    active      INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE UNIQUE INDEX idx_workflows_active ON workflows(name, active) WHERE active = 1;
+
+-- One row per workflow run. job_id links to the production jobs table when
+-- the execution drives a video job; NULL for utility workflows.
+CREATE TABLE workflow_runs (
+    id           TEXT PRIMARY KEY,
+    workflow_id  TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+    job_id       TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+    status       TEXT NOT NULL DEFAULT 'running'
+                 CHECK (status IN ('running','succeeded','failed','cancelled')),
+    trigger      TEXT NOT NULL DEFAULT 'manual',
+    started_at   TEXT NOT NULL,
+    finished_at  TEXT,
+    error        TEXT
+);
+CREATE INDEX idx_workflow_runs_workflow ON workflow_runs(workflow_id, started_at);
+CREATE INDEX idx_workflow_runs_status ON workflow_runs(status);
+
+-- Node-level execution record: real timing, state and payload inspection.
+CREATE TABLE workflow_node_runs (
+    id          TEXT PRIMARY KEY,
+    run_id      TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+    node_id     TEXT NOT NULL,
+    node_type   TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','running','succeeded','failed','skipped')),
+    attempt     INTEGER NOT NULL DEFAULT 1,
+    input_json  TEXT,
+    output_json TEXT,
+    error       TEXT,
+    started_at  TEXT,
+    finished_at TEXT
+);
+CREATE INDEX idx_workflow_node_runs_run ON workflow_node_runs(run_id, started_at);
+"""
+
+
+def _migration_v4(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V4)
+
+
 #: Ordered migrations. Index + 1 is the resulting ``user_version``.
 #: Append only — never edit a migration that has shipped.
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v1,
     _migration_v2,
     _migration_v3,
+    _migration_v4,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)
