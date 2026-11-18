@@ -119,13 +119,28 @@ async def process_upload(upload: YouTubeUpload, settings: config.Settings | None
     if not generated.title:
         raise uploader.YouTubeError("The generated title was empty; nothing was uploaded.")
 
+    # Phase 5: route to a channel profile. The default channel (or the legacy
+    # settings) keeps today's behaviour when no rule matches.
+    privacy = upload.privacy or settings.youtube.privacy
+    category_id = settings.youtube.category_id
+    try:
+        from ..routing import resolve_target_channel
+
+        channel = resolve_target_channel(clip.id, settings)
+    except Exception:  # noqa: BLE001 - routing must never block publishing
+        log.warning("Channel routing failed; using the default destination.", exc_info=True)
+        channel = None
+    if channel is not None:
+        privacy = upload.privacy or channel["privacy"]
+        category_id = channel["category_id"]
+
     video_id = await asyncio.to_thread(
         uploader.upload_video,
         settings,
         path=path,
         metadata=generated,
-        privacy=upload.privacy or settings.youtube.privacy,
-        category_id=settings.youtube.category_id,
+        privacy=privacy,
+        category_id=category_id,
         language=language,
     )
 

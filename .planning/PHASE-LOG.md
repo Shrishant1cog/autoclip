@@ -112,6 +112,20 @@ Each phase: implement → test → typecheck/build → commit → push. Log upda
   clean. Live-verified: real `clipsorial` connection auto-migrated as default account/channel,
   token claimed, routing endpoint returns effective upload policy.
 
+### Phase 5 — Intelligent classification & user-defined routing (COMPLETE)
+
+- Migration v6: `content_classifications` (clip → category/confidence/provider/reason,
+  latest wins) + `routing_rules` (keyword → target channel, priority-ordered, enable flag).
+- `routing/classifier.py`: classification over the provider fallback chain (never raises;
+  failures leave the clip unclassified), rules CRUD, `resolve_target_channel` (first enabled
+  matching rule wins, else the default channel — preserving pre-routing behaviour).
+- Upload path integration: `process_upload` resolves the channel profile and uses its
+  privacy/category; routing failures never block publishing.
+- `api/routing.py`: categories, rules CRUD + toggle, per-clip classify/target endpoints.
+- Tests: 13 new (`tests/test_routing.py`); suite **422 passed**; ruff + tsc + build clean.
+- Live-verified over HTTP: categories listed, rule created/toggled/deleted against the real
+  clipsorial channel row.
+
 ### Phase 2 — Workflow engine foundation (COMPLETE — commit `b07e759`)
 
 - Migration v4: `workflows` (versioned, active flag), `workflow_runs`, `workflow_node_runs`.

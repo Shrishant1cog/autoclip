@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from . import ai_providers, clips, jobs, settings, sources, workflows, youtube, youtube_accounts
+from . import (
+    ai_providers,
+    clips,
+    jobs,
+    routing,
+    settings,
+    sources,
+    workflows,
+    youtube,
+    youtube_accounts,
+)
 
 __all__ = ["api_router"]
 
@@ -17,3 +27,4 @@ api_router.include_router(youtube.router)
 api_router.include_router(workflows.router)
 api_router.include_router(ai_providers.router)
 api_router.include_router(youtube_accounts.router)
+api_router.include_router(routing.router)

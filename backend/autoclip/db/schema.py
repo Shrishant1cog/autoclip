@@ -271,6 +271,42 @@ def _migration_v5(conn: sqlite3.Connection) -> None:
     conn.executescript(_V5)
 
 
+# --------------------------------------------------------------------------
+# V6 — content classification & routing rules (Phase 5)
+# --------------------------------------------------------------------------
+
+_V6 = """
+-- AI classification of a clip's content: which audience/category it fits.
+CREATE TABLE content_classifications (
+    id          TEXT PRIMARY KEY,
+    clip_id     TEXT NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+    category    TEXT NOT NULL DEFAULT '',
+    confidence  REAL NOT NULL DEFAULT 0,
+    provider    TEXT NOT NULL DEFAULT '',
+    reason      TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX idx_classifications_clip ON content_classifications(clip_id, created_at);
+
+-- User-defined routing: classification keyword -> target channel profile.
+-- Evaluated in priority order (lower number = earlier); first enabled match wins.
+CREATE TABLE routing_rules (
+    id            TEXT PRIMARY KEY,
+    name          TEXT NOT NULL DEFAULT '',
+    match_keyword TEXT NOT NULL,
+    target_channel_id TEXT NOT NULL REFERENCES youtube_channels(id) ON DELETE CASCADE,
+    priority      INTEGER NOT NULL DEFAULT 100,
+    enabled       INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+CREATE INDEX idx_routing_rules_priority ON routing_rules(enabled, priority);
+"""
+
+def _migration_v6(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V6)
+
+
 #: Ordered migrations. Index + 1 is the resulting ``user_version``.
 #: Append only — never edit a migration that has shipped.
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
@@ -279,6 +315,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v3,
     _migration_v4,
     _migration_v5,
+    _migration_v6,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)
