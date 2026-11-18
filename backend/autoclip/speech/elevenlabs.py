@@ -19,7 +19,7 @@ import httpx
 
 from ..config import TranscriptionSettings, get_secret
 from ..pipeline.transcript import Segment, Transcript, Word
-from .base import SpeechError
+from .base import SpeechCancelled, SpeechError
 
 log = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ class ElevenLabsSTT:
             raise SpeechError("No ElevenLabs API key configured. Add one in Settings → Keys.")
 
         if cancelled is not None and cancelled():
-            raise SpeechError("Transcription cancelled.")
+            raise SpeechCancelled("Transcription cancelled.")
 
         if on_progress:
             on_progress(0.05)
@@ -125,7 +125,7 @@ class ElevenLabsSTT:
             raise SpeechError("ElevenLabs returned a non-JSON response.") from exc
 
         if cancelled is not None and cancelled():
-            raise SpeechError("Transcription cancelled.")
+            raise SpeechCancelled("Transcription cancelled.")
 
         try:
             words = self._map_words(payload.get("words") or [])

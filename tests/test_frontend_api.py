@@ -67,6 +67,25 @@ def test_the_provider_list_covers_every_preset(client: TestClient) -> None:
         }
 
 
+def test_the_legacy_health_endpoint_answers_with_the_provider_statuses(
+    client: TestClient,
+) -> None:
+    """It used to answer 500: the response model said dict, the body said model.
+
+    The status list quotes whatever each provider said, including a 401 from
+    a rejected key — so the failure was reported as an auth problem rather
+    than the bug it was.
+    """
+    response = client.get("/api/ai/health")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert isinstance(body, list)
+    assert {entry["name"] for entry in body} >= {"openai", "gemini", "ollama"}
+    for entry in body:
+        assert set(entry) >= {"name", "available", "has_key", "requires_key"}
+
+
 def test_the_presets_endpoint_returns_every_provider(client: TestClient) -> None:
     response = client.get("/api/ai/presets")
 

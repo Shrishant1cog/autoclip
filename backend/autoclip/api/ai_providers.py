@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from .. import config
 from ..providers import keypool, resolver
 from ..providers import presets as preset_registry
+from .schemas import ProviderStatusOut
 from .settings import providers_status as legacy_providers_status
 
 log = logging.getLogger(__name__)
@@ -94,9 +95,15 @@ async def presets() -> dict:
     }
 
 
-@router.get("/health")
-async def health() -> list[dict]:
-    """Legacy per-adapter live health, unchanged from the Settings page."""
+@router.get("/health", response_model=list[ProviderStatusOut])
+async def health() -> list[ProviderStatusOut]:
+    """Legacy per-adapter live health, unchanged from the Settings page.
+
+    The response model is declared rather than left to ``list[dict]``: the
+    status list is a list of models, and a plain ``dict`` annotation made
+    FastAPI reject the response it had just built — the endpoint answered
+    500 instead of the provider statuses.
+    """
     return await legacy_providers_status()
 
 

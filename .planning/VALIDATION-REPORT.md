@@ -2,7 +2,8 @@
 
 Feature branch: `feature/autonomous-platform`
 Baseline checkpoint: `54d6288` on `main`
-Phase 17 commit: *(see the phase log — this report is written before the final push)*
+Phase 17 commit: `a6bf514`
+Final audit commit: *(this commit — see the phase log)*
 
 This is the report the whole upgrade was working towards: what was asked for,
 what was actually built, how each claim was proved, and what is still blocked
@@ -46,8 +47,11 @@ computer that never restarts is now something the app handles explicitly.
 | Unified error handling and the recovery centre | 15 | Complete |
 | Resource optimisation — measure, bound, reclaim, expose | 16 | Complete |
 | The complete frontend, and a restart you can see | 17 | Complete |
+| The job state machine, audited against the real database | 17 audit | Complete |
 
-Fifteen phases, fifteen commits, each one pushed before the next began.
+Fifteen phases, fifteen commits, each one pushed before the next began — plus
+this audit, which found seven more defects and repaired the rows two of them
+had already written wrong.
 
 ---
 
@@ -67,8 +71,8 @@ through all eighteen phases:
    not a mock.
 7. **Commit and push**, then the next phase begins.
 
-The suite grew from **362 passing** at the Phase 1 baseline to **658 passing**
-at the end of Phase 17 — 296 new tests, no test deleted or weakened.
+The suite grew from **362 passing** at the Phase 1 baseline to **672 passing**
+at the end of the final audit — 310 new tests, no test deleted or weakened.
 
 | Phase | Suite | Added |
 |---|---|---|
@@ -89,37 +93,111 @@ at the end of Phase 17 — 296 new tests, no test deleted or weakened.
 | 15 | 554 | 26 |
 | 16 | 603 | 49 |
 | 17 | 658 | 55 |
+| 17 audit | 672 | 14 |
 
 ---
 
 ## 3. The real database, at the end
 
-Schema version **12**, foreign-key check clean, 296 rows of real work:
+The schema version **14**, foreign-key check clean, 241 rows of real work:
 
 | Table | Rows | Table | Rows |
 |---|---|---|---|
 | `sources` | 8 | `workflows` | 6 |
-| `jobs` | 11 | `workflow_runs` | 4 |
-| `clips` | 32 | `workflow_node_runs` | 8 |
-| `exports` | 52 | `batches` | 1 |
-| `youtube_uploads` | 52 | `notifications` | 36 |
+| `jobs` | 13 | `workflow_runs` | 4 |
+| `clips` | 35 | `workflow_node_runs` | 8 |
+| `exports` | 55 | `batches` | 1 |
+| `youtube_uploads` | 55 | `notifications` | 42 |
 | `google_accounts` | 1 | `youtube_channels` | 1 |
-| `job_resources` | 3 | `app_restarts` | 3 |
+| `job_resources` | 6 | `app_restarts` | 6 |
 
-Job outcomes: **5 done, 2 failed, 3 cancelled, 1 running**.
-Clip outcomes: **32 exported** — every clip that was found made it to a render.
-Upload outcomes: **32 published, 20 skipped as duplicates**.
+Job outcomes: **6 done, 1 failed, 6 cancelled**. Clip outcomes: **35
+exported** — every clip that was found made it to a render. Upload outcomes:
+**35 published, 20 skipped as duplicates**.
 
-The three failures are honest failures with honest messages — a 56-second test
-video that genuinely contains no self-contained highlight. The twenty skipped
-uploads are the duplicate guard working: the same clip re-exported was
-recognised and not published twice.
+Every one of the thirteen job rows now agrees with itself. A job in a
+terminal state carries a finish time, and that finish time is the moment it
+entered that state — the property the final audit repaired and v13 makes
+permanent.
+
+The single failure is an honest failure with an honest message — a
+56-second test video that genuinely contains no self-contained highlight.
+The twenty skipped uploads are the duplicate guard working: the same clip
+re-exported was recognised and not published twice.
+
+**The last run, end to end, with nothing mocked.** Job
+`8c6a0771907c4495` — a 68-minute interview, Whisper *small*, three clips of
+20–60 seconds, the Gemini provider — ran the whole pipeline and finished in
+2 minutes 37 seconds:
+
+| | |
+|---|---|
+| Clips | 3 — *"Why launching ChatGPT felt like a mistake"* (92), *"What a billionaire actually misses about normal life"* (91), *"Can you teach someone to be ambitious?"* (91) |
+| Exports | 3 real MP4s — h264 **1080×1920** (true 9:16), 45.2 s / 53.0 s / 24.7 s, 27.8 MB / 14.4 MB / 15.7 MB |
+| Published | 3 videos — `m8GFe59Gejw`, `i_cis9lIUyc`, `vpIg0wnPQE8`, each confirmed through YouTube's own oEmbed lookup |
+| Model calls | 10 LLM calls, 102,262 input tokens, 2,195 output tokens |
+| Media work | 3 ffmpeg runs, 89.0 seconds of encoding, 60,779,575 bytes written |
+
+The exports were checked with `ffprobe` rather than trusted because a row
+said so: a database can claim a 9:16 video that is not one. The published
+videos were checked through YouTube's API for the same reason — an upload
+row saying `done` is a claim, and the oEmbed lookup is the proof.
+
+The transcription was not recomputed for this run: the audio and the
+transcript from the earlier run of the same source with the same model were
+already in the work directory, and the pipeline reuses them by design. That
+is the resume path, not a shortcut around it — the app found the files on
+disk and skipped the stages that had already been done.
+
+One provider detail worth recording: Gemini answered three of the highlight
+requests with `503 UNAVAILABLE — high demand`. The provider layer retried
+each one and the stage succeeded. The fallback did not have to invent
+anything, and no output was fabricated — the run used the model's real
+answer after the real retry.
+
+**The measured resource state, read live from `GET /api/resources` at the
+end.** These are the app's own numbers, not a separate audit:
+
+| | |
+|---|---|
+| Total on disk | 4.5 GB |
+| media / work / exports / database | 2.4 GB / 1.1 GB / 1.1 GB / 348.0 KB |
+| Model calls | 12 |
+| Tokens in / out | 105,515 / 2,205 |
+| ffmpeg runs | 24 |
+| ffmpeg time | 16 min |
+| Exported | 438.5 MB (459,835,238 bytes) |
+
+The token counts are what the providers reported and the ffmpeg time is the
+wall clock around the real processes — the same accounting that was wrong in
+Phase 16 until the double-counting defect was fixed. A job that never reached
+the model contributes zero rather than an estimate: the cancelled and failed
+rows below show `llm_calls: 0` because no provider was ever called for them.
+
+The six jobs with resource rows, read from the same endpoint:
+
+| Job | Status | LLM calls | Tokens in/out | ffmpeg runs | ffmpeg time |
+|---|---|---|---|---|---|
+| `8c6a0771907c4495` | done | 10 | 102,262 / 2,195 | 3 | 89.0 s |
+| `3ce7a92e38c44e3e` | cancelled | 0 | 0 / 0 | 2 | 188.6 s |
+| `2e27f97823df42c8` | cancelled | 0 | 0 / 0 | 0 | 0.0 s |
+| `e4a714b3c4c04794` | cancelled | 1 | 1,626 / 5 | 2 | 0.7 s |
+| `84cf122f2d9d4f05` | failed | 1 | 1,627 / 5 | 0 | 0.0 s |
+| `798a3104e2a4494a` | done | 0 | 0 / 0 | 17 | 690.3 s |
+
+Two rows worth reading twice. `798a3104e2a4494a` did seventeen ffmpeg runs
+and 690 seconds of encoding but reports zero model calls and zero tokens: its
+highlights came from a local provider that reports no usage, and it
+contributes zero rather than an estimate. And `3ce7a92e38c44e3e` — the job
+cancelled mid-transcription — shows two ffmpeg runs and 188.6 seconds, the
+audio extraction that had already happened, and no model call at all, because
+it never reached the highlight stage.
 
 ---
 
 ## 4. The migrations, and why they were safe
 
-Twelve migrations, every one of them additive and every one of them verified
+Fourteen migrations, every one of them additive and every one of them verified
 against a copy of the real database rather than a fresh one. The check was
 always the same: row counts before, row counts after, `PRAGMA
 foreign_key_check`, and a second run to confirm it is a no-op.
@@ -141,6 +219,34 @@ real database had 52 — the copy missed the write-ahead log. Copying the
 `.db`, `-wal` and `-shm` together after a checkpoint gave the true picture.
 A migration check that under-counts is worse than no check at all, because it
 would have reported "rows preserved" for data it never looked at.
+
+### v13 and v14 — repairing the rows the audit found
+
+The final audit of the job state machine found five ways a job row could
+disagree with itself (Phase 17 audit, in the phase log). Two of them had
+already written wrong rows into real databases, so the repair ships as two
+append-only migrations rather than as a one-off script:
+
+```
+BEFORE  v13   218 rows · fk issues 0
+AFTER   v14   218 rows · fk issues 0
+             v13: three job rows repaired (two with no finish time, one
+                   carrying the previous attempt's finish time)
+             v14: one job row repaired — a cancelled transcription that
+                   had been reported as a failure
+RE-RUN  v14   no-op · counts identical · rows identical
+```
+
+v13's rule rests on an invariant that is easy to check: for a job in a
+terminal state, the last write to its row *is* the transition into that
+state, because nothing updates a finished job afterwards. So the row's own
+`updated_at` is the moment it finished. A queued or running job has not
+finished at all, so any finish time on it is a leftover.
+
+v14's rule is narrower: the error text is the fingerprint. Only the
+cancellation path ever produced `Transcription cancelled.`, so only that
+job's status changes — a job that failed for a real reason keeps its
+failure.
 
 ---
 
@@ -327,9 +433,10 @@ the *transcribe* stage. The row was left exactly as a crash leaves it —
 — no fatal error in its log, no OS-level event, the process simply gone —
 while job `2e27f97823df42c8` was transcribing a 68-minute interview. On the
 next start the app reported `jobs_resumed: 1` for that job id and the job
-resumed. Two of the three restarts in the history are restarts that had real
-work to recover, and the third — the clean start — says "nothing was in
-flight", which is the honest answer for a normal boot.
+resumed. It happened twice: the same job was caught by the recovery path on
+three separate starts, and `app_restarts` now holds six rows — three with
+real work to recover and three clean boots that honestly say nothing was in
+flight.
 
 A restart with nothing in flight is recorded but **not** announced: it is the
 normal case and does not deserve a notification.
@@ -387,14 +494,18 @@ over the marker heuristics. The hint says the fix, and retryability is a
 property of the cause — a rate limit is worth retrying, a rejected credential
 is not, and offering "try again" for a rejected credential would be a lie.
 
-**Additive migrations only.** Twelve of them, each verified against a copy of
-the real database with row counts compared and a foreign-key check run.
+**Additive migrations only.** Fourteen of them, each verified against a copy of
+the real database with row counts compared and a foreign-key check run. The
+last two repair rows that earlier builds wrote wrong, and they do it by
+invariants that can be checked rather than by guesswork: for a terminal job
+the last write is the transition into that state, and only the cancellation
+path ever produced the error text `Transcription cancelled.`
 
 ---
 
 ## 9. The defects the live runs found — the real return on the work
 
-Thirteen phases found something the tests had not. This is the number worth
+Fourteen phases found something the tests had not. This is the number worth
 remembering, because it is the argument for running the thing rather than
 only testing it.
 
@@ -424,6 +535,35 @@ only testing it.
 | 17 | Notification verb disagreement | "1 job that were interrupted" |
 | 17 | Nav squeezed to 150px | Eight navigation links unreachable |
 | 17 | Tests read the real keyring | A test that fails only on the developer's machine |
+| 17 audit | Retry kept the old finish time | A queued job claimed it had finished before it started |
+| 17 audit | Queued cancel stamped no finish time | A cancelled job looked like it was still in flight |
+| 17 audit | Cancel request outlived the cancellation | **A retried job could never run** |
+| 17 audit | Missing source failed without a finish time | A failed job with no end |
+| 17 audit | Cancelled transcription reported as failure | The job said "failed" when the user stopped it — and the fallback started a second transcription anyway |
+| 17 audit | `/api/ai/health` response model mismatch | The provider panel answered 500 instead of the provider statuses |
+| 17 audit | Server error classified as an auth failure | "Check your API key" for a bug in this app — the key was never the problem |
+
+The last one is the reason the audit was worth doing. It was found by
+cancelling a real job mid-transcription and reading what the row said
+afterwards — not by a test, and not by a code review. The bug was not only
+the wrong status: a cancellation was being treated as an engine failure, so
+the runner fell back to the local Whisper engine, which would have started a
+second full transcription of a job the user had asked to stop.
+
+The two API defects came from the same place. The server tried to answer
+`GET /api/ai/health` with a list of provider-status models while declaring
+the response as `list[dict]`, so FastAPI rejected the response it had just
+built and answered 500. The error classifier then read the message, found
+the string "401" quoted inside the provider's status detail ("Incorrect API
+key provided"), and reported an **auth** failure — telling the user to check
+a key that was never the problem. The endpoint now declares the model it
+actually returns, and a response-validation error is classified as what it
+is: a bug in this app, never the caller's fault.
+
+Both were proven against the running server: before the fix the endpoint
+answered 401 with an empty body; after it, it answers **200** with the real
+provider statuses — Gemini available, and the rejected OpenAI key reported
+honestly as a detail.
 
 ---
 
@@ -441,6 +581,22 @@ call).
 **The ElevenLabs key.** Not yet stored in Settings → API Keys. The engine
 resolves external-first and falls back to local Whisper, which is the
 designed behaviour — so this is a preference, not a fault.
+
+**Ollama is not running.** `http://localhost:11434` is unreachable, so the
+local-provider path cannot be exercised on this machine. The provider
+fallback chain is therefore only three providers deep in practice — Gemini,
+then OpenAI, then Anthropic — rather than the sixteen the preset registry
+knows about. The registry and the chain are tested; the fourth entry in it
+is not.
+
+**The machine's memory.** A 68-minute interview with Whisper *medium* killed
+the server twice — the process disappeared with no fatal error in its log and
+no OS-level event, on a machine with 0.6 GB of 7.8 GB free. Whisper *small*
+completes the same source with the machine healthy. The final verification
+run therefore used the model that is known to finish on this hardware. The
+failure was the environment's, not the pipeline's — but the pipeline's
+response to it (restart recovery, recorded three times in `app_restarts`) was
+itself correct.
 
 **One duplicate video on the user's channel.** `https://youtu.be/OoA4bvUJbAg`
 (title *"I've been doing this since I was 12 years old"*, clip
@@ -488,22 +644,30 @@ transcribes locally and then honestly fails at the highlight stage with
 
 ## 12. The verdict
 
-Eighteen phases. Fifteen feature commits, each pushed before the next began.
-The suite went from 362 to 658 tests, and every phase passed the same six
-gates. The real database holds 32 published clips, 52 exports, 52 upload
-rows, 6 workflows, 36 notifications and a clean foreign-key check at schema
-version 12.
+Eighteen phases. Fifteen feature commits, each pushed before the next began,
+plus the final audit's commit. The suite went from 362 to 672 tests, and every
+phase passed the same six gates. The real database holds 35 published clips,
+55 exports, 55 upload rows, 6 workflows, 42 notifications and a clean
+foreign-key check at schema version 14.
 
 The platform is local-first, multi-provider, multi-key, multi-account and
 multi-channel, with a native visual workflow builder, real resource
 accounting, honest failure reporting, and a restart that is recorded and
 shown rather than silently swallowed.
 
-Twenty-two defects were found by running the thing against real data, and
-every one of them is fixed with a regression test. The three failures in the
-job history are honest failures with honest messages — a 56-second test video
-that genuinely contains no self-contained highlight. The twenty skipped
+Twenty-nine defects were found by running the thing against real data, and
+every one of them is fixed with a regression test. The single failure in the
+job history is an honest failure with an honest message — a 56-second test
+video that genuinely contains no self-contained highlight. The twenty skipped
 uploads are the duplicate guard working.
+
+The last audit — seven defects in the job state machine and the API around
+it — was found by reading the real database after a live run and asking
+whether every row agreed with itself. One of them meant a retried job could
+never run. One of them meant a cancelled job would start a second
+transcription anyway. One of them told the user to check an API key when the
+bug was in the server's own response model. None of them would have been
+caught by reading the code; all of them were caught by running it.
 
 Two items remain, both outside the code and both named in §10: the YouTube
 quota increase (a manual Google account action) and one duplicate video to

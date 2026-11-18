@@ -250,6 +250,136 @@ suite's own charter (`nothing in the test suite may touch the user's real
 - Final system validation report for phases 0–17 written to
   `.planning/VALIDATION-REPORT.md`.
 
+### Phase 17 audit — the job state transitions (COMPLETE)
+
+The last thing the upgrade owed was an audit of the job state machine
+itself: every row in `jobs` had to agree with every other row about what
+happened to that job. Reading the real database found seven ways it did not.
+
+**How the audit started.** Job `e4a714b3c4c04794` had been *failed* at
+16:52:33 and was *cancelled* at 17:28:02 — and its `finished_at` still said
+16:52:33. The access log showed what had happened in between: a `POST
+/api/jobs/{id}/retry` followed by a `POST /api/jobs/{id}/cancel`, both from
+the JobProgress page. The job had failed, been retried, waited behind
+another job in the queue, and then been cancelled while it was still
+waiting.
+
+**Seven defects, each fixed with a regression test.**
+
+1. *A retry left the previous attempt's finish time behind.*
+   `api/jobs.py::retry_job` reset the status, the error and the progress,
+   but not `finished_at` — so a queued job claimed it had finished before
+   the retry even started. The retry now clears `finished_at` and
+   `started_at`: both belonged to the attempt that ended.
+
+2. *Cancelling a queued job never stamped a finish time.* The queue
+   cancelled a waiting job with a bare `status="cancelled"`, so the row
+   had no finish time at all — indistinguishable from a job still in
+   flight. Two rows in the real database had exactly that. The queue now
+   stamps `finished_at`.
+
+3. *The cancel request outlived the cancellation.* This was the serious
+   one. `JobQueue._cancel_requested` is discarded when a runner finishes —
+   but a job cancelled while it was still **queued** never had a runner, so
+   its flag stayed set forever. Retrying that job put it back in the
+   queue, where the worker cancelled it the instant it started: **a retried
+   job could never run.** The queue now has `forget_cancel()`, and the
+   retry endpoint calls it — a retry is an explicit instruction to run the
+   job again.
+
+4. *A job whose source had gone missing was marked failed without a finish
+   time.* The queue's own failure path (`Source not found.`) now stamps one.
+
+5. *A cancelled transcription was reported as a failed job.* This one
+   surfaced live: cancelling job `2e27f97823df42c8` mid-transcription left
+   it `failed` with the error `Transcription cancelled.` The speech layer
+   raised its cancellation as an ordinary engine error, so the runner
+   treated it as a failure — and, worse, **fell back to the local Whisper
+   engine**, which would have started a second full transcription of a job
+   the user had asked to stop. The speech layer now has its own
+   `SpeechCancelled` type, and the runner checks it *before* the fallback:
+   a cancellation is never a reason to try another engine.
+
+6. *`GET /api/ai/health` answered 500 instead of the provider statuses.*
+   The endpoint returned a list of `ProviderStatusOut` models while
+   declaring `list[dict]`, so FastAPI rejected the response it had just
+   built. The endpoint now declares the model it actually returns.
+
+7. *A server-side response bug was classified as an auth failure.* The
+   error classifier reads markers out of the message, and the message
+   quoted the provider's own status detail — including `"Incorrect API key
+   provided"` and a `401`. So a bug in this app was reported as
+   **"check your API key"**, sending the user to fix something that was
+   never broken. A `ResponseValidationError` is now classified as
+   `internal`/500, before the marker matching — the app's own response
+   bug is never the caller's fault.
+
+**Two repair migrations.** Both append-only, both verified against a
+WAL-safe copy of the real database (the `.db`, `-wal` and `-shm` together,
+after a checkpoint — a copy without the write-ahead log under-counts, and a
+migration check that under-counts is worse than none).
+
+- **v13** repairs the rows the old code wrote wrong: a terminal job whose
+  `finished_at` was missing or older than its own last write now carries
+  that write's time, and a queued or running job never carries a finish
+  time. Verified: 218 rows before and after, foreign-key check clean, a
+  re-run is a no-op, and exactly the three broken rows changed.
+- **v14** repairs the one row the cancellation bug produced: a job whose
+  error is exactly `Transcription cancelled.` was a job the user stopped,
+  not a job that failed. The error text is the fingerprint — only the
+  cancellation path produces it. Verified the same way: 222 rows before and
+  after, one row changed, a re-run is a no-op.
+
+**Proved live, against the running app.**
+
+- The queued-cancel path: a job cancelled while it was waiting behind
+  another job came back `cancelled` with `finished_at` stamped.
+- The retry path: retrying that same job came back `queued` with
+  `finished_at` and `started_at` both null, and the queue's cancel flag
+  cleared.
+- The recovery path: the restart after the second silent death resumed the
+  interrupted job and reported `jobs_resumed: 1` for its exact id — the
+  third restart in the history with real work to recover.
+- The cancellation path: cancelling job `2e27f97823df42c8` mid-transcription
+  used to mark it failed; the repaired row now reads `cancelled`, and the
+  run that proved it was the first to use the fixed code. Job
+  `3ce7a92e38c44e3e` was then cancelled mid-transcription on purpose, and
+  came back `cancelled` with `error: None` — the old code produced
+  `failed` and "Transcription cancelled.".
+- The health path: `GET /api/ai/health` answered **401 with an empty body**
+  before the fix. It now answers **200** with the real provider statuses —
+  Gemini available, and the rejected OpenAI key reported honestly as a
+  detail rather than crashing the endpoint.
+
+**The final green run, end to end.** Job `8c6a0771907c4495` — a 68-minute
+interview, Whisper *small*, three clips of 20–60 s, the Gemini provider —
+finished in 2 minutes 37 seconds: 3 clips with real titles and scores
+(92 / 91 / 91), 3 exports that `ffprobe` confirms are h264 1080×1920
+(true 9:16) at 45.2 s / 53.0 s / 24.7 s, and 3 videos published and
+confirmed through YouTube's own oEmbed lookup (`m8GFe59Gejw`,
+`i_cis9lIUyc`, `vpIg0wnPQE8`). Ten real LLM calls, 102,262 input tokens,
+2,195 output tokens; 3 ffmpeg runs and 89.0 seconds of encoding. Gemini
+answered three highlight requests with `503 — high demand`; the provider
+layer retried and the stage succeeded, with nothing fabricated.
+
+The transcription was not recomputed: the audio and transcript from the
+earlier run of the same source with the same model were already in the work
+directory, and the pipeline reuses them by design. That is the resume path,
+not a way around it.
+
+**The environment, honestly.** The 68-minute interview with Whisper
+**medium** killed the server twice — the process disappeared with no fatal
+error in its log and no OS-level event, on a machine with 0.6 GB of 7.8 GB
+free. Whisper **small** completes the same source with the machine healthy.
+The final verification run therefore used the model that is known to finish
+on this hardware. The failure was the environment's, not the pipeline's — but
+the pipeline's response to it (restart recovery) was itself correct, and is
+now recorded three times over.
+
+- Tests: 14 new (`tests/test_job_state_transitions.py`, plus one each in
+  `tests/test_frontend_api.py` and `tests/test_errors.py`); suite **672
+  passed**; ruff + tsc + build clean.
+
 ### Phase 16 — Resource optimisation: measure, bound, reclaim, expose (COMPLETE)
 
 - **Measure.** `resources.py` owns the accounting. `disk_usage()` walks the

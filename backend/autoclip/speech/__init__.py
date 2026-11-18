@@ -10,13 +10,14 @@ downstream knows or cares which one ran — ``Transcript.source`` records it.
 
 from __future__ import annotations
 
-from .base import SpeechError, resolve_engine
+from .base import SpeechCancelled, SpeechError, resolve_engine
 from .elevenlabs import ElevenLabsSTT
 from .local import LocalWhisperSTT
 
 __all__ = [
     "ElevenLabsSTT",
     "LocalWhisperSTT",
+    "SpeechCancelled",
     "SpeechError",
     "resolve_engine",
 ]

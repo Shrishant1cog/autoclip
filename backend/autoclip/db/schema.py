@@ -512,6 +512,62 @@ def _migration_v12(conn: sqlite3.Connection) -> None:
     conn.executescript(_V12)
 
 
+# --- v13: repair the job timestamps (Phase 17 audit) ------------------------
+
+_V13 = """
+-- Repair the job finish times an older build could leave wrong.
+--
+-- Three ways it went wrong, all in the job state machine:
+--
+--   * cancelling a job that was still queued never stamped a finish time,
+--     so a finished job looked like one still in flight;
+--   * retrying a job kept the previous attempt's finish time, so the row
+--     claimed it had finished before the retry even started;
+--   * a job whose source had gone missing was marked failed without one.
+--
+-- For a job in a terminal state the last write *is* the transition into
+-- that state — nothing updates a finished job afterwards — so the row's own
+-- updated_at is the moment it finished. And a job that is queued or running
+-- has not finished at all, so any finish time on it is a leftover.
+UPDATE jobs
+SET finished_at = updated_at
+WHERE status IN ('done', 'failed', 'cancelled')
+  AND (finished_at IS NULL OR finished_at < updated_at);
+
+UPDATE jobs
+SET finished_at = NULL
+WHERE status IN ('queued', 'running')
+  AND finished_at IS NOT NULL;
+"""
+
+
+def _migration_v13(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V13)
+
+
+# --- v14: a cancelled transcription was reported as a failure ----------------
+
+_V14 = """
+-- An older build reported a cancelled transcription as a failed job.
+--
+-- The speech layer raised its cancellation as an ordinary engine error, so
+-- the runner recorded the job as failed and — worse — fell back to another
+-- engine, which would have started a second transcription for a job the
+-- user had asked to stop.
+--
+-- The error text is the fingerprint: only the cancellation path produces it.
+-- A job that failed for any other reason keeps its status.
+UPDATE jobs
+SET status = 'cancelled'
+WHERE status = 'failed'
+  AND error = 'Transcription cancelled.';
+"""
+
+
+def _migration_v14(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V14)
+
+
 #: Ordered migrations. Index + 1 is the resulting ``user_version``.
 #: Append only — never edit a migration that has shipped.
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
@@ -527,6 +583,8 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v10,
     _migration_v11,
     _migration_v12,
+    _migration_v13,
+    _migration_v14,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)

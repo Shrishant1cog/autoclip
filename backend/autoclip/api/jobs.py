@@ -147,7 +147,22 @@ async def retry_job(job_id: str) -> JobOut:
             detail=f"Only failed or cancelled jobs can be retried (this one is {job.status}).",
         )
 
-    await asyncio.to_thread(store.update_job, job_id, status="queued", error=None, progress=0.0)
+    # A retry is an explicit instruction to run the job again, so it clears
+    # the cancel request a previous cancellation left behind. Without this,
+    # a job cancelled while it sat in the queue can never run: the queue's
+    # flag is only cleared when a runner finishes, and this job never had one.
+    queue.forget_cancel(job_id)
+    # The previous attempt's timestamps go with it. Leaving ``finished_at``
+    # behind makes a queued job claim it finished before this run started.
+    await asyncio.to_thread(
+        store.update_job,
+        job_id,
+        status="queued",
+        error=None,
+        progress=0.0,
+        finished_at=None,
+        started_at=None,
+    )
     queue.notify()
 
     updated = await asyncio.to_thread(store.get_job, job_id)

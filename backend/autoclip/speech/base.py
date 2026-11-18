@@ -23,6 +23,16 @@ class SpeechError(RuntimeError):
     """A speech engine could not produce a transcript."""
 
 
+class SpeechCancelled(SpeechError):
+    """The transcription stopped because the job was cancelled.
+
+    Not a failure — the user asked for it. It is its own type so the runner
+    can tell "the engine broke" from "the user stopped the job": a
+    cancellation must never trigger the fallback to another engine, because
+    the fallback would keep a job running that the user asked to stop.
+    """
+
+
 class SpeechEngine(Protocol):
     """One speech-to-text backend."""
 
@@ -79,6 +89,7 @@ def resolve_engine(settings: Settings) -> tuple[SpeechEngine, str | None]:
 
 
 __all__ = [
+    "SpeechCancelled",
     "SpeechEngine",
     "SpeechError",
     "resolve_engine",

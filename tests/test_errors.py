@@ -59,6 +59,34 @@ def test_auth_failure_is_not_retryable() -> None:
     assert "Settings" in info.hint
 
 
+def test_a_response_validation_error_is_never_an_auth_failure() -> None:
+    """A response this app could not build is a bug, not a bad key.
+
+    The message can quote anything the payload contained — a provider's
+    "401" among it — so the markers must not be read from it. Reporting
+    this as an auth failure would tell the user to check a key that was
+    never the problem.
+    """
+    from fastapi.exceptions import ResponseValidationError
+
+    exc = ResponseValidationError(
+        [
+            {
+                "type": "dict_type",
+                "loc": ("response", 0),
+                "msg": "Input should be a valid dictionary",
+                "input": "Error code: 401 - Incorrect API key provided.",
+            }
+        ],
+        body="[]",
+    )
+
+    info = errors.classify(exc)
+
+    assert info.code == errors.INTERNAL
+    assert info.status == 500
+
+
 def test_network_failure_is_retryable() -> None:
     info = errors.classify(RuntimeError("Connection reset by peer"))
     assert info.code == errors.NETWORK

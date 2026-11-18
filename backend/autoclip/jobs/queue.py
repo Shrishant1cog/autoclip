@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from ..config import Settings
 from ..config import load as load_settings
 from ..db import store
-from ..db.models import Job
+from ..db.models import Job, utcnow
 from ..pipeline.runner import JobCancelled, PipelineRunner
 from .events import Event, broker, progress_event
 
@@ -89,7 +89,10 @@ class JobQueue:
         resumed: list[str] = []
         for job in interrupted:
             log.info("Requeuing job %s, interrupted by a restart.", job.id)
-            store.update_job(job.id, status="queued", error=None)
+            # ``finished_at`` is cleared as well: a job that is waiting to run
+            # again has not finished, and an older build's retry could leave
+            # the previous attempt's finish time behind.
+            store.update_job(job.id, status="queued", error=None, finished_at=None)
             store.mark_job_resumed(job.id)
             resumed.append(job.id)
         return resumed
@@ -104,9 +107,24 @@ class JobQueue:
 
         self._cancel_requested.add(job_id)
         if job.status == "queued":
-            store.update_job(job_id, status="cancelled")
+            # The job has not started, so it finishes here rather than in the
+            # runner. Stamp the finish time: a job that reached a terminal
+            # state without one is indistinguishable from one still in
+            # flight, and its history is wrong in a way nothing else corrects.
+            store.update_job(job_id, status="cancelled", finished_at=utcnow())
             broker.publish(Event(type="cancelled", job_id=job_id))
         return True
+
+    def forget_cancel(self, job_id: str) -> None:
+        """Clear a pending cancel request so the job is allowed to run.
+
+        The flag is discarded when a runner finishes — but a job cancelled
+        while it was still queued never has a runner, so its flag would
+        outlive the cancellation and kill the job the moment a later retry
+        put it back in the queue. A retry is an explicit instruction to run
+        the job, so it clears the flag.
+        """
+        self._cancel_requested.discard(job_id)
 
     def is_cancelled(self, job_id: str) -> bool:
         return job_id in self._cancel_requested
@@ -135,7 +153,12 @@ class JobQueue:
     async def _run_one(self, job: Job) -> None:
         source = await asyncio.to_thread(store.get_source, job.source_id)
         if source is None:
-            store.update_job(job.id, status="failed", error="Source not found.")
+            store.update_job(
+                job.id,
+                status="failed",
+                error="Source not found.",
+                finished_at=utcnow(),
+            )
             broker.publish(Event(type="failed", job_id=job.id, data={"error": "Source not found."}))
             return
 

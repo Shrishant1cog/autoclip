@@ -381,6 +381,11 @@ class PipelineRunner:
                 on_progress=self._stage_progress(stage),
                 cancelled=self._is_cancelled,
             )
+        except speech.SpeechCancelled as exc:
+            # The job was cancelled, not broken. This is checked before the
+            # fallback for a reason: falling back to another engine would
+            # start a second transcription for a job the user asked to stop.
+            raise JobCancelled("Transcription cancelled.") from exc
         except speech.SpeechError as exc:
             if pinned:
                 raise

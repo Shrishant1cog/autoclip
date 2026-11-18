@@ -212,6 +212,12 @@ def classify(exc: BaseException, *, hint: str = "") -> ErrorInfo:
         code = MEDIA
     elif name in ("ValidationError", "WorkflowValidationError"):
         code = VALIDATION
+    elif name == "ResponseValidationError":
+        # The server built a response it could not serialise. That is a bug
+        # in this app, never the caller's fault — and the message can quote
+        # anything (a provider's "401" among it), so it must not be read as
+        # a marker. This is checked before the markers for that reason.
+        code = INTERNAL
     elif _has(text, _QUOTA_MARKERS):
         code = QUOTA
     elif _has(text, _RATE_MARKERS):

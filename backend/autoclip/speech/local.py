@@ -13,7 +13,7 @@ from pathlib import Path
 
 from ..config import TranscriptionSettings
 from ..pipeline import transcribe as local_transcribe
-from .base import SpeechError
+from .base import SpeechCancelled, SpeechError
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +49,11 @@ class LocalWhisperSTT:
                 cancelled=cancelled,
             )
         except local_transcribe.TranscriptionError as exc:
+            # A cancellation is not a failure: the engine noticed the job was
+            # cancelled and stopped. Reporting it as an error would tell the
+            # user their job had failed when they stopped it themselves.
+            if cancelled is not None and cancelled():
+                raise SpeechCancelled(str(exc)) from exc
             raise SpeechError(str(exc)) from exc
 
 
