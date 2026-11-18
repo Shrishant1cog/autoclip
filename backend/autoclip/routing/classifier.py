@@ -8,6 +8,7 @@ uploads go to the default channel — the pre-routing behaviour, preserved.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -147,7 +148,7 @@ def classification_for(clip_id: str) -> dict[str, Any] | None:
 def list_rules(*, enabled_only: bool = False) -> list[dict[str, Any]]:
     query = (
         "SELECT id, name, match_keyword, target_channel_id, priority, enabled,"
-        " created_at, updated_at FROM routing_rules"
+        " extra_channel_ids_json, created_at, updated_at FROM routing_rules"
     )
     if enabled_only:
         query += " WHERE enabled = 1"
@@ -165,8 +166,9 @@ def _rule_row(r: tuple[Any, ...]) -> dict[str, Any]:
         "target_channel_id": r[3],
         "priority": r[4],
         "enabled": bool(r[5]),
-        "created_at": r[6],
-        "updated_at": r[7],
+        "extra_channel_ids": json.loads(r[6] or "[]"),
+        "created_at": r[7],
+        "updated_at": r[8],
     }
 
 
@@ -174,7 +176,7 @@ def get_rule(rule_id: str) -> dict[str, Any] | None:
     with connection() as conn:
         row = conn.execute(
             "SELECT id, name, match_keyword, target_channel_id, priority, enabled,"
-            " created_at, updated_at FROM routing_rules WHERE id = ?",
+            " extra_channel_ids_json, created_at, updated_at FROM routing_rules WHERE id = ?",
             (rule_id,),
         ).fetchone()
     return _rule_row(row) if row else None
@@ -187,15 +189,17 @@ def add_rule(
     name: str = "",
     priority: int = 100,
     enabled: bool = True,
+    extra_channel_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     now = utcnow()
     rule_id = new_id()
     with connection() as conn:
         conn.execute(
             "INSERT INTO routing_rules (id, name, match_keyword, target_channel_id,"
-            " priority, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            " priority, enabled, extra_channel_ids_json, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (rule_id, name, match_keyword.lower(), target_channel_id, priority,
-             int(enabled), now, now),
+             int(enabled), json.dumps(extra_channel_ids or []), now, now),
         )
     result = get_rule(rule_id)
     assert result is not None
@@ -203,12 +207,21 @@ def add_rule(
 
 
 def update_rule(rule_id: str, **fields: Any) -> dict[str, Any] | None:
-    allowed = {"name", "match_keyword", "target_channel_id", "priority", "enabled"}
+    allowed = {
+        "name",
+        "match_keyword",
+        "target_channel_id",
+        "priority",
+        "enabled",
+        "extra_channel_ids",
+    }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return get_rule(rule_id)
     if "match_keyword" in updates:
         updates["match_keyword"] = str(updates["match_keyword"]).lower()
+    if "extra_channel_ids" in updates:
+        updates["extra_channel_ids_json"] = json.dumps(updates.pop("extra_channel_ids") or [])
     sets = ", ".join(f"{k} = ?" for k in updates)
     with connection() as conn:
         conn.execute(
@@ -255,3 +268,62 @@ def resolve_target_channel(
                 return channel
 
     return accounts_store.default_channel()
+
+
+def resolve_target_channels(
+    clip_id: str, settings: config.Settings | None = None
+) -> list[dict[str, Any]]:
+    """Every channel this clip should publish to, primary first.
+
+    Routing rules name a primary target plus optional extra channels; that is
+    the fan-out used by auto-publishing. Channels whose own ``auto_upload`` is
+    off are dropped from the fan-out, so a subscriber-only channel is not
+    published to by surprise. With no channel profiles at all this returns an
+    empty list, and the caller falls back to the legacy single upload.
+    """
+    settings = settings or config.load()
+    classification = classification_for(clip_id)
+    hay = (classification["category"] if classification is not None else "").lower()
+
+    primary: dict[str, Any] | None = None
+    extras: list[dict[str, Any]] = []
+    for rule in list_rules(enabled_only=True):
+        if rule["match_keyword"] in hay:
+            channel = accounts_store.get_channel(rule["target_channel_id"])
+            if channel is not None:
+                log.info(
+                    "Routing clip %s to %s via rule %r.",
+                    clip_id, channel["channel_id"], rule["match_keyword"],
+                )
+                primary = channel
+                for extra_id in rule.get("extra_channel_ids") or []:
+                    extra = accounts_store.get_channel(extra_id)
+                    if extra is not None:
+                        extras.append(extra)
+            break
+    else:
+        default = accounts_store.default_channel()
+        if default is not None:
+            primary = default
+
+    if primary is None:
+        return []
+
+    ordered: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for channel in [primary, *extras]:
+        # Two profiles can point at the same underlying YouTube channel (for
+        # example the default profile plus a hand-added duplicate); publishing
+        # twice to one channel would be a duplicate upload, so collapse them.
+        identity = f"{channel['account_id']}:{channel['channel_id'] or channel['id']}"
+        if identity in seen:
+            continue
+        seen.add(identity)
+        if not channel.get("auto_upload"):
+            log.info(
+                "Channel %s has auto-upload off; skipping fan-out for clip %s.",
+                channel["channel_id"], clip_id,
+            )
+            continue
+        ordered.append(channel)
+    return ordered

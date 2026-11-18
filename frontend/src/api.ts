@@ -42,6 +42,7 @@ export interface UploadRecord {
   id: string
   export_id: string
   clip_id: string
+  channel_row_id: string
   status: 'pending' | 'uploading' | 'done' | 'failed' | 'skipped'
   video_id: string | null
   title: string
@@ -63,6 +64,7 @@ export interface ExportRecord {
   created_at: string
   download_url: string
   upload: UploadRecord | null
+  uploads: UploadRecord[]
 }
 
 export type ClipStatus = 'candidate' | 'kept' | 'discarded' | 'exported' | 'invalid'

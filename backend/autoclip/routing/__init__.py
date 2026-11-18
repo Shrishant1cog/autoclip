@@ -9,6 +9,7 @@ from .classifier import (
     get_rule,
     list_rules,
     resolve_target_channel,
+    resolve_target_channels,
     save_classification,
     update_rule,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "get_rule",
     "list_rules",
     "resolve_target_channel",
+    "resolve_target_channels",
     "save_classification",
     "update_rule",
 ]

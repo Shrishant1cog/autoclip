@@ -379,6 +379,53 @@ def _migration_v8(conn: sqlite3.Connection) -> None:
     conn.executescript(_V8)
 
 
+# --- v9: multi-channel publishing fan-out (Phase 10) -----------------------
+
+_V9 = """
+PRAGMA foreign_keys = OFF;
+-- One upload row per (export, channel). Channel '' means the legacy default.
+CREATE TABLE youtube_uploads_v9 (
+    id             TEXT PRIMARY KEY,
+    export_id      TEXT NOT NULL REFERENCES exports(id) ON DELETE CASCADE,
+    clip_id        TEXT NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+    channel_row_id TEXT NOT NULL DEFAULT '',
+    status         TEXT NOT NULL DEFAULT 'pending'
+                   CHECK (status IN ('pending','uploading','done','failed','skipped')),
+    video_id       TEXT,
+    title          TEXT NOT NULL DEFAULT '',
+    description    TEXT NOT NULL DEFAULT '',
+    tags_json      TEXT NOT NULL DEFAULT '[]',
+    privacy        TEXT NOT NULL DEFAULT 'public',
+    error          TEXT,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+INSERT INTO youtube_uploads_v9 (
+    id, export_id, clip_id, channel_row_id, status, video_id, title, description,
+    tags_json, privacy, error, created_at, updated_at
+)
+SELECT id, export_id, clip_id, '', status, video_id, title, description,
+       tags_json, privacy, error, created_at, updated_at
+FROM youtube_uploads;
+DROP TABLE youtube_uploads;
+ALTER TABLE youtube_uploads_v9 RENAME TO youtube_uploads;
+CREATE UNIQUE INDEX idx_youtube_uploads_export_channel
+    ON youtube_uploads(export_id, channel_row_id);
+CREATE INDEX idx_youtube_uploads_status ON youtube_uploads(status);
+
+-- Per-channel publishing profile additions.
+ALTER TABLE youtube_channels ADD COLUMN title_suffix TEXT NOT NULL DEFAULT '';
+
+-- A rule may fan a clip out to additional channels besides its primary target.
+ALTER TABLE routing_rules ADD COLUMN extra_channel_ids_json TEXT NOT NULL DEFAULT '[]';
+PRAGMA foreign_keys = ON;
+"""
+
+
+def _migration_v9(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V9)
+
+
 #: Ordered migrations. Index + 1 is the resulting ``user_version``.
 #: Append only — never edit a migration that has shipped.
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
@@ -390,6 +437,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v6,
     _migration_v7,
     _migration_v8,
+    _migration_v9,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)

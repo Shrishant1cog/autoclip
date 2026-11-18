@@ -59,6 +59,9 @@ _pending: dict[str, _Pending] = {}
 
 _token_cache: dict[str, Any] = {"access_token": "", "expires_at": 0.0}
 
+#: Access tokens per connected Google account (multi-account publishing).
+_tokens_by_account: dict[str, dict[str, Any]] = {}
+
 
 # --------------------------------------------------------------------------
 # Configuration checks
@@ -228,9 +231,33 @@ def _cache_token(access_token: str, expires_in: int) -> None:
     _token_cache["expires_at"] = time.monotonic() + max(expires_in - 60, 30)
 
 
-def access_token(settings: config.Settings | None = None) -> str:
-    """Return a valid access token, refreshing it when necessary."""
+def access_token(
+    settings: config.Settings | None = None, account_id: str | None = None
+) -> str:
+    """Return a valid access token, refreshing it when necessary.
+
+    With ``account_id`` the token belongs to that connected Google account;
+    without it the legacy single-account token is used.
+    """
     settings = settings or config.load()
+    if account_id:
+        cached = _tokens_by_account.get(account_id)
+        if cached and time.monotonic() < cached["expires_at"]:
+            return cached["access_token"]
+        from .accounts import refresh_token_for
+
+        refresh_token = refresh_token_for(account_id, settings)
+        if not refresh_token:
+            raise OAuthError(
+                "No stored credential for that Google account. Reconnect it in Settings."
+            )
+        token, expires_in = _refresh(refresh_token, settings)
+        _tokens_by_account[account_id] = {
+            "access_token": token,
+            "expires_at": time.monotonic() + max(expires_in - 60, 30),
+        }
+        return token
+
     if _token_cache["access_token"] and time.monotonic() < _token_cache["expires_at"]:
         return _token_cache["access_token"]
 
@@ -238,6 +265,12 @@ def access_token(settings: config.Settings | None = None) -> str:
     if not refresh_token:
         raise OAuthError("No YouTube channel is connected. Press Connect YouTube channel.")
 
+    token, expires_in = _refresh(refresh_token, settings)
+    _cache_token(token, expires_in)
+    return token
+
+
+def _refresh(refresh_token: str, settings: config.Settings) -> tuple[str, int]:
     client_id = settings.youtube.client_id
     client_secret = config.get_secret(config.YOUTUBE_CLIENT_SECRET_KEY, settings)
     if not client_id or not client_secret:
@@ -254,8 +287,7 @@ def access_token(settings: config.Settings | None = None) -> str:
     token = tokens.get("access_token", "")
     if not token:
         raise OAuthError("Google did not return an access token for the saved channel.")
-    _cache_token(token, int(tokens.get("expires_in", 3600)))
-    return token
+    return token, int(tokens.get("expires_in", 3600))
 
 
 def _post_token(payload: dict[str, str]) -> dict[str, Any]:

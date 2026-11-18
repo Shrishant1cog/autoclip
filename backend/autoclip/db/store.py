@@ -460,21 +460,23 @@ def create_upload(upload: YouTubeUpload) -> YouTubeUpload:
     """
     with connection() as conn:
         existing = conn.execute(
-            "SELECT * FROM youtube_uploads WHERE export_id = ?", (upload.export_id,)
+            "SELECT * FROM youtube_uploads WHERE export_id = ? AND channel_row_id = ?",
+            (upload.export_id, upload.channel_row_id),
         ).fetchone()
         if existing:
             return YouTubeUpload.from_row(existing)
         conn.execute(
             """
             INSERT INTO youtube_uploads (
-                id, export_id, clip_id, status, video_id, title, description,
-                tags_json, privacy, error, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, export_id, clip_id, channel_row_id, status, video_id, title,
+                description, tags_json, privacy, error, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 upload.id,
                 upload.export_id,
                 upload.clip_id,
+                upload.channel_row_id,
                 upload.status,
                 upload.video_id,
                 upload.title,
@@ -496,11 +498,23 @@ def get_upload(upload_id: str) -> YouTubeUpload | None:
 
 
 def get_upload_for_export(export_id: str) -> YouTubeUpload | None:
+    """The first upload row for an export (legacy default channel first)."""
     with connection() as conn:
         row = conn.execute(
-            "SELECT * FROM youtube_uploads WHERE export_id = ?", (export_id,)
+            "SELECT * FROM youtube_uploads WHERE export_id = ? "
+            "ORDER BY (channel_row_id <> '') ASC, created_at ASC LIMIT 1",
+            (export_id,),
         ).fetchone()
     return YouTubeUpload.from_row(row) if row else None
+
+
+def list_uploads_for_export(export_id: str) -> list[YouTubeUpload]:
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM youtube_uploads WHERE export_id = ? ORDER BY created_at ASC",
+            (export_id,),
+        ).fetchall()
+    return [YouTubeUpload.from_row(r) for r in rows]
 
 
 def list_uploads_for_clip(clip_id: str) -> list[YouTubeUpload]:

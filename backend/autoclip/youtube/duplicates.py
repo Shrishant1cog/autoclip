@@ -69,7 +69,11 @@ def conflict_for(upload: YouTubeUpload) -> YouTubeUpload | None:
     in_flight: list[YouTubeUpload] = []
     queued: list[YouTubeUpload] = []
     for row in rows:
-        if row.id == upload.id or row.clip_id != upload.clip_id:
+        if row.id == upload.id:
+            continue
+        # The same clip legitimately fans out to several channels; a duplicate
+        # is only a duplicate within one destination channel.
+        if row.clip_id != upload.clip_id or row.channel_row_id != upload.channel_row_id:
             continue
         if row.status == "done":
             done.append(row)
@@ -134,9 +138,9 @@ def _keep_order(rows: list[YouTubeUpload]) -> list[YouTubeUpload]:
 
 
 def _same_clip(rows: list[YouTubeUpload], include_failed: bool) -> list[DuplicateGroup]:
-    by_clip: dict[str, list[YouTubeUpload]] = defaultdict(list)
+    by_clip: dict[tuple[str, str], list[YouTubeUpload]] = defaultdict(list)
     for row in rows:
-        by_clip[row.clip_id].append(row)
+        by_clip[(row.clip_id, row.channel_row_id)].append(row)
 
     groups: list[DuplicateGroup] = []
     for clip_rows in by_clip.values():
@@ -158,7 +162,7 @@ def _identical_files(
     rows: list[YouTubeUpload], include_failed: bool, claimed: set[str]
 ) -> list[DuplicateGroup]:
     """Hash exports only when two uploads share a file size, so singles are free."""
-    by_size: dict[int, list[tuple[YouTubeUpload, Path]]] = defaultdict(list)
+    by_size: dict[tuple[int, str], list[tuple[YouTubeUpload, Path]]] = defaultdict(list)
     for row in rows:
         export = store.get_export(row.export_id)
         if export is None:
@@ -169,7 +173,7 @@ def _identical_files(
         except OSError:
             continue
         if size > 0:
-            by_size[size].append((row, path))
+            by_size[(size, row.channel_row_id)].append((row, path))
 
     groups: list[DuplicateGroup] = []
     for same_size in by_size.values():
@@ -201,13 +205,13 @@ def _identical_files(
 
 
 def _same_title(rows: list[YouTubeUpload], claimed: set[str]) -> list[DuplicateGroup]:
-    by_title: dict[str, list[YouTubeUpload]] = defaultdict(list)
+    by_title: dict[tuple[str, str], list[YouTubeUpload]] = defaultdict(list)
     for row in rows:
         if row.id in claimed:
             continue
         title = _normalise(row.title)
         if title:
-            by_title[title].append(row)
+            by_title[(title, row.channel_row_id)].append(row)
 
     groups: list[DuplicateGroup] = []
     for same_title in by_title.values():

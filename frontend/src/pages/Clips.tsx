@@ -285,9 +285,21 @@ function ClipLibraryRow({
           </a>
         )}
 
-          {latest?.upload && (
-            <UploadBadge upload={latest.upload} onRetry={() => onRetryUpload(latest.upload!.id)} />
-          )}
+        {(() => {
+          const rows =
+            latest?.uploads && latest.uploads.length > 0
+              ? latest.uploads
+              : latest?.upload
+                ? [latest.upload]
+                : []
+          return rows.map((upload) => (
+            <UploadBadge
+              key={upload.id}
+              upload={upload}
+              onRetry={() => onRetryUpload(upload.id)}
+            />
+          ))
+        })()}
 
         {clip.validation && !clip.validation.ok && (
           <span

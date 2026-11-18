@@ -35,23 +35,36 @@ class DuplicateUploadError(uploader.YouTubeError):
 
 
 def enqueue_export(export_id: str, settings: config.Settings | None = None) -> YouTubeUpload | None:
-    """Queue an upload for ``export_id`` when automation allows it.
+    """Queue uploads for ``export_id`` and return the first row, if any.
 
-    Returns the upload row (new or already present) or ``None`` when the export
-    is not eligible. Never raises: an upload problem must not fail a pipeline
-    that has already produced a perfectly good file.
+    Kept for callers that only need a yes/no plus a row to report; the full
+    fan-out is :func:`enqueue_export_all`.
+    """
+    rows = enqueue_export_all(export_id, settings)
+    return rows[0] if rows else None
+
+
+def enqueue_export_all(
+    export_id: str, settings: config.Settings | None = None
+) -> list[YouTubeUpload]:
+    """Queue one upload per target channel for ``export_id``.
+
+    Routing rules decide the channels; when there are no channel profiles the
+    legacy single-row behaviour (``channel_row_id = ''``) is used so existing
+    installs keep working. Never raises: an upload problem must not fail a
+    pipeline that has already produced a perfectly good file.
     """
     try:
         settings = settings or config.load()
         if not settings.youtube.auto_upload:
-            return None
+            return []
         if not oauth.is_connected(settings):
-            return None
+            return []
 
         export = store.get_export(export_id)
         if export is None:
             log.warning("Cannot enqueue upload: export %s is missing.", export_id)
-            return None
+            return []
 
         # Phase 9: a clip that failed validation is never published.
         try:
@@ -61,35 +74,75 @@ def enqueue_export(export_id: str, settings: config.Settings | None = None) -> Y
             clip = None
         if clip is not None and clip.status == "invalid":
             log.warning("Not queueing upload for invalid clip %s.", clip.id)
-            return None
+            return []
 
-        upload = store.create_upload(
-            YouTubeUpload(
-                id=new_id(),
-                export_id=export.id,
-                clip_id=export.clip_id,
-                privacy=settings.youtube.privacy,
+        try:
+            from ..routing import resolve_target_channels
+
+            targets = resolve_target_channels(export.clip_id, settings)
+        except Exception:  # routing must never block publishing
+            log.warning("Channel routing failed; using the default destination.", exc_info=True)
+            targets = []
+
+        if not targets:
+            row = store.create_upload(
+                YouTubeUpload(
+                    id=new_id(),
+                    export_id=export.id,
+                    clip_id=export.clip_id,
+                    privacy=settings.youtube.privacy,
+                )
             )
-        )
-        log.info("Queued YouTube upload %s for export %s.", upload.id, export_id)
-        return upload
+            log.info("Queued YouTube upload %s for export %s.", row.id, export_id)
+            return [row]
+
+        rows: list[YouTubeUpload] = []
+        for channel in targets:
+            row = store.create_upload(
+                YouTubeUpload(
+                    id=new_id(),
+                    export_id=export.id,
+                    clip_id=export.clip_id,
+                    channel_row_id=channel["id"],
+                    privacy=channel.get("privacy") or settings.youtube.privacy,
+                )
+            )
+            rows.append(row)
+            log.info(
+                "Queued YouTube upload %s for export %s to channel %s.",
+                row.id,
+                export_id,
+                channel.get("channel_id", channel["id"]),
+            )
+        return rows
     except Exception:  # pragma: no cover - defensive
         log.exception("Could not queue a YouTube upload for %s.", export_id)
-        return None
+        return []
 
 
 def retry_upload(upload_id: str, settings: config.Settings | None = None) -> YouTubeUpload | None:
-    """Put a failed upload back in the queue, re-reading the current privacy."""
+    """Put a failed upload back in the queue.
+
+    A channel fan-out row keeps its own channel's privacy; only the legacy
+    default-channel row re-reads the global setting.
+    """
     settings = settings or config.load()
     upload = store.get_upload(upload_id)
     if upload is None:
         return None
     if upload.status == "done":
         return upload
+    privacy = settings.youtube.privacy
+    if upload.channel_row_id:
+        from . import accounts as accounts_store
+
+        channel = accounts_store.get_channel(upload.channel_row_id)
+        if channel is not None:
+            privacy = channel["privacy"]
     store.update_upload(
         upload.id,
         status="pending",
-        privacy=settings.youtube.privacy,
+        privacy=privacy,
         clear_error=True,
     )
     return store.get_upload(upload.id)
@@ -129,20 +182,40 @@ async def process_upload(upload: YouTubeUpload, settings: config.Settings | None
     if not generated.title:
         raise uploader.YouTubeError("The generated title was empty; nothing was uploaded.")
 
-    # Phase 5: route to a channel profile. The default channel (or the legacy
-    # settings) keeps today's behaviour when no rule matches.
+    # Phase 10: the row already names its channel (fan-out created it), so the
+    # worker publishes to exactly that destination instead of re-routing.
     privacy = upload.privacy or settings.youtube.privacy
     category_id = settings.youtube.category_id
-    try:
-        from ..routing import resolve_target_channel
+    account_id: str | None = None
+    channel: dict | None = None
+    if upload.channel_row_id:
+        from ..youtube import accounts as accounts_store
 
-        channel = resolve_target_channel(clip.id, settings)
-    except Exception:  # noqa: BLE001 - routing must never block publishing
-        log.warning("Channel routing failed; using the default destination.", exc_info=True)
-        channel = None
-    if channel is not None:
+        channel = accounts_store.get_channel(upload.channel_row_id)
+        if channel is None:
+            raise uploader.YouTubeError(
+                "The destination channel for this upload no longer exists. "
+                "Reconnect the channel or delete the upload."
+            )
         privacy = upload.privacy or channel["privacy"]
         category_id = channel["category_id"]
+        account_id = channel["account_id"]
+        suffix = channel.get("title_suffix") or ""
+        if suffix and not generated.title.endswith(suffix):
+            generated.title = f"{generated.title} {suffix}".strip()
+    else:
+        # Legacy path: no channel profile, fall back to rule routing.
+        try:
+            from ..routing import resolve_target_channel
+
+            channel = resolve_target_channel(clip.id, settings)
+        except Exception:  # noqa: BLE001 - routing must never block publishing
+            log.warning("Channel routing failed; using the default destination.", exc_info=True)
+            channel = None
+        if channel is not None:
+            privacy = upload.privacy or channel["privacy"]
+            category_id = channel["category_id"]
+            account_id = channel["account_id"]
 
     video_id = await asyncio.to_thread(
         uploader.upload_video,
@@ -152,6 +225,7 @@ async def process_upload(upload: YouTubeUpload, settings: config.Settings | None
         privacy=privacy,
         category_id=category_id,
         language=language,
+        account_id=account_id,
     )
 
     # The video is already published at this point, so a thumbnail problem is
@@ -160,7 +234,11 @@ async def process_upload(upload: YouTubeUpload, settings: config.Settings | None
     if thumbnail is not None:
         try:
             await asyncio.to_thread(
-                uploader.set_thumbnail, settings, video_id=video_id, path=thumbnail
+                uploader.set_thumbnail,
+                settings,
+                video_id=video_id,
+                path=thumbnail,
+                account_id=account_id,
             )
         except Exception as exc:
             log.warning("Upload %s published, but its thumbnail failed: %s", upload.id, exc)

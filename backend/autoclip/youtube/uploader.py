@@ -46,13 +46,14 @@ def upload_video(
     privacy: str,
     category_id: str = "24",
     language: str = "",
+    account_id: str | None = None,
 ) -> str:
     """Upload one file and return its YouTube video id."""
     if not path.is_file():
         raise YouTubeError(f"The exported file is missing: {path}")
 
     settings.youtube.privacy = privacy  # type: ignore[assignment]
-    token = oauth.access_token(settings)
+    token = oauth.access_token(settings, account_id=account_id)
 
     snippet: dict[str, object] = {
         "title": metadata.title,
@@ -119,7 +120,13 @@ def upload_video(
     return video_id
 
 
-def set_thumbnail(settings: config.Settings, *, video_id: str, path: Path) -> str:
+def set_thumbnail(
+    settings: config.Settings,
+    *,
+    video_id: str,
+    path: Path,
+    account_id: str | None = None,
+) -> str:
     """Attach a custom thumbnail to an uploaded video.
 
     YouTube takes the thumbnail as a raw image body rather than a resumable
@@ -133,7 +140,7 @@ def set_thumbnail(settings: config.Settings, *, video_id: str, path: Path) -> st
     if not path.is_file():
         raise YouTubeError(f"The thumbnail is missing: {path}")
 
-    token = oauth.access_token(settings)
+    token = oauth.access_token(settings, account_id=account_id)
     try:
         response = httpx.post(
             THUMBNAIL_URL,

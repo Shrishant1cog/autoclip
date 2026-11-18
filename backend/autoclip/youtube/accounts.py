@@ -139,7 +139,7 @@ def default_account() -> dict[str, Any] | None:
 def list_channels(account_id: str | None = None) -> list[dict[str, Any]]:
     query = (
         "SELECT id, account_id, channel_id, title, url, is_default, privacy,"
-        " category_id, auto_upload, created_at, updated_at FROM youtube_channels"
+        " category_id, auto_upload, title_suffix, created_at, updated_at FROM youtube_channels"
     )
     params: tuple[Any, ...] = ()
     if account_id:
@@ -155,7 +155,7 @@ def get_channel(channel_row_id: str) -> dict[str, Any] | None:
     with connection() as conn:
         row = conn.execute(
             "SELECT id, account_id, channel_id, title, url, is_default, privacy,"
-            " category_id, auto_upload, created_at, updated_at"
+            " category_id, auto_upload, title_suffix, created_at, updated_at"
             " FROM youtube_channels WHERE id = ?",
             (channel_row_id,),
         ).fetchone()
@@ -173,8 +173,9 @@ def _channel_row(r: tuple[Any, ...]) -> dict[str, Any]:
         "privacy": r[6],
         "category_id": r[7],
         "auto_upload": bool(r[8]),
-        "created_at": r[9],
-        "updated_at": r[10],
+        "title_suffix": r[9],
+        "created_at": r[10],
+        "updated_at": r[11],
     }
 
 
@@ -186,6 +187,7 @@ def add_channel(
     privacy: str = "public",
     category_id: str = "24",
     auto_upload: bool = False,
+    title_suffix: str = "",
 ) -> dict[str, Any]:
     """Register a channel under an account. First channel becomes default."""
     row_id = new_id()
@@ -198,11 +200,11 @@ def add_channel(
                          (account_id,))
         conn.execute(
             "INSERT INTO youtube_channels (id, account_id, channel_id, title, url,"
-            " is_default, privacy, category_id, auto_upload, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " is_default, privacy, category_id, auto_upload, title_suffix, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (row_id, account_id, channel["id"], channel.get("title", ""),
              channel.get("url", ""), int(is_default), privacy, category_id,
-             int(auto_upload), now, now),
+             int(auto_upload), title_suffix, now, now),
         )
     result = get_channel(row_id)
     assert result is not None
@@ -210,7 +212,7 @@ def add_channel(
 
 
 def update_channel(channel_row_id: str, **fields: Any) -> dict[str, Any] | None:
-    allowed = {"privacy", "category_id", "auto_upload", "is_default", "title"}
+    allowed = {"privacy", "category_id", "auto_upload", "is_default", "title", "title_suffix"}
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return get_channel(channel_row_id)

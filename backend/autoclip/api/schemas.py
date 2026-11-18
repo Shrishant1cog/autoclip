@@ -120,6 +120,7 @@ class UploadOut(BaseModel):
     id: str
     export_id: str
     clip_id: str
+    channel_row_id: str = ""
     status: str
     video_id: str | None = None
     title: str = ""
@@ -137,6 +138,7 @@ class UploadOut(BaseModel):
             id=upload.id,
             export_id=upload.export_id,
             clip_id=upload.clip_id,
+            channel_row_id=upload.channel_row_id,
             status=upload.status,
             video_id=upload.video_id,
             title=upload.title,
@@ -184,11 +186,21 @@ class ExportOut(BaseModel):
     created_at: str
     download_url: str
     #: Present when this export was queued for YouTube, so the UI can show
-    #: progress or a retry button next to the download link.
+    #: progress or a retry button next to the download link. ``upload`` keeps
+    #: the first row for backwards compatibility; ``uploads`` lists every
+    #: fan-out destination.
     upload: UploadOut | None = None
+    uploads: list[UploadOut] = Field(default_factory=list)
 
     @classmethod
-    def of(cls, export: models.Export, upload: models.YouTubeUpload | None = None) -> ExportOut:
+    def of(
+        cls,
+        export: models.Export,
+        upload: models.YouTubeUpload | None = None,
+        *,
+        uploads: list[models.YouTubeUpload] | None = None,
+    ) -> ExportOut:
+        rows = uploads if uploads is not None else ([upload] if upload else [])
         return cls(
             id=export.id,
             clip_id=export.clip_id,
@@ -197,7 +209,8 @@ class ExportOut(BaseModel):
             size_bytes=export.size_bytes,
             created_at=export.created_at,
             download_url=f"/api/exports/{export.id}/download",
-            upload=UploadOut.of(upload) if upload else None,
+            upload=UploadOut.of(rows[0]) if rows else None,
+            uploads=[UploadOut.of(row) for row in rows],
         )
 
 
@@ -228,7 +241,7 @@ class ClipOut(BaseModel):
         *,
         edit: models.ClipEdit | None = None,
         exports: list[models.Export] | None = None,
-        uploads: dict[str, models.YouTubeUpload] | None = None,
+        uploads: dict[str, list[models.YouTubeUpload]] | None = None,
     ) -> ClipOut:
         uploads = uploads or {}
         return cls(
@@ -249,7 +262,9 @@ class ClipOut(BaseModel):
             validation=clip.validation,
             caption_style=edit.caption_style if edit else "bold_pop",
             ratio=edit.ratio if edit else "9:16",
-            exports=[ExportOut.of(e, uploads.get(e.id)) for e in (exports or [])],
+            exports=[
+                ExportOut.of(e, uploads=uploads.get(e.id, [])) for e in (exports or [])
+            ],
         )
 
 

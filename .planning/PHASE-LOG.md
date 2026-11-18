@@ -138,6 +138,30 @@ Each phase: implement → test → typecheck/build → commit → push. Log upda
 - Live-verified over HTTP: batch create → add real source → detail (item pending with
   source title) → delete. Defect fixed: module-vs-singleton import in app + API.
 
+### Phase 10 — Multi-channel publishing fan-out (COMPLETE)
+
+- Migration **v9**: `youtube_uploads` rebuilt with `channel_row_id` (unique per
+  export+channel, legacy rows map to `''`), `youtube_channels.title_suffix`,
+  `routing_rules.extra_channel_ids_json`. Verified on a copy of the real DB
+  (15 clips / 21 exports / 21 uploads preserved, FK check clean).
+- `uploads.enqueue_export_all`: one row per target channel from
+  `routing.resolve_target_channels` (primary + extras, channels with
+  `auto_upload` off are dropped, legacy single row when no profiles).
+  Per-channel privacy is captured at enqueue; `retry_upload` keeps a channel
+  row's own privacy instead of the global default.
+- `process_upload` publishes to the row's channel (`account_id`, privacy,
+  category) and appends `title_suffix`; account-scoped OAuth tokens
+  (`oauth.access_token(settings, account_id=...)`) cached per Google account;
+  `uploader.upload_video` / `set_thumbnail` accept `account_id`.
+- Duplicate detection (`conflict_for`, same-clip / identical-file / same-title)
+  is now scoped per destination channel, so a legitimate fan-out is not flagged.
+- APIs expose channel `title_suffix` and rule `extra_channel_ids`; `ExportOut`
+  gained `uploads: list[UploadOut]` (`upload` kept for compatibility); the
+  clips library renders one upload badge per channel.
+- Verified live on a copy of the real DB: rule + extra channel produced two
+  pending rows with per-channel privacy, re-enqueue idempotent, duplicate
+  scoping correct. Suite **466 passed**, ruff/tsc/build clean.
+
 ### Phase 9 — Clip validation gate (COMPLETE)
 
 - `pipeline/validate.py`: bounds checks (positive/min/max duration, word range,

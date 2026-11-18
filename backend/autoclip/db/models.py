@@ -227,6 +227,8 @@ class YouTubeUpload:
     id: str
     export_id: str
     clip_id: str
+    #: youtube_channels.id this row publishes to; '' = legacy default channel.
+    channel_row_id: str = ""
     status: UploadStatus = "pending"
     video_id: str | None = None
     title: str = ""
@@ -243,6 +245,7 @@ class YouTubeUpload:
             id=row["id"],
             export_id=row["export_id"],
             clip_id=row["clip_id"],
+            channel_row_id=row["channel_row_id"],
             status=row["status"],
             video_id=row["video_id"],
             title=row["title"],

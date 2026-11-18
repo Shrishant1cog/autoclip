@@ -29,6 +29,7 @@ class ChannelIn(BaseModel):
     category_id: str = "24"
     auto_upload: bool = False
     is_default: bool | None = None
+    title_suffix: str = ""
 
 
 class ChannelUpdateIn(BaseModel):
@@ -37,6 +38,7 @@ class ChannelUpdateIn(BaseModel):
     auto_upload: bool | None = None
     is_default: bool | None = None
     title: str | None = None
+    title_suffix: str | None = None
 
 
 @router.get("")
@@ -100,6 +102,7 @@ async def add_channel(account_id: str, payload: ChannelIn) -> dict:
         privacy=payload.privacy,
         category_id=payload.category_id,
         auto_upload=payload.auto_upload,
+        title_suffix=payload.title_suffix,
     )
 
 

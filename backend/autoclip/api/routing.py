@@ -21,6 +21,7 @@ class RuleIn(BaseModel):
     target_channel_id: str
     priority: int = 100
     enabled: bool = True
+    extra_channel_ids: list[str] = []
 
 
 class RuleUpdateIn(BaseModel):
@@ -29,6 +30,7 @@ class RuleUpdateIn(BaseModel):
     target_channel_id: str | None = None
     priority: int | None = None
     enabled: bool | None = None
+    extra_channel_ids: list[str] | None = None
 
 
 @router.get("/categories")
@@ -50,12 +52,16 @@ async def add_rule(payload: RuleIn) -> dict:
 
     if accounts_store.get_channel(payload.target_channel_id) is None:
         raise HTTPException(status_code=404, detail="Target channel not found.")
+    for extra_id in payload.extra_channel_ids:
+        if accounts_store.get_channel(extra_id) is None:
+            raise HTTPException(status_code=404, detail=f"Extra channel {extra_id} not found.")
     return classifier.add_rule(
         payload.match_keyword.strip(),
         payload.target_channel_id,
         name=payload.name,
         priority=payload.priority,
         enabled=payload.enabled,
+        extra_channel_ids=payload.extra_channel_ids,
     )
 
 

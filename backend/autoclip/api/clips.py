@@ -38,7 +38,9 @@ router = APIRouter(prefix="/api", tags=["clips"])
 def _clip_out(clip) -> ClipOut:
     edit = store.get_clip_edit(clip.id)
     exports = store.list_exports(clip.id)
-    uploads = {u.export_id: u for u in store.list_uploads_for_clip(clip.id)}
+    uploads: dict[str, list] = {}
+    for upload in store.list_uploads_for_clip(clip.id):
+        uploads.setdefault(upload.export_id, []).append(upload)
     return ClipOut.of(clip, edit=edit, exports=exports, uploads=uploads)
 
 
@@ -287,7 +289,6 @@ async def export_clip(clip_id: str, payload: ExportRequestIn) -> ExportOut:
         validation=report.to_dict(),
     )
 
-    upload = None
     if not report.ok:
         log.warning(
             "Export %s failed validation for clip %s: %s",
@@ -297,17 +298,20 @@ async def export_clip(clip_id: str, payload: ExportRequestIn) -> ExportOut:
         )
         return ExportOut.of(record, None)
 
+    uploads: list = []
     try:
         from ..youtube import uploads as youtube_uploads
         from ..youtube.queue import upload_queue
 
-        upload = await asyncio.to_thread(youtube_uploads.enqueue_export, record.id, settings)
-        if upload is not None:
+        uploads = await asyncio.to_thread(
+            youtube_uploads.enqueue_export_all, record.id, settings
+        )
+        if uploads:
             upload_queue.notify()
     except Exception:  # the export succeeded; a queue failure is not fatal
         log.exception("Could not queue a YouTube upload for export %s.", record.id)
 
-    return ExportOut.of(record, upload)
+    return ExportOut.of(record, uploads=uploads)
 
 
 @router.post("/clips/{clip_id}/validate")

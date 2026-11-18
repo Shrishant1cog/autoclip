@@ -38,12 +38,12 @@ log = logging.getLogger(__name__)
 
 
 def _maybe_enqueue_upload(export_id: str, settings: Settings) -> None:
-    """Queue a YouTube upload when automation is on. Never raises."""
+    """Queue YouTube uploads when automation is on. Never raises."""
     try:
         from ..youtube.queue import upload_queue
-        from ..youtube.uploads import enqueue_export
+        from ..youtube.uploads import enqueue_export_all
 
-        if enqueue_export(export_id, settings) is not None:
+        if enqueue_export_all(export_id, settings):
             upload_queue.notify()
     except Exception:  # an upload must never fail the pipeline
         log.exception("Could not queue a YouTube upload for export %s.", export_id)

@@ -193,7 +193,7 @@ def test_upload_video_posts_metadata_then_the_file(
     file = tmp_path / "clip.mp4"
     file.write_bytes(b"video-bytes")
     settings = config.load()
-    monkeypatch.setattr(oauth, "access_token", lambda _=None: "token")
+    monkeypatch.setattr(oauth, "access_token", lambda _=None, account_id=None: "token")
 
     calls: dict[str, dict] = {}
 
