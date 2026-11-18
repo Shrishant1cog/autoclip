@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from . import (
     ai_providers,
     batches,
+    chat,
     clips,
     jobs,
     learning,
@@ -36,3 +37,4 @@ api_router.include_router(batches.router)
 api_router.include_router(music.router)
 api_router.include_router(learning.router)
 api_router.include_router(trends.router)
+api_router.include_router(chat.router)

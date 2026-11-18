@@ -138,6 +138,40 @@ Each phase: implement → test → typecheck/build → commit → push. Log upda
 - Live-verified over HTTP: batch create → add real source → detail (item pending with
   source title) → delete. Defect fixed: module-vs-singleton import in app + API.
 
+### Phase 13 — The project-aware assistant (COMPLETE)
+
+- `chat/context.py`: a read-only snapshot of **real** project state — the
+  library summary, current settings, recent jobs, recent clips (with their
+  score, hook, the reason the model gave and the upload outcome), failures
+  (failed jobs and failed uploads with their real error strings), YouTube
+  channels, routing rules, the `improve.txt` standing instructions, the trend
+  cache, and an optional focus on one clip or one job. Every fact traces back
+  to a row or a file.
+- `chat/agent.py`: the answer loop. The snapshot is the *entirety* of what the
+  model is told, and the system prompt says so explicitly. The provider
+  fallback chain is the standard resolver, so the configured provider leads
+  and a healthy local model is the terminal fallback. A JSON-shaped answer is
+  retried once as prose, since a chat reply is not a schema.
+- **No fabrication, enforced at two levels.** The prompt forbids inventing
+  counts, titles, errors or URLs; and when every provider fails, the endpoint
+  returns HTTP 502 with an actionable message instead of a canned reply that
+  would look like an answer.
+- `api/chat.py`: `POST /api/chat`, `GET /api/chat/context` (the exact
+  snapshot, for inspection), `GET /api/chat/starters`.
+- Frontend: a new **Assistant** page (`/assistant`, in the top nav) — a
+  message thread, starter questions, the provider that answered, and a
+  "Show what the assistant can see" panel that renders the literal brief sent
+  with the question. `components/Markdown.tsx` renders the model's prose
+  (emphasis, lists, code spans) as React elements — never HTML strings.
+- Verified live against the real project with Google Gemini: asked what has
+  been produced (answered 15 clips, correctly named the top clip "Recreating
+  the Hunger Games in real life" at score 92), what is failing (correctly
+  reported zero failures and distinguished the one running job), and how many
+  views the published videos got — the assistant answered *"The project data
+  does not record view counts"*, which is the correct honest reply. The UI
+  thread, the context panel and the Markdown rendering were verified in the
+  browser with no console errors. Suite **512 passed**, ruff/tsc/build clean.
+
 ### Phase 12 — Trending research (COMPLETE)
 
 - `trends/research.py`: real trend signal from YouTube itself — the Data API's

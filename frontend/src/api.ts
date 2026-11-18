@@ -676,6 +676,23 @@ export const api = {
       fetched_at: number
       provider: string
     }>('/api/trends/context'),
+
+  // -- Project-aware assistant (Phase 13) -----------------------------------
+  chatStarters: () => request<{ starters: string[] }>('/api/chat/starters'),
+  chatContext: (clipId = '', jobId = '') => {
+    const params = new URLSearchParams()
+    if (clipId) params.set('clip_id', clipId)
+    if (jobId) params.set('job_id', jobId)
+    const query = params.toString()
+    return request<{ context: Record<string, unknown>; prompt: string }>(
+      `/api/chat/context${query ? `?${query}` : ''}`,
+    )
+  },
+  askAssistant: (message: string, history: { role: string; content: string }[] = []) =>
+    request<{ answer: string; provider: string; context: Record<string, unknown> }>('/api/chat', {
+      method: 'POST',
+      body: JSON.stringify({ message, history }),
+    }),
 }
 
 /** Format seconds as m:ss, or h:mm:ss past an hour. */
