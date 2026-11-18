@@ -5,12 +5,16 @@ import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import { App } from './App'
 import './index.css'
 import { Assistant } from './pages/Assistant'
+import { Batches } from './pages/Batches'
+import { Channels } from './pages/Channels'
 import { Clips } from './pages/Clips'
 import { ErrorBoundary, RouteError } from './components/ErrorBoundary'
 import { Ingest } from './pages/Ingest'
 import { JobProgress } from './pages/JobProgress'
+import { Providers } from './pages/Providers'
 import { Recovery } from './pages/Recovery'
 import { Review } from './pages/Review'
+import { Routing } from './pages/Routing'
 import { Settings } from './pages/Settings'
 import { Trends } from './pages/Trends'
 import { Workflows } from './pages/Workflows'
@@ -29,6 +33,10 @@ const router = createBrowserRouter([
       { path: 'recovery', element: <Recovery /> },
       { path: 'trends', element: <Trends /> },
       { path: 'workflows', element: <Workflows /> },
+      { path: 'providers', element: <Providers /> },
+      { path: 'channels', element: <Channels /> },
+      { path: 'routing', element: <Routing /> },
+      { path: 'batches', element: <Batches /> },
       { path: 'jobs/:jobId', element: <JobProgress /> },
       { path: 'jobs/:jobId/clips', element: <Review /> },
       { path: 'settings', element: <Settings /> },

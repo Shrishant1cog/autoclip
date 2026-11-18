@@ -35,11 +35,13 @@ class UploadQueue:
         self._wakeup: asyncio.Event | None = None
         self._stopping = False
         self._current: str | None = None
+        #: Uploads recovered from an interrupted run (Phase 17).
+        self.resumed_upload_ids: list[str] = []
 
     # -- lifecycle ---------------------------------------------------------
 
     async def start(self) -> None:
-        store.requeue_interrupted_uploads()
+        self.resumed_upload_ids = store.requeue_interrupted_uploads()
         self._stopping = False
         self._wakeup = asyncio.Event()
         self._task = asyncio.create_task(self._worker(), name="autoclip-upload-queue")

@@ -479,6 +479,39 @@ def _migration_v11(conn: sqlite3.Connection) -> None:
     conn.executescript(_V11)
 
 
+# --- v12: restart recovery (Phase 17) ---------------------------------------
+
+_V12 = """
+-- When AutoClip restarts, work that was in flight is resumed automatically.
+--
+-- That is the right behaviour, but it used to be invisible: the job simply
+-- carried on as if nothing had happened, and the user had no way to learn
+-- that a restart had interrupted it (or that it had to start a stage again
+-- because the interruption happened mid-stage).
+--
+-- These columns and table make the restart visible. The counts are the real
+-- numbers of rows that were recovered, not a summary of an estimate.
+ALTER TABLE jobs ADD COLUMN last_resumed_at TEXT;
+ALTER TABLE youtube_uploads ADD COLUMN last_resumed_at TEXT;
+
+CREATE TABLE app_restarts (
+    id                  TEXT PRIMARY KEY,
+    started_at          TEXT NOT NULL,
+    jobs_resumed        INTEGER NOT NULL DEFAULT 0,
+    uploads_resumed     INTEGER NOT NULL DEFAULT 0,
+    batch_items_resumed INTEGER NOT NULL DEFAULT 0,
+    job_ids_json        TEXT NOT NULL DEFAULT '[]',
+    upload_ids_json     TEXT NOT NULL DEFAULT '[]',
+    details             TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX idx_app_restarts_started ON app_restarts(started_at);
+"""
+
+
+def _migration_v12(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V12)
+
+
 #: Ordered migrations. Index + 1 is the resulting ``user_version``.
 #: Append only — never edit a migration that has shipped.
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
@@ -493,6 +526,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v9,
     _migration_v10,
     _migration_v11,
+    _migration_v12,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)

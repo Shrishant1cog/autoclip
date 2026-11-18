@@ -193,12 +193,21 @@ def batch_progress(batch_id: str) -> dict[str, int]:
     }
 
 
-def recover_interrupted() -> int:
-    """On startup: reset items left 'processing' back to 'pending'. Returns count."""
+def recover_interrupted() -> list[str]:
+    """On startup: reset items left 'processing' back to 'pending'.
+
+    Returns the ids that were recovered, so the restart can be recorded and
+    the user can see that their batch was picked back up (Phase 17).
+    """
     with connection() as conn:
-        cursor = conn.execute(
-            "UPDATE batch_items SET status = 'pending', updated_at = ?"
-            " WHERE status = 'processing'",
-            (utcnow(),),
-        )
-        return cursor.rowcount
+        rows = conn.execute(
+            "SELECT id FROM batch_items WHERE status = 'processing'"
+        ).fetchall()
+        ids = [row["id"] for row in rows]
+        if ids:
+            conn.execute(
+                "UPDATE batch_items SET status = 'pending', updated_at = ?"
+                " WHERE status = 'processing'",
+                (utcnow(),),
+            )
+    return ids

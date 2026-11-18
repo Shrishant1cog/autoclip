@@ -80,6 +80,9 @@ class Job:
     updated_at: str = field(default_factory=utcnow)
     started_at: str | None = None
     finished_at: str | None = None
+    #: When a restart last interrupted this job and the queue resumed it
+    #: (Phase 17). None when the job has never been interrupted.
+    last_resumed_at: str | None = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Job:
@@ -96,6 +99,14 @@ class Job:
             updated_at=row["updated_at"],
             started_at=row["started_at"],
             finished_at=row["finished_at"],
+            # ``sqlite3.Row.__contains__`` tests *values*, not keys, and the
+            # row has no ``get`` — so the column's presence has to be checked
+            # against the key list.
+            last_resumed_at=(
+                row["last_resumed_at"]
+                if "last_resumed_at" in row.keys()  # noqa: SIM118
+                else None
+            ),
         )
 
 
@@ -238,6 +249,9 @@ class YouTubeUpload:
     error: str | None = None
     created_at: str = field(default_factory=utcnow)
     updated_at: str = field(default_factory=utcnow)
+    #: When a restart last interrupted this upload and the queue resumed it
+    #: (Phase 17).
+    last_resumed_at: str | None = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> YouTubeUpload:
@@ -255,6 +269,46 @@ class YouTubeUpload:
             error=row["error"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            last_resumed_at=(
+                row["last_resumed_at"]
+                if "last_resumed_at" in row.keys()  # noqa: SIM118
+                else None
+            ),
+        )
+
+
+@dataclass
+class AppRestart:
+    """One restart of AutoClip, and what it had to recover (Phase 17).
+
+    The counts are the real numbers of rows that were recovered — not an
+    estimate of how much work was lost.
+    """
+
+    id: str
+    started_at: str = field(default_factory=utcnow)
+    jobs_resumed: int = 0
+    uploads_resumed: int = 0
+    batch_items_resumed: int = 0
+    job_ids: list[str] = field(default_factory=list)
+    upload_ids: list[str] = field(default_factory=list)
+    details: str = ""
+
+    @property
+    def total_resumed(self) -> int:
+        return self.jobs_resumed + self.uploads_resumed + self.batch_items_resumed
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> AppRestart:
+        return cls(
+            id=row["id"],
+            started_at=row["started_at"],
+            jobs_resumed=row["jobs_resumed"],
+            uploads_resumed=row["uploads_resumed"],
+            batch_items_resumed=row["batch_items_resumed"],
+            job_ids=json.loads(row["job_ids_json"] or "[]"),
+            upload_ids=json.loads(row["upload_ids_json"] or "[]"),
+            details=row["details"],
         )
 
 

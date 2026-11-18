@@ -841,23 +841,29 @@ def test_concurrent_windows_are_each_charged_exactly_once(
 # The schema
 # --------------------------------------------------------------------------
 
-def test_the_schema_migrates_to_v11(autoclip_home: Path) -> None:
+def test_the_schema_migrates_to_the_current_version(autoclip_home: Path) -> None:
     from autoclip import db
+    from autoclip.db import schema
 
     version = db.init()
 
-    assert version == 11
+    # Compared against the schema module rather than a literal: a hardcoded
+    # version has to be edited by every later phase, and the day someone
+    # forgets, the test stops meaning anything.
+    assert version == schema.SCHEMA_VERSION
     with db.connection() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == schema.SCHEMA_VERSION
         rows = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
         tables = {row[0] for row in rows}
     assert "job_resources" in tables
+    assert "app_restarts" in tables
 
 
 def test_migrating_twice_is_a_no_op(autoclip_home: Path) -> None:
     from autoclip import db
+    from autoclip.db import schema
 
     first = db.init()
     second = db.init()
 
-    assert first == second == 11
+    assert first == second == schema.SCHEMA_VERSION

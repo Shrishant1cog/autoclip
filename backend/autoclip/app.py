@@ -90,6 +90,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     else:
         log.info("Job worker disabled by %s=1.", ENV_NO_WORKER)
 
+    # Phase 17: record what the restart had to recover, so the interruption is
+    # visible instead of the work silently carrying on as if nothing had
+    # happened. The counts are the real numbers of rows that were recovered.
+    _record_restart()
+
     log.info("AutoClip %s ready. Artifacts in %s", __version__, paths.root())
 
     try:
@@ -99,6 +104,62 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if worker_enabled:
             await upload_queue.stop()
             await queue.stop()
+
+
+def _record_restart() -> None:
+    """Write one restart record and tell the user what it resumed.
+
+    A failure here is logged and swallowed: the app has already started and
+    the work is already running — failing to *report* the restart must never
+    stop the app from serving.
+    """
+    from .db import store
+    from .jobs.batch_runner import batch_runner
+    from .notifications import events
+
+    try:
+        job_ids = list(getattr(queue, "resumed_job_ids", []))
+        upload_ids = list(getattr(upload_queue, "resumed_upload_ids", []))
+        item_ids = list(getattr(batch_runner, "resumed_item_ids", []))
+
+        # Cleared once read: the queues are process-wide singletons, so a
+        # second app instance in the same process must not report the first
+        # one's recovery a second time.
+        queue.resumed_job_ids = []
+        upload_queue.resumed_upload_ids = []
+        batch_runner.resumed_item_ids = []
+
+        restart = store.record_restart(
+            jobs_resumed=len(job_ids),
+            uploads_resumed=len(upload_ids),
+            batch_items_resumed=len(item_ids),
+            job_ids=job_ids,
+            upload_ids=upload_ids,
+            details="; ".join(
+                part
+                for part in (
+                    f"{len(job_ids)} job(s)" if job_ids else "",
+                    f"{len(upload_ids)} upload(s)" if upload_ids else "",
+                    f"{len(item_ids)} batch item(s)" if item_ids else "",
+                )
+                if part
+            ),
+        )
+        if restart.total_resumed:
+            log.info(
+                "Restart %s resumed %d job(s), %d upload(s), %d batch item(s).",
+                restart.id,
+                restart.jobs_resumed,
+                restart.uploads_resumed,
+                restart.batch_items_resumed,
+            )
+        events.app_restarted(
+            jobs=restart.jobs_resumed,
+            uploads=restart.uploads_resumed,
+            batch_items=restart.batch_items_resumed,
+        )
+    except Exception:  # noqa: BLE001
+        log.warning("Could not record the restart.", exc_info=True)
 
 
 def create_app() -> FastAPI:

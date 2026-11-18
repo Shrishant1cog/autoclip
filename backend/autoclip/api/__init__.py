@@ -15,6 +15,7 @@ from . import (
     notifications,
     recovery,
     resources,
+    restarts,
     routing,
     settings,
     sources,
@@ -44,3 +45,4 @@ api_router.include_router(chat.router)
 api_router.include_router(notifications.router)
 api_router.include_router(recovery.router)
 api_router.include_router(resources.router)
+api_router.include_router(restarts.router)

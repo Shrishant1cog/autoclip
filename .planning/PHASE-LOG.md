@@ -138,6 +138,118 @@ Each phase: implement → test → typecheck/build → commit → push. Log upda
 - Live-verified over HTTP: batch create → add real source → detail (item pending with
   source title) → delete. Defect fixed: module-vs-singleton import in app + API.
 
+### Phase 17 — The complete frontend, and a restart you can see (COMPLETE)
+
+Two things were missing at the end of Phase 16: most of the backend had no
+screen, and the one automatic behaviour nobody could see was the restart.
+
+**Four pages that were already in the backend but had no frontend.**
+
+The provider manager (Phase 3), the multi-account/multi-channel store
+(Phase 10), the routing rules (Phase 5) and the batch queue (Phase 6) had
+working endpoints the whole time. The client methods existed for the batch
+queue and nothing called them. Now each has a screen:
+
+- **Providers** (`/providers`) — all 16 presets, hosted and local, with the
+  state of each key pool: how many keys are usable, which one is cooling
+  down, what error it actually hit, and whether the provider is active. Keys
+  can be added, removed, disabled and re-enabled; the value never leaves the
+  server (the endpoint returns the label and the health, not the secret).
+- **Channels** (`/channels`) — every Google account with its token status,
+  and every channel under it with its own publishing policy: privacy, YouTube
+  category, title suffix, whether it publishes automatically, and whether it
+  is the default. A channel with automatic publishing off is never published
+  to by a fan-out, so this switch is load-bearing, not decoration.
+- **Routing** (`/routing`) — the ten categories the classifier assigns, and
+  the rules that map a category to a channel. Rules can be created, edited,
+  toggled and deleted. A rule whose target channel does not exist is refused
+  by the server (404), not stored as one that can never fire.
+- **Batches** (`/batches`) — the full lifecycle: create, add videos, run,
+  pause, cancel, retry the failed ones, delete. Each item carries its own
+  status and its own real error. The page polls only while a batch is
+  actually running — a batch that is merely queued does nothing until it is
+  launched, so polling it would be traffic for a page that never changes.
+
+**Restart recovery, made visible.**
+
+AutoClip resumes interrupted work on startup. That behaviour existed before
+this phase and was correct, but it was invisible: the job simply carried on,
+and there was no way to learn that a restart had interrupted it (or that it
+had to begin a stage again because the interruption landed mid-stage).
+
+- Migration **v12** adds `jobs.last_resumed_at`, `youtube_uploads.last_resumed_at`
+  and an `app_restarts` table. Verified on a WAL-safe copy of the real
+  database: v11 → v12 preserved all 8 sources / 8 jobs / 32 clips / 52 exports
+  / 52 uploads / 6 workflows / 1 batch / 32 notifications / 1 account /
+  1 channel / 1 job-resource row, foreign-key check clean, re-running is a
+  no-op, and the two new columns default to NULL on every existing row.
+- The three recovery paths now report what they recovered instead of
+  returning a bare count: the job queue returns the ids it requeued, the
+  upload queue returns the ids it put back to pending, and the batch runner
+  returns the item ids it reset. Each marks the row it recovered.
+- The app's lifespan collects those, writes one `app_restarts` row with the
+  real counts, and leaves a notification in the inbox. A restart with nothing
+  in flight is the normal case and is recorded but not announced.
+- `GET /api/restarts` exposes the history; the **Recovery** page now lists
+  every restart with what it recovered.
+
+**Verified live, by actually killing the server mid-job.**
+
+A real job (`84cf122f2d9d4f05`) was started on the 56-second local test
+video and the server processes were killed while it was in the *transcribe*
+stage. The row was left exactly as a crash leaves it — `status = running`,
+`last_resumed_at = null`. The server was restarted, and:
+
+- `/api/restarts` reported `jobs_resumed: 1`, `total_resumed: 1`, and the
+  exact job id `84cf122f2d9d4f05` — the real row, not an estimate;
+- the job carried on (it resumed at *transcribe* and ran to the next stage);
+- `jobs.last_resumed_at` was stamped with the restart time;
+- the inbox gained "AutoClip restarted — Resumed 1 job that was interrupted."
+
+The earlier restart (before the crash) is also in the history, showing
+"nothing was in flight" — the honest answer for a clean start.
+
+**A second, unplanned proof.** Later in the phase the server process died on
+its own — no fatal error in its log, no OS-level event, the process simply
+gone — while job `2e27f97823df42c8` was transcribing a 68-minute interview.
+The next start reported `jobs_resumed: 1` for that job id and the job
+resumed. Two of the three restarts in the history are restarts that had real
+work to recover; the third — the clean start — says "nothing was in flight".
+
+**Three real defects found and fixed while verifying.**
+
+1. *The schema tests hardcoded the version number.* `test_the_schema_migrates_to_v11`
+   asserted `version == 11`, so adding a migration broke a test that had
+   nothing to do with migrations — and a version literal has to be edited by
+   every later phase, which is exactly how such a test stops meaning
+   anything. Both tests now compare against `schema.SCHEMA_VERSION`.
+2. *The restart notification disagreed with itself.* "Resumed 1 job that
+   were interrupted" — the verb did not agree with the count. The wording
+   now agrees, and a test pins both the singular and the plural.
+3. *The navigation was squeezed to 150px.* Eleven links do not fit beside the
+   logo on a narrow window. The first fix made the nav scroll but left it
+   shrinking to whatever space was left (`flex-1` with `min-w-0`) — eight
+   links off-screen. Measured: the links need 766px, and beside the logo and
+   the status controls they need ~1252px to sit inline, which fits at 1536px
+   but not at 1024px. The breakpoint moved from `lg` to `2xl`, and below it
+   the nav takes a full-width row of its own and scrolls horizontally.
+   Verified at a 613px viewport: the nav is on its own row, the first eight
+   links are visible, and scrolling reaches Channels, Routing and Settings.
+
+**Test isolation defect found while writing the API tests.** The new
+frontend-API tests read the *real* OS keyring through the legacy
+single-account fallback, so a test asserting "this account has no refresh
+token" failed on the developer's machine because the developer's YouTube
+token was there. The fixture now replaces the keyring, which is what the
+suite's own charter (`nothing in the test suite may touch the user's real
+~/.autoclip directory or their real OS keyring`) requires.
+
+- Tests: 26 new (`tests/test_restart_recovery.py`) + 29 new
+  (`tests/test_frontend_api.py`); suite **658 passed**; ruff + tsc + build
+  clean.
+- Final system validation report for phases 0–17 written to
+  `.planning/VALIDATION-REPORT.md`.
+
 ### Phase 16 — Resource optimisation: measure, bound, reclaim, expose (COMPLETE)
 
 - **Measure.** `resources.py` owns the accounting. `disk_usage()` walks the

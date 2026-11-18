@@ -69,8 +69,9 @@ def test_recover_interrupted(initialised_db: int, sources: list) -> None:
     batch = batches.create_batch()
     item = batches.add_item(batch["id"], sources[0].id)
     batches.update_item(item["id"], status="processing")
+    # The recovered ids come back so the restart can be recorded (Phase 17).
     recovered = batches.recover_interrupted()
-    assert recovered >= 1
+    assert item["id"] in recovered
     assert batches.get_item(item["id"])["status"] == "pending"  # type: ignore[index]
 
 

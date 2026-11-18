@@ -187,6 +187,42 @@ def provider_unavailable(detail: str) -> Notification | None:
     )
 
 
+def app_restarted(
+    *, jobs: int = 0, uploads: int = 0, batch_items: int = 0
+) -> Notification | None:
+    """AutoClip restarted and picked interrupted work back up.
+
+    Only says something when something was actually resumed: a restart with
+    nothing in flight is the normal case and does not deserve a notification.
+
+    The wording agrees with the count — "1 job that was interrupted" reads
+    like something a person wrote, "1 job that were interrupted" does not.
+    """
+    total = jobs + uploads + batch_items
+    if total == 0:
+        return None
+
+    parts = []
+    for count, noun in (
+        (jobs, "job"),
+        (uploads, "upload"),
+        (batch_items, "batch item"),
+    ):
+        if count:
+            parts.append(f"{count} {noun}{'s' if count != 1 else ''}")
+
+    return notify(
+        "app_restarted",
+        severity="warning",
+        title="AutoClip restarted",
+        body=(
+            f"Resumed {', '.join(parts)} that "
+            f"{'was' if total == 1 else 'were'} interrupted."
+        ),
+        link="/recovery",
+    )
+
+
 def context_snapshot(extra: dict[str, Any] | None = None) -> dict[str, Any]:
     """A small summary of the inbox, for the UI badge."""
     payload: dict[str, Any] = {
@@ -200,6 +236,7 @@ def context_snapshot(extra: dict[str, Any] | None = None) -> dict[str, Any]:
 
 __all__ = [
     "MAX_NOTIFICATIONS",
+    "app_restarted",
     "batch_done",
     "clip_exported",
     "context_snapshot",

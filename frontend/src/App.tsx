@@ -20,26 +20,46 @@ export function App() {
   return (
     <div className="min-h-screen bg-ink-900">
       <header className="border-b border-ink-800">
-        <div className="mx-auto flex max-w-[1600px] items-baseline gap-8 px-6 py-4 lg:px-10">
-          <NavLink to="/" className="group flex items-baseline gap-2.5">
+        {/*
+          The nav scrolls rather than overflows, and on a narrow window it
+          takes a row of its own. There are more destinations than fit beside
+          the logo, and a link that is cut off is a screen the user cannot
+          find — scrolling keeps every one of them exactly one click away.
+        */}
+        <div className="mx-auto flex max-w-[1600px] flex-wrap items-baseline gap-x-8 gap-y-3 px-6 py-4 lg:px-10">
+          <NavLink to="/" className="group flex shrink-0 items-baseline gap-2.5">
             <span className="font-display text-2xl leading-none text-ink-100">
               Auto<span className="italic text-sodium-500">Clip</span>
             </span>
           </NavLink>
 
-          <nav className="flex items-baseline gap-6">
+          {/* `w-full` is what makes it wrap: a flex item with `flex-1` and
+              `min-w-0` shrinks to whatever space is left instead of taking a
+              row of its own, which left the nav 150px wide and eight links
+              off-screen.
+
+              The inline breakpoint is `2xl` (1536px) rather than `lg`: the
+              eleven links measure about 770px, and beside the logo and the
+              status controls they need roughly 1200px to sit on one line.
+              At `lg` they would still be squeezed, so the nav keeps its own
+              row — full width — from just under 1536px all the way down. */}
+          <nav className="order-last flex w-full min-w-0 items-baseline gap-5 overflow-x-auto 2xl:order-none 2xl:w-auto 2xl:flex-1">
             <TopLink to="/" end>
               New
             </TopLink>
             <TopLink to="/clips">Clips</TopLink>
+            <TopLink to="/batches">Batches</TopLink>
             <TopLink to="/assistant">Assistant</TopLink>
             <TopLink to="/trends">Trends</TopLink>
             <TopLink to="/recovery">Recovery</TopLink>
             <TopLink to="/workflows">Workflows</TopLink>
+            <TopLink to="/providers">Providers</TopLink>
+            <TopLink to="/channels">Channels</TopLink>
+            <TopLink to="/routing">Routing</TopLink>
             <TopLink to="/settings">Settings</TopLink>
           </nav>
 
-          <div className="ml-auto flex items-center gap-4">
+          <div className="ml-auto flex shrink-0 items-center gap-4">
             <NotificationBell />
             <YouTubeControls />
             {system && <SystemBadge system={system} />}
@@ -248,7 +268,7 @@ function TopLink({
       end={end}
       className={({ isActive }) =>
         [
-          'text-sm font-medium transition-colors duration-200',
+          'whitespace-nowrap text-sm font-medium transition-colors duration-200',
           isActive ? 'text-sodium-500' : 'text-ink-400 hover:text-ink-200',
         ].join(' ')
       }

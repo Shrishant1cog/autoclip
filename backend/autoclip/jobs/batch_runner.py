@@ -29,11 +29,13 @@ class BatchRunner:
         self._wakeup: asyncio.Event | None = None
         self._task: asyncio.Task | None = None
         self._stopping = False
+        #: Batch items recovered from an interrupted run (Phase 17).
+        self.resumed_item_ids: list[str] = []
 
     def start(self) -> None:
         self._stopping = False
         self._wakeup = asyncio.Event()
-        batches.recover_interrupted()
+        self.resumed_item_ids = batches.recover_interrupted()
         self._task = asyncio.create_task(self._loop(), name="autoclip-batch-runner")
 
     async def stop(self) -> None:

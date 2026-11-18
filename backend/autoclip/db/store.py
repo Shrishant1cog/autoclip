@@ -12,6 +12,7 @@ from typing import Any
 
 from . import connection
 from .models import (
+    AppRestart,
     Clip,
     ClipEdit,
     ClipStatus,
@@ -24,6 +25,7 @@ from .models import (
     Transcript,
     UploadStatus,
     YouTubeUpload,
+    new_id,
     utcnow,
 )
 
@@ -581,12 +583,95 @@ def update_upload(
         )
 
 
-def requeue_interrupted_uploads() -> None:
-    """Turn rows left mid-upload by a crash back into pending work."""
+def requeue_interrupted_uploads() -> list[str]:
+    """Turn rows left mid-upload by a crash back into pending work.
+
+    Returns the ids that were recovered, so the restart can be recorded and
+    the user can be told what was resumed.
+    """
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT id FROM youtube_uploads WHERE status = 'uploading'"
+        ).fetchall()
+        ids = [row["id"] for row in rows]
+        if ids:
+            conn.execute(
+                """
+                UPDATE youtube_uploads
+                   SET status = 'pending', error = NULL, last_resumed_at = ?
+                 WHERE status = 'uploading'
+                """,
+                (utcnow(),),
+            )
+    return ids
+
+
+# --------------------------------------------------------------------------
+# Restart recovery (Phase 17)
+# --------------------------------------------------------------------------
+
+
+def mark_job_resumed(job_id: str) -> None:
+    """Record that a restart interrupted this job and the queue resumed it."""
     with connection() as conn:
         conn.execute(
-            "UPDATE youtube_uploads SET status = 'pending', error = NULL WHERE status = 'uploading'"
+            "UPDATE jobs SET last_resumed_at = ? WHERE id = ?", (utcnow(), job_id)
         )
+
+
+def record_restart(
+    *,
+    jobs_resumed: int = 0,
+    uploads_resumed: int = 0,
+    batch_items_resumed: int = 0,
+    job_ids: list[str] | None = None,
+    upload_ids: list[str] | None = None,
+    details: str = "",
+) -> AppRestart:
+    """Record one restart and what it recovered."""
+    restart = AppRestart(
+        id=new_id(),
+        jobs_resumed=jobs_resumed,
+        uploads_resumed=uploads_resumed,
+        batch_items_resumed=batch_items_resumed,
+        job_ids=list(job_ids or []),
+        upload_ids=list(upload_ids or []),
+        details=details,
+    )
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_restarts (
+                id, started_at, jobs_resumed, uploads_resumed,
+                batch_items_resumed, job_ids_json, upload_ids_json, details
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                restart.id,
+                restart.started_at,
+                restart.jobs_resumed,
+                restart.uploads_resumed,
+                restart.batch_items_resumed,
+                json.dumps(restart.job_ids),
+                json.dumps(restart.upload_ids),
+                restart.details,
+            ),
+        )
+    return restart
+
+
+def list_restarts(limit: int = 20) -> list[AppRestart]:
+    """Restarts, newest first."""
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM app_restarts
+             ORDER BY started_at DESC, rowid DESC
+             LIMIT ?
+            """,
+            (max(1, min(limit, 200)),),
+        ).fetchall()
+    return [AppRestart.from_row(row) for row in rows]
 
 
 # --------------------------------------------------------------------------

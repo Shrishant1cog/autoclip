@@ -47,12 +47,14 @@ class JobQueue:
         self._running_job_id: str | None = None
         self._cancel_requested: set[str] = set()
         self._stopping = False
+        #: Jobs recovered from an interrupted run (Phase 17).
+        self.resumed_job_ids: list[str] = []
 
     # -- lifecycle ---------------------------------------------------------
 
     async def start(self) -> None:
         """Start the worker and requeue anything left running by a crash."""
-        self._requeue_interrupted()
+        self.resumed_job_ids = self._requeue_interrupted()
         self._stopping = False
         self._wakeup = asyncio.Event()
         self._task = asyncio.create_task(self._worker(), name="autoclip-job-queue")
@@ -77,11 +79,20 @@ class JobQueue:
         if self._wakeup is not None:
             self._wakeup.set()
 
-    def _requeue_interrupted(self) -> None:
+    def _requeue_interrupted(self) -> list[str]:
+        """Requeue jobs a crash left mid-flight.
+
+        Returns the ids that were resumed so the restart can be recorded and
+        the user can see that their work was picked back up (Phase 17).
+        """
         interrupted = store.list_jobs(limit=100, status="running")
+        resumed: list[str] = []
         for job in interrupted:
             log.info("Requeuing job %s, interrupted by a restart.", job.id)
             store.update_job(job.id, status="queued", error=None)
+            store.mark_job_resumed(job.id)
+            resumed.append(job.id)
+        return resumed
 
     # -- control -----------------------------------------------------------
 

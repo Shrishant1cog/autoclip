@@ -542,6 +542,112 @@ export interface Notification {
   created_at: string
 }
 
+// -- AI providers (Phase 3, surfaced in Phase 17) ----------------------------
+
+/**
+ * One provider preset with the state of its key pool.
+ *
+ * `keys_healthy` is the number of keys that are enabled and not cooling down
+ * — the ones that could actually answer a request right now.
+ */
+export interface ProviderPreset {
+  key: string
+  label: string
+  adapter: string
+  requires_key: boolean
+  default_model: string
+  default_base_url: string | null
+  suggested_models: string[]
+  capabilities: string[]
+  is_local: boolean
+  keys_total: number
+  keys_healthy: number
+  active: boolean
+}
+
+/** One key in a provider's pool. The value itself is never sent to the browser. */
+export interface ProviderKey {
+  label: string
+  enabled: boolean
+  failures: number
+  last_error: string
+  cooling_down: boolean
+  last_used: string
+}
+
+// -- YouTube accounts and channels (Phase 10, surfaced in Phase 17) -----------
+
+export interface YouTubeChannel {
+  id: string
+  account_id: string
+  channel_id: string
+  title: string
+  url: string
+  is_default: boolean
+  privacy: string
+  category_id: string
+  auto_upload: boolean
+  title_suffix: string
+  created_at: string
+  updated_at: string
+}
+
+export interface YouTubeAccount {
+  id: string
+  label: string
+  email: string
+  client_id: string
+  connected_at: string
+  created_at: string
+  /** Whether a refresh token is stored. The token itself never leaves the server. */
+  has_refresh_token: boolean
+  channels: YouTubeChannel[]
+}
+
+// -- Routing (Phase 5, surfaced in Phase 17) ---------------------------------
+
+export interface RoutingRule {
+  id: string
+  name: string
+  match_keyword: string
+  /** The channel *row* id (youtube_channels.id), not the YouTube channel id. */
+  target_channel_id: string
+  priority: number
+  enabled: boolean
+  extra_channel_ids: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface ClipClassification {
+  clip_id: string
+  category: string
+  confidence: number
+  provider: string
+  reason: string
+  created_at: string
+}
+
+// -- Restart history (Phase 17) ---------------------------------------------
+
+/**
+ * One restart of AutoClip and what it had to recover.
+ *
+ * The counts are the real numbers of rows that were recovered — not an
+ * estimate of how much work was lost.
+ */
+export interface AppRestart {
+  id: string
+  started_at: string
+  jobs_resumed: number
+  uploads_resumed: number
+  batch_items_resumed: number
+  total_resumed: number
+  job_ids: string[]
+  upload_ids: string[]
+  details: string
+}
+
 export const api = {
   health: () => request<{ status: string; version: string }>('/api/health'),
   system: () => request<SystemStatus>('/api/system'),
@@ -853,6 +959,124 @@ export const api = {
   resources: () => request<ResourceOverview>('/api/resources'),
   cleanupResources: () =>
     request<CleanupReport>('/api/resources/cleanup', { method: 'POST' }),
+
+  // -- AI providers (Phase 3, surfaced in Phase 17) -------------------------
+  listProviders: () => request<ProviderPreset[]>('/api/ai/providers'),
+  providerPresets: () => request<Record<string, Omit<ProviderPreset, 'key' | 'requires_key' | 'keys_total' | 'keys_healthy' | 'active'>>>('/api/ai/presets'),
+  providerKeys: (key: string) =>
+    request<ProviderKey[]>(`/api/ai/providers/${encodeURIComponent(key)}/keys`),
+  addProviderKey: (key: string, label: string, value: string) =>
+    request<{ stored: string }>(`/api/ai/providers/${encodeURIComponent(key)}/keys`, {
+      method: 'POST',
+      body: JSON.stringify({ label, value }),
+    }),
+  removeProviderKey: (key: string, label: string) =>
+    request<void>(
+      `/api/ai/providers/${encodeURIComponent(key)}/keys/${encodeURIComponent(label)}`,
+      { method: 'DELETE' },
+    ),
+  setProviderKeyEnabled: (key: string, label: string, enabled: boolean) =>
+    request<void>(
+      `/api/ai/providers/${encodeURIComponent(key)}/keys/${encodeURIComponent(label)}/state`,
+      { method: 'PUT', body: JSON.stringify({ enabled }) },
+    ),
+
+  // -- YouTube accounts and channels (Phase 10, surfaced in Phase 17) --------
+  listYouTubeAccounts: () => request<YouTubeAccount[]>('/api/youtube/accounts'),
+  createYouTubeAccount: (label: string, email: string) =>
+    request<YouTubeAccount>('/api/youtube/accounts', {
+      method: 'POST',
+      body: JSON.stringify({ label, email }),
+    }),
+  deleteYouTubeAccount: (id: string) =>
+    request<void>(`/api/youtube/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  listYouTubeChannels: (accountId: string) =>
+    request<YouTubeChannel[]>(`/api/youtube/accounts/${encodeURIComponent(accountId)}/channels`),
+  addYouTubeChannel: (
+    accountId: string,
+    channel: {
+      privacy?: string
+      category_id?: string
+      auto_upload?: boolean
+      is_default?: boolean | null
+      title_suffix?: string
+    },
+  ) =>
+    request<YouTubeChannel>(`/api/youtube/accounts/${encodeURIComponent(accountId)}/channels`, {
+      method: 'POST',
+      body: JSON.stringify(channel),
+    }),
+  updateYouTubeChannel: (
+    channelRowId: string,
+    patch: {
+      privacy?: string
+      category_id?: string
+      auto_upload?: boolean
+      is_default?: boolean
+      title?: string
+      title_suffix?: string
+    },
+  ) =>
+    request<YouTubeChannel>(`/api/youtube/accounts/channels/${encodeURIComponent(channelRowId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+  deleteYouTubeChannel: (channelRowId: string) =>
+    request<void>(`/api/youtube/accounts/channels/${encodeURIComponent(channelRowId)}`, {
+      method: 'DELETE',
+    }),
+
+  // -- Routing (Phase 5, surfaced in Phase 17) ------------------------------
+  routingCategories: () => request<string[]>('/api/routing/categories'),
+  listRoutingRules: () => request<RoutingRule[]>('/api/routing/rules'),
+  createRoutingRule: (rule: {
+    name?: string
+    match_keyword: string
+    target_channel_id: string
+    priority?: number
+    enabled?: boolean
+    extra_channel_ids?: string[]
+  }) =>
+    request<RoutingRule>('/api/routing/rules', {
+      method: 'POST',
+      body: JSON.stringify(rule),
+    }),
+  updateRoutingRule: (
+    ruleId: string,
+    patch: {
+      name?: string
+      match_keyword?: string
+      target_channel_id?: string
+      priority?: number
+      enabled?: boolean
+      extra_channel_ids?: string[]
+    },
+  ) =>
+    request<RoutingRule>(`/api/routing/rules/${encodeURIComponent(ruleId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+  deleteRoutingRule: (ruleId: string) =>
+    request<void>(`/api/routing/rules/${encodeURIComponent(ruleId)}`, { method: 'DELETE' }),
+  clipClassification: (clipId: string) =>
+    request<ClipClassification>(`/api/routing/clips/${encodeURIComponent(clipId)}/classification`),
+  classifyClip: (clipId: string) =>
+    request<ClipClassification>(`/api/routing/clips/${encodeURIComponent(clipId)}/classify`, {
+      method: 'POST',
+    }),
+  clipTarget: (clipId: string) =>
+    request<YouTubeChannel & { channel_row_id?: string }>(
+      `/api/routing/clips/${encodeURIComponent(clipId)}/target`,
+    ),
+
+  // -- Restart history (Phase 17) ------------------------------------------
+  listRestarts: (limit = 20) =>
+    request<{
+      restarts: AppRestart[]
+      latest: AppRestart | null
+      count: number
+      restarts_with_work: number
+    }>(`/api/restarts?limit=${limit}`),
 }
 
 /** Format seconds as m:ss, or h:mm:ss past an hour. */

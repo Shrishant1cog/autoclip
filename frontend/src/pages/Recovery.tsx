@@ -5,10 +5,15 @@
  * whose render did not survive validation. Each row carries the real error and
  * the action that would fix it — the retry button calls the endpoint that
  * already owns that work.
+ *
+ * The restart history sits underneath. AutoClip resumes interrupted work on
+ * startup, which is the right behaviour but used to be invisible: the job
+ * simply carried on. Now the restart is recorded and shown, so "why did this
+ * video start again?" has an answer.
  */
 import { useCallback, useEffect, useState } from 'react'
 
-import { api } from '../api'
+import { api, type AppRestart } from '../api'
 import { ErrorNote } from '../components/ErrorNote'
 
 interface RecoveryItem {
@@ -49,6 +54,7 @@ const CODE_LABEL: Record<string, string> = {
 export function Recovery() {
   const [items, setItems] = useState<RecoveryItem[]>([])
   const [counts, setCounts] = useState<Record<string, number>>({})
+  const [restarts, setRestarts] = useState<AppRestart[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<Error | null>(null)
@@ -67,9 +73,19 @@ export function Recovery() {
     }
   }, [])
 
+  const loadRestarts = useCallback(async () => {
+    try {
+      const history = await api.listRestarts(10)
+      setRestarts(history.restarts)
+    } catch (err) {
+      setError(err as Error)
+    }
+  }, [])
+
   useEffect(() => {
     void load()
-  }, [load])
+    void loadRestarts()
+  }, [load, loadRestarts])
 
   const retry = async (item: RecoveryItem) => {
     setBusy(item.id)
@@ -159,6 +175,66 @@ export function Recovery() {
           ))}
         </div>
       )}
+
+      <RestartHistory restarts={restarts} />
     </div>
+  )
+}
+
+/**
+ * What each restart had to pick back up.
+ *
+ * A restart with nothing in flight is the normal case and is listed plainly;
+ * the ones that resumed work stand out, because those are the runs where a
+ * stage may have had to start again.
+ */
+function RestartHistory({ restarts }: { restarts: AppRestart[] }) {
+  return (
+    <section className="mt-14 border-t border-ink-800 pt-8">
+      <div className="flex items-baseline gap-4">
+        <h2 className="eyebrow">Restarts</h2>
+        <span className="numeric text-xs text-ink-600">{restarts.length}</span>
+      </div>
+      <p className="mt-2 max-w-prose text-xs leading-relaxed text-ink-500">
+        AutoClip resumes interrupted work when it starts. These are the last restarts and
+        what each of them had to recover — the counts are the real rows, not an estimate.
+      </p>
+
+      {restarts.length === 0 ? (
+        <p className="mt-4 text-sm leading-relaxed text-ink-500">
+          No restart has been recorded yet.
+        </p>
+      ) : (
+        <div className="mt-4 space-y-2">
+          {restarts.map((restart) => (
+            <article
+              key={restart.id}
+              className="flex flex-wrap items-baseline justify-between gap-3 border border-ink-800 bg-ink-850/30 px-4 py-3"
+            >
+              <div className="min-w-0">
+                <p className="numeric text-xs text-ink-200">
+                  {new Date(restart.started_at).toLocaleString()}
+                </p>
+                {restart.total_resumed > 0 ? (
+                  <p className="mt-1 text-xs text-ink-400">
+                    Resumed {restart.jobs_resumed} job{restart.jobs_resumed === 1 ? '' : 's'},{' '}
+                    {restart.uploads_resumed} upload{restart.uploads_resumed === 1 ? '' : 's'},{' '}
+                    {restart.batch_items_resumed} batch item
+                    {restart.batch_items_resumed === 1 ? '' : 's'}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-ink-500">Nothing was in flight.</p>
+                )}
+              </div>
+              {restart.total_resumed > 0 && (
+                <span className="text-[10px] uppercase tracking-wider text-signal-warn">
+                  {restart.total_resumed} recovered
+                </span>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
