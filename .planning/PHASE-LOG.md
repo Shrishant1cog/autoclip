@@ -79,6 +79,25 @@ Baseline (Phase 0 checkpoint): commit `54d6288` on `main`, pushed to `origin/mai
 
 Each phase: implement → test → typecheck/build → commit → push. Log updated per phase.
 
+### Phase 3 — Universal AI provider manager (COMPLETE)
+
+- `providers/keypool.py`: multi-key pools per provider — OS keyring entries `<provider>#<label>`
+  (first key keeps the legacy bare name), pool metadata in `~/.autoclip/key_pools.json`
+  (non-secret). Rotation picks fewest-failures/least-recently-used; auth failures disable a
+  key, rate-limits impose a 60s self-recovering cooldown; success resets health.
+- `providers/presets.py`: 16 provider presets as data (openai, gemini, anthropic, openrouter,
+  groq, cerebras, deepseek, mistral, together, freellmapi, huggingface, nvidia, lmstudio,
+  llamacpp, vllm, ollama). OpenAI-compatible vendors share the `openai` adapter; locals need
+  no key and sort last in fallback chains; `freellmapi` has deliberately no hardcoded URL.
+  Capability registry maps tasks (clip_analysis→json, metadata→text, …).
+- `providers/resolver.py`: capability-aware fallback chains, `run_with_fallback`
+  (never fabricates — raises `AllProvidersFailedError`), `available_providers` summary.
+- `api/ai_providers.py`: `/api/ai/providers`, `/keys` (add/remove/enable), `/presets`,
+  `/health`, `/tasks` (task execution over the chain). Wired into `api/__init__.py`.
+- Tests: 16 new (`tests/test_ai_providers.py`); suite **396 passed**; ruff + tsc + build clean.
+- Live-verified: `/api/ai/providers` returns 16 presets with pool health; legacy single keys
+  surface as `primary` automatically; presets endpoint enumerates all 16.
+
 ### Phase 2 — Workflow engine foundation (COMPLETE — commit `b07e759`)
 
 - Migration v4: `workflows` (versioned, active flag), `workflow_runs`, `workflow_node_runs`.
