@@ -138,6 +138,24 @@ Each phase: implement → test → typecheck/build → commit → push. Log upda
 - Live-verified over HTTP: batch create → add real source → detail (item pending with
   source title) → delete. Defect fixed: module-vs-singleton import in app + API.
 
+### Phase 8 — Background music with speech-aware ducking (COMPLETE)
+
+- `config.py`: export settings `music_track`, `music_volume`, `music_ducking`,
+  `ducking_amount_db` (additive defaults: no track, 0.15, ducking on, -12 dB).
+- `pipeline/music.py`: track library in `~/.autoclip/music`; resolves bare names or
+  absolute paths; a missing track logs loudly and degrades to a plain export.
+- `pipeline/export.py`: `build_mixed_audio_filtergraph` mixes a looped, trimmed bed
+  under loudness-normalised speech with `sidechaincompress` keyed on the speech
+  (attack 120 ms, release 600 ms) and `amix … normalize=0` so speech level is
+  preserved. Sources with no audio skip the bed instead of failing.
+- `api/music.py`: `GET/POST /api/music/tracks`, `DELETE /api/music/tracks/{name}`.
+- Frontend Settings → Export → Background music: track picker, volume, ducking
+  toggle, ducking depth, upload and remove.
+- Verified: real ffmpeg render (looping 2.5 s bed under a 5 s clip), and a real
+  app export measured with `bandpass=f=330` — music-only energy up +1.6 dB in the
+  bed band while overall loudness stayed flat (found and fixed `amix` default
+  normalisation attenuating speech ~6 dB). Suite **446 passed**, ruff/tsc/build clean.
+
 ### Phase 7 — Visual workflow builder UI (COMPLETE)
 
 - `frontend/src/pages/Workflows.tsx`: n8n-inspired builder — infinite pan/zoom canvas

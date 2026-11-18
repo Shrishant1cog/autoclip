@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { api, type ProviderStatus, type Settings as SettingsData, type SystemStatus, type YouTubeStatus } from '../api'
+import { api, type MusicTrack, type ProviderStatus, type Settings as SettingsData, type SystemStatus, type YouTubeStatus } from '../api'
 import { ErrorNote } from '../components/ErrorNote'
 
 const SECRET_LABELS: Record<string, string> = {
@@ -26,6 +26,7 @@ export function Settings() {
   const [providers, setProviders] = useState<ProviderStatus[]>([])
   const [system, setSystem] = useState<SystemStatus | null>(null)
   const [youtube, setYoutube] = useState<YouTubeStatus | null>(null)
+  const [tracks, setTracks] = useState<MusicTrack[]>([])
   const [error, setError] = useState<Error | null>(null)
   const [saved, setSaved] = useState(false)
 
@@ -34,6 +35,7 @@ export function Settings() {
     void api.providerStatus().then(setProviders).catch(() => undefined)
     void api.system().then(setSystem).catch(() => undefined)
     void api.youtubeStatus().then(setYoutube).catch(() => undefined)
+    void api.listMusicTracks().then(setTracks).catch(() => undefined)
   }
 
   useEffect(reload, [])
@@ -386,6 +388,107 @@ export function Settings() {
           />
           Also write an .srt sidecar
         </label>
+
+        <div className="mt-8 border-t border-ink-800 pt-6">
+          <h3 className="text-sm text-ink-100">Background music</h3>
+          <p className="mt-1 text-xs leading-snug text-ink-500">
+            Tracks live in <code className="text-ink-400">~/.autoclip/music</code>. Music is looped
+            under the clip; ducking drops it while someone is speaking.
+          </p>
+
+          <div className="mt-4 grid gap-5 sm:grid-cols-2">
+            <Select
+              label="Track"
+              value={settings.export.music_track}
+              onChange={(value) => patch({ export: { ...settings.export, music_track: value } })}
+              options={['', ...tracks.map((t) => t.name)]}
+              labels={{ '': 'None' }}
+            />
+            <NumberField
+              label="Music volume (0–1)"
+              value={settings.export.music_volume}
+              onCommit={(value) => patch({ export: { ...settings.export, music_volume: value } })}
+            />
+          </div>
+
+          <label className="mt-4 flex items-center gap-3 text-sm text-ink-200">
+            <input
+              type="checkbox"
+              checked={settings.export.music_ducking}
+              onChange={(e) =>
+                patch({ export: { ...settings.export, music_ducking: e.target.checked } })
+              }
+              className="size-4 accent-sodium-500"
+            />
+            Duck the music while speech is present
+          </label>
+
+          {settings.export.music_ducking && (
+            <div className="mt-4 grid gap-5 sm:grid-cols-2">
+              <NumberField
+                label="Ducking depth (dB, negative)"
+                value={settings.export.ducking_amount_db}
+                onCommit={(value) =>
+                  patch({ export: { ...settings.export, ducking_amount_db: value } })
+                }
+              />
+            </div>
+          )}
+
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <label className="cursor-pointer border border-ink-700 px-3 py-2 text-xs text-ink-200 transition-colors hover:border-ink-600">
+              Add track…
+              <input
+                type="file"
+                accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0]
+                  e.target.value = ''
+                  if (!file) return
+                  try {
+                    await api.uploadMusicTrack(file)
+                    setTracks(await api.listMusicTracks())
+                  } catch (err) {
+                    setError(err as Error)
+                  }
+                }}
+              />
+            </label>
+            <span className="text-xs text-ink-500">
+              {tracks.length === 0 ? 'Library is empty.' : `${tracks.length} track${tracks.length === 1 ? '' : 's'} in library`}
+            </span>
+          </div>
+
+          {tracks.length > 0 && (
+            <ul className="mt-4 space-y-1">
+              {tracks.map((track) => (
+                <li
+                  key={track.name}
+                  className="flex items-center justify-between gap-3 border-b border-ink-850 py-2 text-sm"
+                >
+                  <span className="truncate text-ink-200">{track.name}</span>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api.deleteMusicTrack(track.name)
+                        setTracks(await api.listMusicTracks())
+                        if (settings.export.music_track === track.name) {
+                          await patch({ export: { ...settings.export, music_track: '' } })
+                        }
+                      } catch (err) {
+                        setError(err as Error)
+                      }
+                    }}
+                    className="text-xs text-ink-500 transition-colors hover:text-signal-bad"
+                  >
+                    remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </Section>
 
       <Section

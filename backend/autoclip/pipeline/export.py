@@ -176,7 +176,81 @@ def _zoom_filter(zoom: float, out_w: int, out_h: int) -> str:
 
 
 def build_audio_filtergraph(settings: ExportSettings) -> str:
+    """Speech-only loudness normalisation (no music bed configured)."""
     return f"loudnorm=I={settings.loudness_lufs}:TP={LOUDNESS_TRUE_PEAK}:LRA={LOUDNESS_RANGE}"
+
+
+def build_mixed_audio_filtergraph(
+    settings: ExportSettings, music_path: Path, duration_s: float
+) -> dict[str, object]:
+    """Filter graph mixing a music bed under the speech, with optional ducking.
+
+    Returns the pieces the ffmpeg invocation needs: ``filter_complex`` string,
+    the audio output label to map, and extra input arguments. Speech drives a
+    sidechain compressor over the bed when ducking is on — the classic
+    "background drops when someone talks" behaviour. Loudness normalisation
+    applies to the speech chain before the mix; the bed sits at
+    ``music_volume`` of full scale, dropping by ``ducking_amount_db`` while
+    speech is detected.
+
+    Input layout: ``[0:a]`` is the speech (the source clip) and ``[1:a]`` is the
+    music. The music is opened with ``-stream_loop -1`` so it covers clips
+    longer than the track, then trimmed to the clip duration.
+    """
+    vol = min(max(settings.music_volume, 0.0), 1.0)
+    duck_db = max(min(settings.ducking_amount_db, 0.0), -60.0)
+    # Convert dB to a linear threshold for sidechaincompress (1.0 = no drop).
+    duck_linear = 10 ** (duck_db / 20)
+    duration = max(duration_s, 0.001)
+
+    # Speech: loudness-normalise first, then it doubles as the ducking key.
+    speech = (
+        f"[0:a]loudnorm=I={settings.loudness_lufs}:TP={LOUDNESS_TRUE_PEAK}:"
+        f"LRA={LOUDNESS_RANGE}[sp]"
+    )
+    # Bed: trim to the clip, level it, format to match the speech for the mix.
+    bed = (
+        f"[1:a]atrim=0:{duration:.4f},asetpts=PTS-STARTPTS,"
+        f"volume={vol:.3f},aformat=sample_rates={AUDIO_SAMPLE_RATE}:channel_layouts=stereo[bed]"
+    )
+
+    if not settings.music_ducking:
+        complex_filter = (
+            f"{speech};{bed};"
+            f"[sp][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]"
+        )
+        return {
+            "filter_complex": complex_filter,
+            "map": "[aout]",
+            "input_args": ["-stream_loop", "-1", "-i", str(music_path)],
+        }
+
+    complex_filter = (
+        f"{speech};{bed};"
+        # Bed ducks while speech plays; attack/release keep it musical.
+        f"[bed][sp]sidechaincompress=threshold={duck_linear:.4f}:ratio=8:"
+        f"attack=120:release=600:makeup=1[ducked];"
+        f"[sp][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]"
+    )
+    return {
+        "filter_complex": complex_filter,
+        "map": "[aout]",
+        "input_args": ["-stream_loop", "-1", "-i", str(music_path)],
+    }
+
+
+def _source_has_audio(path: Path) -> bool:
+    """Whether the clip source has an audio stream.
+
+    When it does not, there is no speech for ducking to key on and no main
+    input to mix into — adding a bed would fail the render. Assume audio when
+    probing fails, matching the pre-music behaviour.
+    """
+    try:
+        return ffmpeg.probe(path).has_audio
+    except Exception:  # noqa: BLE001 - probe failure must not break export
+        log.debug("Could not probe %s for audio; assuming present.", path, exc_info=True)
+        return True
 
 
 def encoder_args(settings: ExportSettings) -> list[str]:
@@ -263,6 +337,30 @@ def export_clip(
 
     request.destination.parent.mkdir(parents=True, exist_ok=True)
 
+    # Optional music bed (Phase 8). A missing/misconfigured track degrades to
+    # the plain speech graph rather than failing the export. The video graph
+    # reads input 0; the music becomes input 1, so the mixed audio graph is
+    # rewritten to read speech from input 1 as well.
+    music_input_args: list[str] = []
+    music_map = "0:a?"
+    audio_filter_args: list[str] = ["-af", build_audio_filtergraph(settings)]
+    if settings.music_track and _source_has_audio(request.source):
+        from . import music as music_module
+
+        track = music_module.resolve_track(settings.music_track)
+        if track is not None:
+            mixed = build_mixed_audio_filtergraph(settings, track, request.duration_s)
+            filtergraph = f"{filtergraph};{mixed['filter_complex']}"
+            music_input_args = mixed["input_args"]
+            music_map = mixed["map"]
+            audio_filter_args = []
+            log.info(
+                "Mixing music bed %s (volume=%.2f, ducking=%s)",
+                track.name,
+                settings.music_volume,
+                settings.music_ducking,
+            )
+
     # Input and output paths are ordinary argv arguments, so they stay absolute
     # and need no escaping regardless of the working directory.
     args = [
@@ -274,27 +372,31 @@ def export_clip(
         f"{request.duration_s:.4f}",
         "-i",
         str(request.source),
+        *music_input_args,
         "-filter_complex",
         filtergraph,
         "-map",
         "[vout]",
         "-map",
-        "0:a?",
-        "-af",
-        build_audio_filtergraph(settings),
-        *encoder_args(settings),
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "aac",
-        "-b:a",
-        AUDIO_BITRATE,
-        "-ar",
-        str(AUDIO_SAMPLE_RATE),
-        "-movflags",
-        "+faststart",
-        str(request.destination),
+        music_map,
     ]
+    args.extend(audio_filter_args)
+    args.extend(
+        [
+            *encoder_args(settings),
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            AUDIO_BITRATE,
+            "-ar",
+            str(AUDIO_SAMPLE_RATE),
+            "-movflags",
+            "+faststart",
+            str(request.destination),
+        ]
+    )
 
     try:
         ffmpeg.run(

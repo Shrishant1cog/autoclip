@@ -127,6 +127,15 @@ class ExportSettings(BaseModel):
     crf: int = 18
     #: Also write a .srt sidecar next to each exported clip.
     write_srt: bool = False
+    #: Background music (Phase 8): file name inside ~/.autoclip/music/, or an
+    #: absolute path. Empty = no bed. Looped to the clip duration when shorter.
+    music_track: str = ""
+    #: Music bed level relative to speech before ducking (0.0 - 1.0).
+    music_volume: float = 0.15
+    #: Duck the bed while speech is present (ffmpeg sidechaincompress).
+    music_ducking: bool = True
+    #: How far the bed drops when speech is detected, in dB (negative).
+    ducking_amount_db: float = -12.0
 
 
 class YouTubeSettings(BaseModel):

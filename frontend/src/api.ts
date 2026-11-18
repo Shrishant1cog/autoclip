@@ -176,6 +176,10 @@ export interface Settings {
     prefer_hardware_encoder: boolean
     crf: number
     write_srt: boolean
+    music_track: string
+    music_volume: number
+    music_ducking: boolean
+    ducking_amount_db: number
   }
   youtube: {
     client_id: string
@@ -379,6 +383,11 @@ export interface BatchProgress {
   cancelled: number
 }
 
+export interface MusicTrack {
+  name: string
+  path: string
+}
+
 export interface Batch {
   id: string
   name: string
@@ -526,6 +535,16 @@ export const api = {
   cancelBatch: (id: string) => request<Batch>(`/api/batches/${id}/cancel`, { method: 'POST' }),
   retryBatchFailed: (id: string) =>
     request<{ requeued: number }>(`/api/batches/${id}/retry-failed`, { method: 'POST' }),
+
+  // -- Music library (Phase 8) ----------------------------------------------
+  listMusicTracks: () => request<MusicTrack[]>(`/api/music/tracks`),
+  uploadMusicTrack: async (file: File) => {
+    const body = new FormData()
+    body.append('file', file)
+    return request<MusicTrack>(`/api/music/tracks`, { method: 'POST', body })
+  },
+  deleteMusicTrack: (name: string) =>
+    request<void>(`/api/music/tracks/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 }
 
 /** Format seconds as m:ss, or h:mm:ss past an hour. */
