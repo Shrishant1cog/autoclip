@@ -231,6 +231,15 @@ class LLMProvider(ABC):
         system = load_prompt(config.prompt_version)
         user = render_window_prompt(window, config)
 
+        # Phase 11: the user's improve.txt standing instructions ride along on
+        # every detection call. A read failure must never break detection.
+        try:
+            from ..learning import improve
+
+            system += improve.prompt_section()
+        except Exception:  # noqa: BLE001
+            log.debug("Could not load improve.txt feedback.", exc_info=True)
+
         raw = await self._complete(system, user, config)
         try:
             return self._parse(raw, window)

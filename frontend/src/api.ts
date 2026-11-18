@@ -560,6 +560,61 @@ export const api = {
   },
   deleteMusicTrack: (name: string) =>
     request<void>(`/api/music/tracks/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+
+  // -- Learning (Phase 11) ---------------------------------------------------
+  learningSummary: () =>
+    request<{
+      clips: number
+      exported: number
+      invalid: number
+      discarded: number
+      uploads_done: number
+      uploads_failed: number
+      sources: number
+      validation_failures: Record<string, number>
+    }>('/api/learning/summary'),
+  learningScoreBands: () =>
+    request<
+      {
+        band: string
+        total: number
+        kept: number
+        discarded: number
+        exported: number
+        uploaded: number
+        trimmed: number
+        keep_rate: number
+        export_rate: number
+      }[]
+    >('/api/learning/score-bands'),
+  learningChannels: () =>
+    request<
+      {
+        channel_row_id: string
+        channel_title: string
+        total: number
+        done: number
+        failed: number
+        skipped: number
+        pending: number
+      }[]
+    >('/api/learning/channels'),
+  learningFeedback: () =>
+    request<{ path: string; content: string; max_chars: number }>('/api/learning/feedback'),
+  saveLearningFeedback: (content: string) =>
+    request<{ saved: boolean; active_chars: number }>('/api/learning/feedback', {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    }),
+  channelNote: (channelId: string) =>
+    request<{ channel_id: string; note: string; path: string }>(
+      `/api/learning/channel-note/${encodeURIComponent(channelId)}`,
+    ),
+  saveChannelNote: (channelId: string, note: string) =>
+    request<{ saved: boolean; note: string }>(
+      `/api/learning/channel-note/${encodeURIComponent(channelId)}`,
+      { method: 'PUT', body: JSON.stringify({ channel_id: channelId, note }) },
+    ),
 }
 
 /** Format seconds as m:ss, or h:mm:ss past an hour. */

@@ -665,7 +665,180 @@ export function Settings() {
           </dl>
         </Section>
       )}
+
+      <LearningSection onError={setError} />
     </div>
+  )
+}
+
+/** Phase 11: outcome stats plus the improve.txt steering file. */
+function LearningSection({ onError }: { onError: (err: Error) => void }) {
+  const [summary, setSummary] = useState<Awaited<ReturnType<typeof api.learningSummary>> | null>(
+    null,
+  )
+  const [bands, setBands] = useState<Awaited<ReturnType<typeof api.learningScoreBands>>>([])
+  const [channelRows, setChannelRows] = useState<Awaited<ReturnType<typeof api.learningChannels>>>(
+    [],
+  )
+  const [feedback, setFeedback] = useState('')
+  const [feedbackPath, setFeedbackPath] = useState('')
+  const [maxChars, setMaxChars] = useState(4000)
+  const [draft, setDraft] = useState('')
+  const [savedAt, setSavedAt] = useState<string | null>(null)
+
+  useEffect(() => {
+    void api
+      .learningSummary()
+      .then(setSummary)
+      .catch(() => undefined)
+    void api
+      .learningScoreBands()
+      .then(setBands)
+      .catch(() => undefined)
+    void api
+      .learningChannels()
+      .then(setChannelRows)
+      .catch(() => undefined)
+    void api
+      .learningFeedback()
+      .then((data) => {
+        setFeedbackPath(data.path)
+        setFeedback(data.content)
+        setDraft(data.content)
+        setMaxChars(data.max_chars)
+      })
+      .catch(() => undefined)
+  }, [])
+
+  const dirty = draft !== feedback
+
+  const save = async () => {
+    try {
+      const result = await api.saveLearningFeedback(draft)
+      setFeedback(draft)
+      setSavedAt(`${result.active_chars} chars active`)
+    } catch (err) {
+      onError(err as Error)
+    }
+  }
+
+  return (
+    <Section title="Learning" note="What the pipeline has done, and standing instructions for the clip finder.">
+      {summary && (
+        <div className="grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
+          <Row label="Clips produced" value={String(summary.clips)} />
+          <Row label="Exported" value={String(summary.exported)} />
+          <Row label="Failed validation" value={String(summary.invalid)} />
+          <Row label="Discarded" value={String(summary.discarded)} />
+          <Row label="Uploads published" value={String(summary.uploads_done)} />
+          <Row label="Uploads failed" value={String(summary.uploads_failed)} />
+        </div>
+      )}
+
+      {summary && Object.keys(summary.validation_failures).length > 0 && (
+        <p className="mt-3 text-xs text-ink-500">
+          Most common failed checks:{' '}
+          {Object.entries(summary.validation_failures)
+            .slice(0, 4)
+            .map(([name, count]) => `${name} (${count})`)
+            .join(', ')}
+        </p>
+      )}
+
+      {bands.some((band) => band.total > 0) && (
+        <div className="mt-8">
+          <h3 className="text-sm text-ink-100">Do high scores survive?</h3>
+          <p className="mt-1 text-xs leading-snug text-ink-500">
+            If clips scored 85+ are discarded more often than 70s, the model's scoring is
+            miscalibrated for your taste — write the correction in the feedback box below.
+          </p>
+          <table className="mt-4 w-full text-sm">
+            <thead>
+              <tr className="border-b border-ink-800 text-left text-xs text-ink-500">
+                <th className="py-2 font-normal">Score band</th>
+                <th className="py-2 font-normal">Clips</th>
+                <th className="py-2 font-normal">Kept</th>
+                <th className="py-2 font-normal">Exported</th>
+                <th className="py-2 font-normal">Published</th>
+                <th className="py-2 font-normal">Trimmed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bands
+                .filter((band) => band.total > 0)
+                .map((band) => (
+                  <tr key={band.band} className="border-b border-ink-850">
+                    <td className="numeric py-2 text-ink-200">{band.band}</td>
+                    <td className="numeric py-2 text-ink-300">{band.total}</td>
+                    <td className="numeric py-2 text-ink-300">{band.kept}</td>
+                    <td className="numeric py-2 text-ink-300">{band.exported}</td>
+                    <td className="numeric py-2 text-ink-300">{band.uploaded}</td>
+                    <td className="numeric py-2 text-ink-300">{band.trimmed}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {channelRows.length > 0 && (
+        <div className="mt-8">
+          <h3 className="text-sm text-ink-100">Per-channel uploads</h3>
+          <table className="mt-4 w-full text-sm">
+            <thead>
+              <tr className="border-b border-ink-800 text-left text-xs text-ink-500">
+                <th className="py-2 font-normal">Channel</th>
+                <th className="py-2 font-normal">Published</th>
+                <th className="py-2 font-normal">Failed</th>
+                <th className="py-2 font-normal">Skipped</th>
+                <th className="py-2 font-normal">Queued</th>
+              </tr>
+            </thead>
+            <tbody>
+              {channelRows.map((row) => (
+                <tr key={row.channel_row_id || 'legacy'} className="border-b border-ink-850">
+                  <td className="py-2 text-ink-200">{row.channel_title}</td>
+                  <td className="numeric py-2 text-ink-300">{row.done}</td>
+                  <td className="numeric py-2 text-ink-300">{row.failed}</td>
+                  <td className="numeric py-2 text-ink-300">{row.skipped}</td>
+                  <td className="numeric py-2 text-ink-300">{row.pending}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="mt-8">
+        <h3 className="text-sm text-ink-100">Standing instructions</h3>
+        <p className="mt-1 text-xs leading-snug text-ink-500">
+          Injected into every highlight-detection call. Lines starting with <code>#</code> are
+          ignored. File: <code className="text-ink-400">{feedbackPath}</code>
+        </p>
+        <textarea
+          className="field mt-3 min-h-40 w-full font-mono text-xs leading-relaxed"
+          value={draft}
+          maxLength={100_000}
+          onChange={(e) => setDraft(e.target.value)}
+          spellCheck={false}
+        />
+        <div className="mt-3 flex items-center gap-4">
+          <button
+            onClick={save}
+            disabled={!dirty}
+            className="border border-ink-700 px-3 py-2 text-xs text-ink-100 transition-colors enabled:hover:border-sodium-600 disabled:opacity-40"
+          >
+            {dirty ? 'Save instructions' : 'Saved'}
+          </button>
+          {savedAt && <span className="text-xs text-ink-500">{savedAt}</span>}
+          {draft.length > maxChars && (
+            <span className="text-xs text-signal-bad">
+              Only the first {maxChars.toLocaleString()} characters reach the model.
+            </span>
+          )}
+        </div>
+      </div>
+    </Section>
   )
 }
 

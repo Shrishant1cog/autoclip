@@ -138,6 +138,32 @@ Each phase: implement → test → typecheck/build → commit → push. Log upda
 - Live-verified over HTTP: batch create → add real source → detail (item pending with
   source title) → delete. Defect fixed: module-vs-singleton import in app + API.
 
+### Phase 11 — Analytics and the learning engine (COMPLETE)
+
+- `learning/analytics.py`: honest outcome aggregates — pipeline summary
+  (clips/exported/invalid/discarded/uploads/sources plus the most common
+  validation failures), score-band outcomes (keep/export/upload/trim rates per
+  85-100 / 70-84 / 50-69 / 0-49 band, the calibration evidence), and per-channel
+  upload outcomes.
+- `learning/improve.py`: `~/.autoclip/improve.txt` — the user's standing
+  instructions, created with a commented template, comments stripped, capped at
+  4,000 characters. Injected into the highlight-detection system prompt on every
+  call (`providers/base.py`). Per-channel notes live in
+  `~/.autoclip/channels/<UC_id>.md` and steer upload titles.
+- `api/learning.py`: `GET /api/learning/{summary,score-bands,channels,feedback}`,
+  `PUT /api/learning/feedback` (blank content restores the template),
+  `GET/PUT /api/learning/channel-note/{channel_id}`.
+- Frontend Settings → Learning: counters, the score-band calibration table, the
+  per-channel upload table, and the standing-instructions editor (save writes
+  the file; the active-character count shows what actually reaches the model).
+- No fabricated performance data: until the YouTube quota increase lands,
+  learning is driven by the user's own keep/discard/trim decisions and
+  validation outcomes.
+- Verified live: real library shows 15 clips / 15 published, score bands 9/4/0/2,
+  per-channel 15 published + 6 skipped; UI save round-tripped to
+  `improve.txt` ("31 chars active"); the feedback is confirmed present in the
+  detection prompt. Suite **475 passed**, ruff/tsc/build clean.
+
 ### Phase 10 — Multi-channel publishing fan-out (COMPLETE)
 
 - Migration **v9**: `youtube_uploads` rebuilt with `channel_row_id` (unique per

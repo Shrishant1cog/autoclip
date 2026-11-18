@@ -9,6 +9,7 @@ from . import (
     batches,
     clips,
     jobs,
+    learning,
     music,
     routing,
     settings,
@@ -32,3 +33,4 @@ api_router.include_router(youtube_accounts.router)
 api_router.include_router(routing.router)
 api_router.include_router(batches.router)
 api_router.include_router(music.router)
+api_router.include_router(learning.router)

@@ -69,10 +69,32 @@ async def generate_metadata(
     words: list[Word],
     duration_s: float,
     language: str = "",
+    channel_id: str = "",
 ) -> ClipMetadata:
-    """Ask the model for metadata, falling back to a local template on failure."""
+    """Ask the model for metadata, falling back to a local template on failure.
+
+    ``channel_id`` selects the per-channel feedback note
+    (``~/.autoclip/channels/<id>.md``) so each channel can steer its own
+    titles.
+    """
     transcript = " ".join(word.text for word in words).strip()
     short = duration_s <= SHORTS_MAX_S
+
+    channel_note = ""
+    if channel_id:
+        try:
+            from ..learning import improve
+
+            channel_note = improve.read_channel_note(channel_id)
+        except Exception:  # noqa: BLE001 - learning must never block publishing
+            log.debug("Could not read channel note for %s.", channel_id, exc_info=True)
+    channel_section = (
+        f"\nThe channel's editor left these standing notes about titles for "
+        f"this channel — follow them:\n---\n{channel_note}\n---\n"
+        if channel_note
+        else ""
+    )
+
     prompt = USER_TEMPLATE.format(
         title=title or "Untitled clip",
         reason=reason or "A self-contained moment.",
@@ -91,6 +113,8 @@ async def generate_metadata(
             else "Do not mention Shorts in the title, description, or tags."
         ),
     )
+    if channel_section:
+        prompt = f"{prompt}\n{channel_section}"
 
     try:
         raw = await provider.generate_text(SYSTEM_PROMPT, prompt, temperature=0.5)

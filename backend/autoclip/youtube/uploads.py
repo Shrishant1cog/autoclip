@@ -177,13 +177,9 @@ async def process_upload(upload: YouTubeUpload, settings: config.Settings | None
             f"as upload {reference}."
         )
 
-    words, language = clip_words(clip)
-    generated = await _metadata(upload, clip, words, language, settings)
-    if not generated.title:
-        raise uploader.YouTubeError("The generated title was empty; nothing was uploaded.")
-
     # Phase 10: the row already names its channel (fan-out created it), so the
     # worker publishes to exactly that destination instead of re-routing.
+    # Resolved first because metadata generation uses the channel's note.
     privacy = upload.privacy or settings.youtube.privacy
     category_id = settings.youtube.category_id
     account_id: str | None = None
@@ -200,9 +196,6 @@ async def process_upload(upload: YouTubeUpload, settings: config.Settings | None
         privacy = upload.privacy or channel["privacy"]
         category_id = channel["category_id"]
         account_id = channel["account_id"]
-        suffix = channel.get("title_suffix") or ""
-        if suffix and not generated.title.endswith(suffix):
-            generated.title = f"{generated.title} {suffix}".strip()
     else:
         # Legacy path: no channel profile, fall back to rule routing.
         try:
@@ -216,6 +209,23 @@ async def process_upload(upload: YouTubeUpload, settings: config.Settings | None
             privacy = upload.privacy or channel["privacy"]
             category_id = channel["category_id"]
             account_id = channel["account_id"]
+
+    words, language = clip_words(clip)
+    generated = await _metadata(
+        upload,
+        clip,
+        words,
+        language,
+        settings,
+        channel_id=(channel or {}).get("channel_id", ""),
+    )
+    if not generated.title:
+        raise uploader.YouTubeError("The generated title was empty; nothing was uploaded.")
+
+    if upload.channel_row_id and channel is not None:
+        suffix = channel.get("title_suffix") or ""
+        if suffix and not generated.title.endswith(suffix):
+            generated.title = f"{generated.title} {suffix}".strip()
 
     video_id = await asyncio.to_thread(
         uploader.upload_video,
@@ -297,8 +307,13 @@ async def _metadata(
     words: list[Word],
     language: str,
     settings: config.Settings,
+    channel_id: str = "",
 ) -> metadata_module.ClipMetadata:
-    """Use stored metadata when it exists; otherwise ask the model."""
+    """Use stored metadata when it exists; otherwise ask the model.
+
+    ``channel_id`` (the destination channel's UC_… id) selects that channel's
+    learning note so per-channel title preferences apply.
+    """
     if upload.title and upload.description:
         return metadata_module.ClipMetadata(
             title=upload.title, description=upload.description, tags=list(upload.tags)
@@ -308,7 +323,10 @@ async def _metadata(
     provider = _build_provider(settings)
     generated: metadata_module.ClipMetadata | None = None
     try:
-        generated = await _ask(provider, title, hook, reason, words, clip.duration_s, language)
+        generated = await _ask(
+            provider, title, hook, reason, words, clip.duration_s, language,
+            channel_id=channel_id,
+        )
     except Exception as exc:  # metadata must never block the upload
         log.warning("Metadata generation failed (%s).", exc)
         if settings.active_provider != "ollama" and looks_like_auth_failure(exc):
@@ -321,6 +339,7 @@ async def _metadata(
                     words,
                     clip.duration_s,
                     language,
+                    channel_id=channel_id,
                 )
             except Exception as fallback_exc:
                 log.warning("The Ollama metadata fallback failed too (%s).", fallback_exc)
@@ -347,6 +366,7 @@ async def _ask(
     words: list[Word],
     duration_s: float,
     language: str,
+    channel_id: str = "",
 ) -> metadata_module.ClipMetadata:
     return await metadata_module.generate_metadata(
         provider,
@@ -356,6 +376,7 @@ async def _ask(
         words=words,
         duration_s=duration_s,
         language=language,
+        channel_id=channel_id,
     )
 
 
