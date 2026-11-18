@@ -34,6 +34,7 @@ export function App() {
             <TopLink to="/clips">Clips</TopLink>
             <TopLink to="/assistant">Assistant</TopLink>
             <TopLink to="/trends">Trends</TopLink>
+            <TopLink to="/recovery">Recovery</TopLink>
             <TopLink to="/workflows">Workflows</TopLink>
             <TopLink to="/settings">Settings</TopLink>
           </nav>

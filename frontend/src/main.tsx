@@ -6,8 +6,10 @@ import { App } from './App'
 import './index.css'
 import { Assistant } from './pages/Assistant'
 import { Clips } from './pages/Clips'
+import { ErrorBoundary, RouteError } from './components/ErrorBoundary'
 import { Ingest } from './pages/Ingest'
 import { JobProgress } from './pages/JobProgress'
+import { Recovery } from './pages/Recovery'
 import { Review } from './pages/Review'
 import { Settings } from './pages/Settings'
 import { Trends } from './pages/Trends'
@@ -17,10 +19,14 @@ const router = createBrowserRouter([
   {
     path: '/',
     element: <App />,
+    // A screen that crashes while rendering is caught here — React Router
+    // handles route errors before an outer React boundary ever sees them.
+    errorElement: <RouteError />,
     children: [
       { index: true, element: <Ingest /> },
       { path: 'clips', element: <Clips /> },
       { path: 'assistant', element: <Assistant /> },
+      { path: 'recovery', element: <Recovery /> },
       { path: 'trends', element: <Trends /> },
       { path: 'workflows', element: <Workflows /> },
       { path: 'jobs/:jobId', element: <JobProgress /> },
@@ -32,6 +38,8 @@ const router = createBrowserRouter([
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <RouterProvider router={router} />
+    <ErrorBoundary>
+      <RouterProvider router={router} />
+    </ErrorBoundary>
   </React.StrictMode>,
 )

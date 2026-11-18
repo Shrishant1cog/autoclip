@@ -10,6 +10,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
+from .. import errors
 from ..db import store
 from ..pipeline import ingest
 from .schemas import SourceOut, YouTubeIngestIn
@@ -64,6 +65,7 @@ async def upload_source(file: UploadFile = File(...)) -> SourceOut:
             detail={
                 "message": f"{suffix or 'This file'} is not a supported format.",
                 "hint": f"Accepted: {', '.join(sorted(ingest.ACCEPTED_SUFFIXES))}",
+                "code": errors.VALIDATION,
             },
         )
 
@@ -85,7 +87,8 @@ async def upload_source(file: UploadFile = File(...)) -> SourceOut:
     except ingest.IngestError as exc:
         staging_path.unlink(missing_ok=True)
         raise HTTPException(
-            status_code=422, detail={"message": str(exc), "hint": exc.hint}
+            status_code=422,
+            detail={"message": str(exc), "hint": exc.hint, "code": errors.MEDIA},
         ) from exc
     finally:
         shutil.rmtree(staging_path.parent / staging_path.name, ignore_errors=True)

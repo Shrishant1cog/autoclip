@@ -138,6 +138,76 @@ Each phase: implement → test → typecheck/build → commit → push. Log upda
 - Live-verified over HTTP: batch create → add real source → detail (item pending with
   source title) → delete. Defect fixed: module-vs-singleton import in app + API.
 
+### Phase 15 — Unified error handling and the recovery centre (COMPLETE)
+
+- `errors.py`: one taxonomy for the whole app. Stable codes — `auth`,
+  `quota`, `rate_limit`, `provider`, `network`, `timeout`, `not_found`,
+  `validation`, `config`, `media`, `conflict`, `internal` — each with a
+  default status, a hint that says the fix, and a **retryability decision
+  that is a property of the cause, not of the mood**: a rate limit or a
+  dropped connection is worth retrying; a rejected credential is not, and
+  telling the user to "try again" there would be a lie.
+  - The real message is always preserved. An unrecognised exception becomes
+    `internal` with its own text — never a guessed cause. An exception that
+    carries an explicit `code` wins over the marker heuristics.
+- `app.py`: `_install_error_handlers()` gives **every** API failure the same
+  JSON body — `{detail, code, hint, retryable}` — for `HTTPException`,
+  `RequestValidationError` and unhandled exceptions alike. Structured
+  `detail` objects (the ingest endpoints' `{message, hint}`) are flattened
+  into that shape, so the client has one contract rather than two.
+- `recovery.py` + `api/recovery.py`: `GET /api/recovery` — one list of
+  everything that failed: failed jobs, failed uploads, and clips whose render
+  did not survive validation. Each item carries the real error, its
+  classification, and the action that would fix it, pointing at the endpoint
+  that already owns that work (retry a job, retry an upload, re-render a
+  clip). The list is read-only — nothing starts work behind the user's back.
+- Frontend: `ApiError` carries `code` and `retryable`; `ErrorNote` shows the
+  code and offers **Try again** when the server says a retry is worth
+  attempting; a new `ErrorBoundary` catches a render crash and offers a way
+  out instead of a blank page; a new **Recovery** page (`/recovery`, in the
+  top nav) lists the failures with their fix.
+- **Three real defects found and fixed by this phase's live run:**
+  1. *The crash boundary never ran.* React Router catches route render
+     errors before an outer React boundary sees them, so the app showed
+     React Router's bare "Unexpected Application Error!" page. The router
+     now has its own `errorElement` (`RouteError`), and the outer
+     `ErrorBoundary` catches crashes outside the route tree — both showing
+     the same friendly screen with a way back. Verified live by crashing a
+     screen on purpose and confirming the recovery screen appeared.
+  2. *The recovery action ignored the cause.* A failed upload whose file
+     was gone was offered "Try publishing again", which would fail in
+     exactly the same way. The action now follows the cause: a transient
+     failure (rate limit, network, timeout) offers a retry; a missing file
+     offers **Render it again**; a rejected credential is not offered as a
+     retry at all, because the user has to fix something first.
+  3. *A recovered failure stayed in the list forever.* Re-rendering a clip
+     creates a new export and a new upload, but the original failed row
+     remained as history — and the recovery list kept asking for a fix that
+     had already been applied. A failure whose clip has been rendered again
+     since it failed is now recognised as superseded and drops off the list.
+- Verified live against the real project:
+  - a 404, a 422 validation error and a 415 unsupported upload all returned
+    the unified body with the right code and a real hint;
+  - a **genuine unhandled crash** — a transcript file corrupted on disk so
+    `json.loads` raised — returned a classified 500 with the real message and
+    no stack trace, and the file was restored afterwards;
+  - the recovery centre classified real seeded failures correctly
+    ("quota exceeded" → `quota`, "429 Too Many Requests" → `rate_limit`,
+    "the file has been moved or deleted" → `not_found`) and offered the
+    right action for each;
+  - the **upload retry action** was exercised end-to-end: `failed` →
+    `pending` → the worker picked it up → it failed again with a real,
+    honest error → a notification with the real title was left behind;
+  - the **job retry action** was exercised end-to-end in an isolated
+    instance: `failed` → `queued` → the worker ran it → it failed again
+    with a real error → it was back in the recovery list with "Run it
+    again";
+  - the **"Render it again" action** was exercised from the browser: the
+    clip was re-rendered (a real 34 MB file), a new upload was queued and
+    correctly **skipped as a duplicate** (that clip is already published),
+    and the superseded failure then dropped off the recovery list.
+- Suite **554 passed**, ruff/tsc/build clean.
+
 ### Phase 14 — The notification centre (COMPLETE)
 
 - **Migration v10** adds a `notifications` table: kind, severity

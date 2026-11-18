@@ -13,11 +13,12 @@ import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, db, paths
+from . import __version__, db, errors, paths
 from .api import api_router
 from .jobs.events import broker
 from .jobs.queue import queue
@@ -94,6 +95,8 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    _install_error_handlers(app)
+
     app.include_router(api_router)
 
     @app.get("/api/health")
@@ -108,6 +111,83 @@ def create_app() -> FastAPI:
 
     _mount_frontend(app)
     return app
+
+
+def _install_error_handlers(app: FastAPI) -> None:
+    """Make every API failure look the same to the client.
+
+    One JSON shape — ``{detail, code, hint, retryable}`` — with a stable code
+    the UI can branch on. Without this, the client had to guess from prose
+    whether a failure was worth retrying.
+    """
+
+    @app.exception_handler(HTTPException)
+    async def handle_http_exception(request: Request, exc: HTTPException) -> JSONResponse:
+        # Some endpoints raise with a structured detail ({message, hint}) so
+        # the UI can show the fix alongside the failure. Those are flattened
+        # into the same shape as every other failure, so the client has one
+        # contract to parse rather than two.
+        message = ""
+        hint = ""
+        code = ""
+        detail = exc.detail
+        if isinstance(detail, dict):
+            message = str(detail.get("message") or detail.get("detail") or "Request failed.")
+            hint = str(detail.get("hint") or "")
+            code = str(detail.get("code") or "")
+        else:
+            message = str(detail)
+
+        if not code:
+            code = _code_for_status(exc.status_code)
+        if not hint:
+            hint = errors.classify_text(message, code=code).hint
+
+        info = errors.ErrorInfo(
+            code=code,
+            message=message,
+            hint=hint,
+            retryable=code in errors.RETRYABLE_CODES,
+            status=exc.status_code,
+        )
+        return JSONResponse(status_code=exc.status_code, content=info.to_response())
+
+    @app.exception_handler(RequestValidationError)
+    async def handle_validation(request: Request, exc: RequestValidationError) -> JSONResponse:
+        first = exc.errors()[0] if exc.errors() else {}
+        field = ".".join(str(part) for part in first.get("loc", [])[1:]) or "request"
+        message = f"{field}: {first.get('msg', 'is invalid')}."
+        info = errors.ErrorInfo(
+            code=errors.VALIDATION,
+            message=message,
+            hint="Check the values sent to this endpoint.",
+            retryable=False,
+            status=422,
+        )
+        return JSONResponse(status_code=422, content=info.to_response())
+
+    @app.exception_handler(Exception)
+    async def handle_unexpected(request: Request, exc: Exception) -> JSONResponse:
+        log.exception("Unhandled error on %s %s.", request.method, request.url.path)
+        info = errors.classify(exc)
+        return JSONResponse(status_code=info.status, content=info.to_response())
+
+
+def _code_for_status(status: int) -> str:
+    """The stable code for a bare HTTP status."""
+    if status == 404:
+        return errors.NOT_FOUND
+    if status == 409:
+        return errors.CONFLICT
+    if status in (401, 403):
+        return errors.AUTH
+    if status == 429:
+        return errors.RATE_LIMIT
+    if status in (400, 415, 422):
+        return errors.VALIDATION
+    if status >= 500:
+        return errors.INTERNAL
+    return errors.CONFIG
 
 
 def _mount_frontend(app: FastAPI) -> None:

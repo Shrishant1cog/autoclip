@@ -178,7 +178,12 @@ class TestSources:
         )
 
         assert response.status_code == 415
-        assert "supported" in response.json()["detail"]["message"]
+        body = response.json()
+        # The unified error shape (Phase 15): a flat detail plus a stable code.
+        assert "supported" in body["detail"]
+        assert body["code"] == "validation"
+        assert body["hint"]
+        assert body["retryable"] is False
 
 
 class TestJobs:

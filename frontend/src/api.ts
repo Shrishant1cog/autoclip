@@ -245,12 +245,18 @@ export interface JobSettingsOverrides {
 export class ApiError extends Error {
   hint: string
   status: number
+  /** The server's stable failure code (auth, quota, rate_limit, …). */
+  code: string
+  /** Whether trying the same thing again could plausibly work. */
+  retryable: boolean
 
-  constructor(message: string, status: number, hint = '') {
+  constructor(message: string, status: number, hint = '', code = '', retryable = false) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.hint = hint
+    this.code = code
+    this.retryable = retryable
   }
 }
 
@@ -266,6 +272,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`
     let hint = ''
+    let code = ''
+    let retryable = false
     try {
       const body = await response.json()
       const detail = body.detail
@@ -277,10 +285,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         message = detail.message ?? message
         hint = detail.hint ?? ''
       }
+      // The unified error shape (Phase 15) adds a stable code and whether a
+      // retry is worth attempting.
+      if (typeof body.code === 'string') code = body.code
+      if (typeof body.retryable === 'boolean') retryable = body.retryable
+      if (!hint && typeof body.hint === 'string') hint = body.hint
     } catch {
       /* Response had no JSON body; the status line is the best we have. */
     }
-    throw new ApiError(message, response.status, hint)
+    throw new ApiError(message, response.status, hint, code, retryable)
   }
 
   if (response.status === 204) return undefined as T
@@ -724,6 +737,38 @@ export const api = {
     }),
   clearReadNotifications: () =>
     request<{ removed: number }>('/api/notifications/clear', { method: 'POST' }),
+
+  // -- Recovery centre (Phase 15) ------------------------------------------
+  recoveryReport: () =>
+    request<{
+      items: {
+        kind: 'job' | 'upload' | 'clip'
+        id: string
+        title: string
+        detail: string
+        code: string
+        retryable: boolean
+        action: string
+        action_label: string
+        link: string
+        entity_id: string
+        created_at: string
+      }[]
+      counts: { job: number; upload: number; clip: number; total: number }
+    }>('/api/recovery'),
+  /**
+   * Run a recovery action.
+   *
+   * A re-render action needs an export body; the retry endpoints take none.
+   * The action path says which it is, so the caller does not have to know.
+   */
+  retryAction: (action: string) =>
+    request<unknown>(action, {
+      method: 'POST',
+      body: action.includes('/export')
+        ? JSON.stringify({ ratio: '9:16', style: 'bold_pop', write_srt: false })
+        : undefined,
+    }),
 }
 
 /** Format seconds as m:ss, or h:mm:ss past an hour. */
