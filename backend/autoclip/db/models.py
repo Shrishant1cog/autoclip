@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 SourceType = Literal["youtube", "upload"]
 JobStatus = Literal["queued", "running", "failed", "done", "cancelled"]
-ClipStatus = Literal["candidate", "kept", "discarded", "exported"]
+ClipStatus = Literal["candidate", "kept", "discarded", "exported", "invalid"]
 
 
 def new_id() -> str:
@@ -140,6 +140,9 @@ class Clip:
     reason: str = ""
     status: ClipStatus = "candidate"
     user_trimmed: bool = False
+    #: Validator report from the last export (checks + pass/fail). Empty when
+    #: the clip has not been validated yet.
+    validation: dict[str, Any] | None = None
     created_at: str = field(default_factory=utcnow)
 
     @property
@@ -162,6 +165,7 @@ class Clip:
             reason=row["reason"],
             status=row["status"],
             user_trimmed=bool(row["user_trimmed"]),
+            validation=json.loads(row["validation_json"]) if row["validation_json"] else None,
             created_at=row["created_at"],
         )
 

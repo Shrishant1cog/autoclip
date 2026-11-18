@@ -341,6 +341,44 @@ def _migration_v7(conn: sqlite3.Connection) -> None:
     conn.executescript(_V7)
 
 
+# --- v8: clip validation reports -------------------------------------------
+
+_V8 = """
+PRAGMA foreign_keys = OFF;
+CREATE TABLE clips_new (
+    id              TEXT PRIMARY KEY,
+    job_id          TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    rank            INTEGER NOT NULL DEFAULT 0,
+    start_s         REAL NOT NULL,
+    end_s           REAL NOT NULL,
+    start_word      INTEGER NOT NULL DEFAULT 0,
+    end_word        INTEGER NOT NULL DEFAULT 0,
+    title           TEXT NOT NULL DEFAULT '',
+    hook            TEXT NOT NULL DEFAULT '',
+    score           INTEGER NOT NULL DEFAULT 0,
+    reason          TEXT NOT NULL DEFAULT '',
+    status          TEXT NOT NULL DEFAULT 'candidate'
+                    CHECK (status IN ('candidate','kept','discarded','exported','invalid')),
+    user_trimmed    INTEGER NOT NULL DEFAULT 0,
+    validation_json TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL
+);
+INSERT INTO clips_new (id, job_id, rank, start_s, end_s, start_word, end_word,
+                       title, hook, score, reason, status, user_trimmed, created_at)
+SELECT id, job_id, rank, start_s, end_s, start_word, end_word,
+       title, hook, score, reason, status, user_trimmed, created_at
+FROM clips;
+DROP TABLE clips;
+ALTER TABLE clips_new RENAME TO clips;
+CREATE INDEX idx_clips_job ON clips(job_id, rank);
+PRAGMA foreign_keys = ON;
+"""
+
+
+def _migration_v8(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V8)
+
+
 #: Ordered migrations. Index + 1 is the resulting ``user_version``.
 #: Append only — never edit a migration that has shipped.
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
@@ -351,6 +389,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v5,
     _migration_v6,
     _migration_v7,
+    _migration_v8,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)

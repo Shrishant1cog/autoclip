@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import subprocess
 from collections.abc import Callable, Sequence
@@ -203,6 +204,46 @@ def probe(path: Path) -> MediaInfo:
         info.audio_codec = audio.get("codec_name")
 
     return info
+
+
+def volumedetect(path: Path) -> float | None:
+    """Peak audio level in dBFS, or ``None`` when ffmpeg reports none.
+
+    Used by clip validation to catch a render whose audio silently dropped out.
+    Raises :class:`FFmpegError` only if ffmpeg itself cannot run.
+    """
+    command = [
+        ffmpeg_path(),
+        "-hide_banner",
+        "-nostats",
+        "-i",
+        str(path),
+        "-map",
+        "0:a:0",
+        "-af",
+        "volumedetect",
+        "-f",
+        "null",
+        "-",
+    ]
+    proc = subprocess.run(command, capture_output=True, text=True, check=False, encoding="utf-8")
+    stderr = proc.stderr or ""
+    if proc.returncode != 0 and "does not contain any stream" in stderr:
+        raise FFmpegError(
+            f"{path.name} has no audio stream to measure.", command=command, stderr=stderr
+        )
+    if proc.returncode != 0:
+        raise FFmpegError(
+            f"Could not measure audio in {path.name}.", command=command, stderr=stderr
+        )
+
+    match = re.search(r"max_volume:\s*(-?(?:inf|\d+(?:\.\d+)?))\s*dB", stderr)
+    if not match:
+        return None
+    value = match.group(1)
+    if value in {"-inf", "-Infinity", "inf"}:
+        return float("-inf")
+    return float(value)
 
 
 def _as_int(value: object) -> int | None:

@@ -337,6 +337,7 @@ def update_clip(
     title: str | None = None,
     status: ClipStatus | None = None,
     user_trimmed: bool | None = None,
+    validation: dict[str, Any] | None = None,
 ) -> None:
     fields: dict[str, Any] = {}
     for name, value in (
@@ -351,6 +352,8 @@ def update_clip(
             fields[name] = value
     if user_trimmed is not None:
         fields["user_trimmed"] = int(user_trimmed)
+    if validation is not None:
+        fields["validation_json"] = json.dumps(validation)
 
     if not fields:
         return

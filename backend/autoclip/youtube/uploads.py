@@ -53,6 +53,16 @@ def enqueue_export(export_id: str, settings: config.Settings | None = None) -> Y
             log.warning("Cannot enqueue upload: export %s is missing.", export_id)
             return None
 
+        # Phase 9: a clip that failed validation is never published.
+        try:
+            clip = store.get_clip(export.clip_id)
+        except Exception:  # a lookup failure must not block an otherwise valid upload
+            log.debug("Could not read clip %s for upload gating.", export.clip_id, exc_info=True)
+            clip = None
+        if clip is not None and clip.status == "invalid":
+            log.warning("Not queueing upload for invalid clip %s.", clip.id)
+            return None
+
         upload = store.create_upload(
             YouTubeUpload(
                 id=new_id(),

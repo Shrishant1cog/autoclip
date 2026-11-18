@@ -138,6 +138,25 @@ Each phase: implement → test → typecheck/build → commit → push. Log upda
 - Live-verified over HTTP: batch create → add real source → detail (item pending with
   source title) → delete. Defect fixed: module-vs-singleton import in app + API.
 
+### Phase 9 — Clip validation gate (COMPLETE)
+
+- `pipeline/validate.py`: bounds checks (positive/min/max duration, word range,
+  inside the source) and media checks (file exists, size floor, ffprobe, video
+  stream, audio stream, exact resolution, duration tolerance, peak-level silence
+  test via the new `ffmpeg.volumedetect`).
+- Migration **v8** rebuilds `clips` to allow the `invalid` status and adds
+  `validation_json`; verified against a copy of the real 15-clip database
+  (rows preserved, `PRAGMA foreign_key_check` clean).
+- Runner and the manual export endpoint validate every render, persist the
+  report, mark failures `invalid`, and skip auto-publish. `enqueue_export` also
+  refuses an invalid clip, so an old queued row cannot slip through.
+- `POST /api/clips/{id}/validate` re-runs checks on the newest export; the
+  library shows `validated` / `failed checks` (with details on hover) plus
+  `re-check`.
+- Verified live: export → 8 checks all pass (1080×1920, 21.2 s vs 21.12 s,
+  peak −1.5 dBFS); sim/re-check endpoint returns ok; UI shows `validated`.
+  Suite **457 passed**, ruff/tsc/build clean.
+
 ### Phase 8 — Background music with speech-aware ducking (COMPLETE)
 
 - `config.py`: export settings `music_track`, `music_volume`, `music_ducking`,

@@ -68,6 +68,18 @@ export function Clips() {
       const updated = await api.getClip(clip.id)
       setClips((current) =>
         current.map((row) => (row.id === clip.id ? { ...row, ...updated } : row)),
+      )    } catch (err) {
+      setError(err as Error)
+    }
+  }, [])
+
+  const revalidate = useCallback(async (clip: LibraryClip) => {
+    setError(null)
+    try {
+      await api.validateClip(clip.id)
+      const updated = await api.getClip(clip.id)
+      setClips((current) =>
+        current.map((row) => (row.id === clip.id ? { ...row, ...updated } : row)),
       )
     } catch (err) {
       setError(err as Error)
@@ -177,6 +189,7 @@ export function Clips() {
               exporting={exporting.has(clip.id)}
               onExport={() => exportClip(clip)}
               onRetryUpload={(uploadId) => retryUpload(clip, uploadId)}
+              onRevalidate={() => revalidate(clip)}
             />
           ))}
         </ul>
@@ -191,12 +204,14 @@ function ClipLibraryRow({
   exporting,
   onExport,
   onRetryUpload,
+  onRevalidate,
 }: {
   clip: LibraryClip
   index: number
   exporting: boolean
   onExport: () => void
   onRetryUpload: (uploadId: string) => void
+  onRevalidate: () => void
 }) {
   const latest = clip.exports[clip.exports.length - 1]
   const finished = clip.job_status === 'done'
@@ -270,8 +285,29 @@ function ClipLibraryRow({
           </a>
         )}
 
-        {latest?.upload && (
-          <UploadBadge upload={latest.upload} onRetry={() => onRetryUpload(latest.upload!.id)} />
+          {latest?.upload && (
+            <UploadBadge upload={latest.upload} onRetry={() => onRetryUpload(latest.upload!.id)} />
+          )}
+
+        {clip.validation && !clip.validation.ok && (
+          <span
+            className="flex items-center gap-2 text-xs text-signal-bad"
+            title={clip.validation.checks
+              .filter((check) => !check.ok)
+              .map((check) => `${check.name}: ${check.detail}`)
+              .join('\n')}
+          >
+            failed checks
+            <button
+              onClick={onRevalidate}
+              className="text-ink-400 underline underline-offset-4 transition-colors hover:text-sodium-500"
+            >
+              re-check
+            </button>
+          </span>
+        )}
+        {clip.validation?.ok && clip.exports.length > 0 && (
+          <span className="text-xs text-ink-600">validated</span>
         )}
       </div>
     </li>

@@ -216,6 +216,7 @@ class ClipOut(BaseModel):
     reason: str
     status: str
     user_trimmed: bool
+    validation: dict | None = None
     caption_style: str = "bold_pop"
     ratio: str = "9:16"
     exports: list[ExportOut] = Field(default_factory=list)
@@ -245,6 +246,7 @@ class ClipOut(BaseModel):
             reason=clip.reason,
             status=clip.status,
             user_trimmed=clip.user_trimmed,
+            validation=clip.validation,
             caption_style=edit.caption_style if edit else "bold_pop",
             ratio=edit.ratio if edit else "9:16",
             exports=[ExportOut.of(e, uploads.get(e.id)) for e in (exports or [])],

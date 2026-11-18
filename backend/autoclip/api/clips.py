@@ -15,6 +15,7 @@ from ..db import store
 from ..db.models import Export, new_id
 from ..pipeline import captions as captions_module
 from ..pipeline import export as export_module
+from ..pipeline import validate as validate_module
 from ..pipeline.reframe.croppath import CropPath, centre_crop
 from ..pipeline.runner import JobWorkspace
 from ..pipeline.transcript import Transcript, Word
@@ -270,9 +271,32 @@ async def export_clip(clip_id: str, payload: ExportRequestIn) -> ExportOut:
         size_bytes=destination.stat().st_size,
     )
     await asyncio.to_thread(store.create_export, record)
-    await asyncio.to_thread(store.update_clip, clip_id, status="exported")
+
+    # Phase 9: validate the render, gate publishing on the result.
+    report = await asyncio.to_thread(
+        validate_module.validate_media,
+        destination,
+        expected_duration_s=clip.duration_s,
+        expected_size=export_module.ratio_dimensions(payload.ratio),
+        require_audio=bool(source.has_audio),
+    )
+    await asyncio.to_thread(
+        store.update_clip,
+        clip_id,
+        status="exported" if report.ok else "invalid",
+        validation=report.to_dict(),
+    )
 
     upload = None
+    if not report.ok:
+        log.warning(
+            "Export %s failed validation for clip %s: %s",
+            record.id,
+            clip_id,
+            "; ".join(report.failures()),
+        )
+        return ExportOut.of(record, None)
+
     try:
         from ..youtube import uploads as youtube_uploads
         from ..youtube.queue import upload_queue
@@ -284,6 +308,38 @@ async def export_clip(clip_id: str, payload: ExportRequestIn) -> ExportOut:
         log.exception("Could not queue a YouTube upload for export %s.", record.id)
 
     return ExportOut.of(record, upload)
+
+
+@router.post("/clips/{clip_id}/validate")
+async def validate_clip(clip_id: str) -> dict:
+    """Re-run validation on a clip's newest export and persist the result."""
+    clip = await asyncio.to_thread(store.get_clip, clip_id)
+    if clip is None:
+        raise HTTPException(status_code=404, detail="Clip not found.")
+
+    exports = await asyncio.to_thread(store.list_exports, clip_id)
+    if not exports:
+        raise HTTPException(status_code=409, detail="This clip has not been exported yet.")
+    latest = exports[-1]
+
+    job = await asyncio.to_thread(store.get_job, clip.job_id)
+    source = await asyncio.to_thread(store.get_source, job.source_id) if job else None
+
+    report = await asyncio.to_thread(
+        validate_module.validate_media,
+        Path(latest.path),
+        expected_duration_s=clip.duration_s,
+        expected_size=export_module.ratio_dimensions(latest.ratio),
+        require_audio=bool(source.has_audio) if source else True,
+    )
+    result = report.to_dict()
+    await asyncio.to_thread(
+        store.update_clip,
+        clip_id,
+        status="exported" if result["ok"] else "invalid",
+        validation=result,
+    )
+    return {"clip_id": clip_id, "export_id": latest.id, **result}
 
 
 @router.get("/exports/{export_id}/download")

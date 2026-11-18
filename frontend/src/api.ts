@@ -65,7 +65,7 @@ export interface ExportRecord {
   upload: UploadRecord | null
 }
 
-export type ClipStatus = 'candidate' | 'kept' | 'discarded' | 'exported'
+export type ClipStatus = 'candidate' | 'kept' | 'discarded' | 'exported' | 'invalid'
 
 export interface Clip {
   id: string
@@ -85,6 +85,10 @@ export interface Clip {
   caption_style: string
   ratio: string
   exports: ExportRecord[]
+  validation: {
+    ok: boolean
+    checks: { name: string; ok: boolean; detail: string }[]
+  } | null
 }
 
 /** A clip in the cross-job library, with the context needed to group it. */
@@ -535,6 +539,15 @@ export const api = {
   cancelBatch: (id: string) => request<Batch>(`/api/batches/${id}/cancel`, { method: 'POST' }),
   retryBatchFailed: (id: string) =>
     request<{ requeued: number }>(`/api/batches/${id}/retry-failed`, { method: 'POST' }),
+
+  // -- Clip validation (Phase 9) --------------------------------------------
+  validateClip: (clipId: string) =>
+    request<{
+      clip_id: string
+      export_id: string
+      ok: boolean
+      checks: { name: string; ok: boolean; detail: string }[]
+    }>(`/api/clips/${clipId}/validate`, { method: 'POST' }),
 
   // -- Music library (Phase 8) ----------------------------------------------
   listMusicTracks: () => request<MusicTrack[]>(`/api/music/tracks`),

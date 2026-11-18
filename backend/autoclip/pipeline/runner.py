@@ -28,7 +28,7 @@ from ..providers import LLMProvider, build_provider, detection_config
 from ..providers.base import looks_like_auth_failure, looks_like_transient_failure
 from ..speech import LocalWhisperSTT
 from ..speech import base as speech
-from . import Stage, captions, export, ffmpeg, highlights, ingest, prepare, transcribe
+from . import Stage, captions, export, ffmpeg, highlights, ingest, prepare, transcribe, validate
 from .prepare import Silence
 from .reframe import ReframeConfig, build_crop_path
 from .reframe.croppath import CropPath
@@ -578,6 +578,42 @@ class PipelineRunner:
 
             destination = self._maybe_narrate(destination, clip, index, len(clips), stage)
 
+            # Phase 9: validate the render before it can be published. A failed
+            # check marks the clip invalid and skips auto-publish; it never
+            # substitutes a different file.
+            report = validate.validate_media(
+                destination,
+                expected_duration_s=clip.duration_s,
+                expected_size=export.ratio_dimensions(ratio),
+                require_audio=self.source.has_audio,
+            )
+            bounds = validate.validate_bounds(
+                start_s=clip.start_s,
+                end_s=clip.end_s,
+                start_word=clip.start_word,
+                end_word=clip.end_word,
+                transcript=transcript,
+                min_duration_s=self.settings.clips.min_duration_s,
+                max_duration_s=self.settings.clips.max_duration_s,
+            )
+            combined = report.to_dict()
+            combined["checks"] = combined["checks"] + [
+                {"name": c.name, "ok": c.ok, "detail": c.detail} for c in bounds
+            ]
+            combined["ok"] = report.ok and all(c.ok for c in bounds)
+            store.update_clip(
+                clip.id,
+                status="exported" if combined["ok"] else "invalid",
+                validation=combined,
+            )
+            if not combined["ok"]:
+                log.warning(
+                    "Clip %s failed validation for job %s: %s",
+                    clip.id,
+                    self.job.id,
+                    "; ".join(c["name"] for c in combined["checks"] if not c["ok"]),
+                )
+
             record = Export(
                 id=new_id(),
                 clip_id=clip.id,
@@ -587,8 +623,8 @@ class PipelineRunner:
                 size_bytes=destination.stat().st_size,
             )
             store.create_export(record)
-            store.update_clip(clip.id, status="exported")
-            _maybe_enqueue_upload(record.id, self.settings)
+            if combined["ok"]:
+                _maybe_enqueue_upload(record.id, self.settings)
 
         self._finish_stage(stage)
 
