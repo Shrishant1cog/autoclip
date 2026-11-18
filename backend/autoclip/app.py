@@ -61,6 +61,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     broker.bind_loop(asyncio.get_running_loop())
 
+    # Phase 6: batch runner advances persistent batch queues item by item.
+    from .jobs.batch_runner import batch_runner
+
+    batch_runner.start()
+
     # Serving the API without a worker is useful for debugging a stuck queue and
     # makes API tests deterministic — jobs stay queued instead of racing off.
     worker_enabled = os.environ.get(ENV_NO_WORKER) != "1"
@@ -75,6 +80,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await batch_runner.stop()
         if worker_enabled:
             await upload_queue.stop()
             await queue.stop()

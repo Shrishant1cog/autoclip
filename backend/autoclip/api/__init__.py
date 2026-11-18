@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from . import (
     ai_providers,
+    batches,
     clips,
     jobs,
     routing,
@@ -28,3 +29,4 @@ api_router.include_router(workflows.router)
 api_router.include_router(ai_providers.router)
 api_router.include_router(youtube_accounts.router)
 api_router.include_router(routing.router)
+api_router.include_router(batches.router)

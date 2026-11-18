@@ -126,6 +126,18 @@ Each phase: implement → test → typecheck/build → commit → push. Log upda
 - Live-verified over HTTP: categories listed, rule created/toggled/deleted against the real
   clipsorial channel row.
 
+### Phase 6 — Persistent batch queues (COMPLETE)
+
+- Migration v7: `batches` + `batch_items` (ordered, per-item status/error/job link,
+  FK cascade from sources; startup recovery resets 'processing' items to 'pending').
+- `jobs/batches.py`: CRUD + progress counters; `jobs/batch_runner.py`: event-driven
+  runner advancing running batches one item at a time through the existing job queue —
+  launch/pause/cancel/retry-failed; failures mark their item and continue.
+- Wired into app lifespan (start/stop). `api/batches.py`: full batch lifecycle API.
+- Tests: 12 new (`tests/test_batches.py`); suite **434 passed**; ruff + tsc + build clean.
+- Live-verified over HTTP: batch create → add real source → detail (item pending with
+  source title) → delete. Defect fixed: module-vs-singleton import in app + API.
+
 ### Phase 2 — Workflow engine foundation (COMPLETE — commit `b07e759`)
 
 - Migration v4: `workflows` (versioned, active flag), `workflow_runs`, `workflow_node_runs`.

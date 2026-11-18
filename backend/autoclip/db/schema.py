@@ -307,6 +307,40 @@ def _migration_v6(conn: sqlite3.Connection) -> None:
     conn.executescript(_V6)
 
 
+# --------------------------------------------------------------------------
+# V7 — persistent batch queues (Phase 6)
+# --------------------------------------------------------------------------
+
+_V7 = """
+CREATE TABLE batches (
+    id           TEXT PRIMARY KEY,
+    name         TEXT NOT NULL DEFAULT '',
+    status       TEXT NOT NULL DEFAULT 'queued'
+                 CHECK (status IN ('queued','running','paused','done','failed','cancelled')),
+    settings_json TEXT NOT NULL DEFAULT '{}',
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+
+CREATE TABLE batch_items (
+    id          TEXT PRIMARY KEY,
+    batch_id    TEXT NOT NULL REFERENCES batches(id) ON DELETE CASCADE,
+    source_id   TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+    job_id      TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+    position    INTEGER NOT NULL DEFAULT 0,
+    status      TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','processing','done','failed','skipped','cancelled')),
+    error       TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE INDEX idx_batch_items_batch ON batch_items(batch_id, position);
+"""
+
+def _migration_v7(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V7)
+
+
 #: Ordered migrations. Index + 1 is the resulting ``user_version``.
 #: Append only — never edit a migration that has shipped.
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
@@ -316,6 +350,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v4,
     _migration_v5,
     _migration_v6,
+    _migration_v7,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)
