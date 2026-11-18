@@ -98,6 +98,20 @@ Each phase: implement → test → typecheck/build → commit → push. Log upda
 - Live-verified: `/api/ai/providers` returns 16 presets with pool health; legacy single keys
   surface as `primary` automatically; presets endpoint enumerates all 16.
 
+### Phase 4 — Multi Google-account / multi YouTube-channel manager (COMPLETE)
+
+- Migration v5: `google_accounts` + `youtube_channels` (per-channel profile: privacy,
+  category, auto_upload, default flag; unique (account, channel) pair; first channel is
+  default). Append-only, idempotent.
+- `youtube/accounts.py`: account/channel CRUD, per-account keyring refresh tokens
+  (`youtube_refresh#<id>`), legacy single-account import (`ensure_legacy_migrated`) that
+  runs at startup and claims the legacy token without deleting it.
+- `api/youtube_accounts.py`: `/api/youtube/accounts` CRUD + channels + routing endpoints.
+  Original single-account endpoints untouched.
+- Tests: 13 new (`tests/test_youtube_accounts.py`); suite **409 passed**; ruff + tsc + build
+  clean. Live-verified: real `clipsorial` connection auto-migrated as default account/channel,
+  token claimed, routing endpoint returns effective upload policy.
+
 ### Phase 2 — Workflow engine foundation (COMPLETE — commit `b07e759`)
 
 - Migration v4: `workflows` (versioned, active flag), `workflow_runs`, `workflow_node_runs`.

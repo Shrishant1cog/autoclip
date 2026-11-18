@@ -50,6 +50,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     paths.ensure_layout()
     db.init()
 
+    # Phase 4: import the pre-multi-era YouTube connection as the default
+    # account/channel row (no-op when already migrated or nothing connected).
+    from .youtube import accounts as yt_accounts
+
+    try:
+        yt_accounts.ensure_legacy_migrated()
+    except Exception:  # noqa: BLE001 - never block startup on the import
+        log.warning("Legacy YouTube account import failed.", exc_info=True)
+
     broker.bind_loop(asyncio.get_running_loop())
 
     # Serving the API without a worker is useful for debugging a stuck queue and

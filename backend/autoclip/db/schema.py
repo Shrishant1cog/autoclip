@@ -225,6 +225,52 @@ def _migration_v4(conn: sqlite3.Connection) -> None:
     conn.executescript(_V4)
 
 
+# --------------------------------------------------------------------------
+# V5 — multi Google-account / multi YouTube-channel (Phase 4)
+# --------------------------------------------------------------------------
+
+_V5 = """
+-- One row per connected Google account. The refresh token lives in the OS
+-- keyring under ``youtube_refresh#<account_id>``; the legacy bare entry maps
+-- to whichever account migrated first.
+CREATE TABLE google_accounts (
+    id           TEXT PRIMARY KEY,
+    label        TEXT NOT NULL DEFAULT '',
+    email        TEXT NOT NULL DEFAULT '',
+    client_id    TEXT NOT NULL DEFAULT '',
+    connected_at TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL
+);
+
+-- One row per YouTube channel, bound to a Google account. Channel-specific
+-- defaults ride along so routing can apply per-channel policies.
+CREATE TABLE youtube_channels (
+    id             TEXT PRIMARY KEY,
+    account_id     TEXT NOT NULL REFERENCES google_accounts(id) ON DELETE CASCADE,
+    channel_id     TEXT NOT NULL,
+    title          TEXT NOT NULL DEFAULT '',
+    url            TEXT NOT NULL DEFAULT '',
+    is_default     INTEGER NOT NULL DEFAULT 0,
+    -- Channel profile: defaults applied when routing uploads here.
+    privacy        TEXT NOT NULL DEFAULT 'public'
+                   CHECK (privacy IN ('private','unlisted','public')),
+    category_id    TEXT NOT NULL DEFAULT '24',
+    auto_upload    INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+CREATE UNIQUE INDEX idx_youtube_channels_channel ON youtube_channels(account_id, channel_id);
+CREATE INDEX idx_youtube_channels_default ON youtube_channels(is_default);
+"""
+
+# The old single-account refresh token keyring entry. Imported on connect.
+LEGACY_REFRESH_KEY = "youtube_refresh_token"
+
+
+def _migration_v5(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V5)
+
+
 #: Ordered migrations. Index + 1 is the resulting ``user_version``.
 #: Append only — never edit a migration that has shipped.
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
@@ -232,6 +278,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v2,
     _migration_v3,
     _migration_v4,
+    _migration_v5,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)
