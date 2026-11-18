@@ -452,6 +452,33 @@ def _migration_v10(conn: sqlite3.Connection) -> None:
     conn.executescript(_V10)
 
 
+# --- v11: per-job resource usage (Phase 16) --------------------------------
+
+_V11 = """
+-- What each job actually consumed (Phase 16).
+--
+-- Every number here is measured, not estimated: the token counts are what the
+-- provider reported, the ffmpeg seconds are the wall clock around the real
+-- process. A cost control that cannot be measured is a cost control nobody
+-- trusts.
+CREATE TABLE job_resources (
+    job_id           TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    llm_calls        INTEGER NOT NULL DEFAULT 0,
+    llm_input_tokens INTEGER NOT NULL DEFAULT 0,
+    llm_output_tokens INTEGER NOT NULL DEFAULT 0,
+    ffmpeg_runs      INTEGER NOT NULL DEFAULT 0,
+    ffmpeg_seconds   REAL NOT NULL DEFAULT 0,
+    export_bytes     INTEGER NOT NULL DEFAULT 0,
+    windows_skipped  INTEGER NOT NULL DEFAULT 0,
+    updated_at       TEXT NOT NULL
+);
+"""
+
+
+def _migration_v11(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V11)
+
+
 #: Ordered migrations. Index + 1 is the resulting ``user_version``.
 #: Append only — never edit a migration that has shipped.
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
@@ -465,6 +492,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v8,
     _migration_v9,
     _migration_v10,
+    _migration_v11,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)

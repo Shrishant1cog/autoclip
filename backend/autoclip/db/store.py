@@ -17,6 +17,7 @@ from .models import (
     ClipStatus,
     Export,
     Job,
+    JobResources,
     JobStatus,
     Notification,
     Source,
@@ -586,6 +587,95 @@ def requeue_interrupted_uploads() -> None:
         conn.execute(
             "UPDATE youtube_uploads SET status = 'pending', error = NULL WHERE status = 'uploading'"
         )
+
+
+# --------------------------------------------------------------------------
+# Job resources (Phase 16)
+# --------------------------------------------------------------------------
+
+
+def upsert_job_resources(resources: JobResources) -> JobResources:
+    """Record what a job consumed, replacing any earlier record for it."""
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO job_resources (
+                job_id, llm_calls, llm_input_tokens, llm_output_tokens,
+                ffmpeg_runs, ffmpeg_seconds, export_bytes, windows_skipped,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(job_id) DO UPDATE SET
+                llm_calls = excluded.llm_calls,
+                llm_input_tokens = excluded.llm_input_tokens,
+                llm_output_tokens = excluded.llm_output_tokens,
+                ffmpeg_runs = excluded.ffmpeg_runs,
+                ffmpeg_seconds = excluded.ffmpeg_seconds,
+                export_bytes = excluded.export_bytes,
+                windows_skipped = excluded.windows_skipped,
+                updated_at = excluded.updated_at
+            """,
+            (
+                resources.job_id,
+                resources.llm_calls,
+                resources.llm_input_tokens,
+                resources.llm_output_tokens,
+                resources.ffmpeg_runs,
+                resources.ffmpeg_seconds,
+                resources.export_bytes,
+                resources.windows_skipped,
+                resources.updated_at,
+            ),
+        )
+    return resources
+
+
+def get_job_resources(job_id: str) -> JobResources | None:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM job_resources WHERE job_id = ?", (job_id,)
+        ).fetchone()
+    return JobResources.from_row(row) if row else None
+
+
+def list_job_resources(limit: int = 100) -> list[JobResources]:
+    """Per-job usage, most recently updated first."""
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM job_resources ORDER BY updated_at DESC, rowid DESC LIMIT ?",
+            (max(1, min(limit, 1000)),),
+        ).fetchall()
+    return [JobResources.from_row(r) for r in rows]
+
+
+def total_job_resources() -> JobResources:
+    """The totals across every job that recorded usage."""
+    with connection() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(llm_calls), 0) AS llm_calls,
+                COALESCE(SUM(llm_input_tokens), 0) AS llm_input_tokens,
+                COALESCE(SUM(llm_output_tokens), 0) AS llm_output_tokens,
+                COALESCE(SUM(ffmpeg_runs), 0) AS ffmpeg_runs,
+                COALESCE(SUM(ffmpeg_seconds), 0) AS ffmpeg_seconds,
+                COALESCE(SUM(export_bytes), 0) AS export_bytes,
+                COALESCE(SUM(windows_skipped), 0) AS windows_skipped,
+                MAX(updated_at) AS updated_at
+            FROM job_resources
+            """
+        ).fetchone()
+    # The aggregate has no job_id of its own; the totals belong to no single job.
+    return JobResources(
+        job_id="",
+        llm_calls=row["llm_calls"],
+        llm_input_tokens=row["llm_input_tokens"],
+        llm_output_tokens=row["llm_output_tokens"],
+        ffmpeg_runs=row["ffmpeg_runs"],
+        ffmpeg_seconds=row["ffmpeg_seconds"],
+        export_bytes=row["export_bytes"],
+        windows_skipped=row["windows_skipped"],
+        updated_at=row["updated_at"] or utcnow(),
+    )
 
 
 # --------------------------------------------------------------------------

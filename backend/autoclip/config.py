@@ -138,6 +138,45 @@ class ExportSettings(BaseModel):
     ducking_amount_db: float = -12.0
 
 
+class ResourceSettings(BaseModel):
+    """Bounds on what AutoClip is allowed to consume (Phase 16).
+
+    Every field here has a default that preserves today's behaviour, so an
+    existing install changes nothing until the user opts in. The defaults are
+    chosen to be safe on a modest machine rather than fast on a large one:
+    an autonomous install runs unattended for weeks, so the risk is filling a
+    disk or saturating a CPU, not a render taking ten minutes longer.
+    """
+
+    #: ffmpeg worker threads per process. 0 leaves ffmpeg's own default, which
+    #: is the core count — that oversubscribes badly when more than one ffmpeg
+    #: is running at a time.
+    ffmpeg_threads: int = Field(default=0, ge=0)
+    #: How many ffmpeg processes may run at once across the whole app.
+    #: At least one: with zero, nothing would ever render.
+    max_parallel_ffmpeg: int = Field(default=2, ge=1)
+    #: Days to keep a finished job's scratch directory (audio, transcript, crop
+    #: paths). 0 keeps them forever. Failed jobs keep theirs regardless: it is
+    #: what makes "run it again" resume instead of re-transcribe.
+    work_retention_days: int = Field(default=7, ge=0)
+    #: Days to keep a *published* clip's rendered file. 0 keeps everything.
+    #: Only published exports are ever reclaimed — an unpublished clip is the
+    #: user's own work and is never deleted automatically.
+    export_retention_days: int = Field(default=0, ge=0)
+    #: Days to keep a downloaded YouTube video. 0 keeps them forever.
+    #: Uploaded files are never touched: they cannot be re-downloaded.
+    raw_retention_days: int = Field(default=0, ge=0)
+    #: Run the cleanup pass when the server starts.
+    cleanup_on_start: bool = True
+    #: Maximum tokens the model may return for one detection call. The
+    #: providers' own defaults vary; one number here makes the cap explicit.
+    max_output_tokens: int = Field(default=4096, ge=1)
+    #: Maximum detection calls per job (one call per transcript window).
+    #: 0 is unlimited. When the cap bites, the job says so rather than
+    #: quietly analysing less of the video than it claims to.
+    max_llm_calls_per_job: int = Field(default=0, ge=0)
+
+
 class YouTubeSettings(BaseModel):
     """Upload destination and automation policy.
 
@@ -179,6 +218,7 @@ class Settings(BaseModel):
     clips: ClipSettings = Field(default_factory=ClipSettings)
     ingest: IngestSettings = Field(default_factory=IngestSettings)
     export: ExportSettings = Field(default_factory=ExportSettings)
+    resources: ResourceSettings = Field(default_factory=ResourceSettings)
     youtube: YouTubeSettings = Field(default_factory=YouTubeSettings)
 
     #: Set when secrets had to be written to config.json because no keyring

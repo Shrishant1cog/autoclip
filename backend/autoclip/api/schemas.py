@@ -321,6 +321,7 @@ class SettingsOut(BaseModel):
     clips: dict[str, Any]
     ingest: dict[str, Any]
     export: dict[str, Any]
+    resources: dict[str, Any] = Field(default_factory=dict)
     youtube: dict[str, Any]
     insecure_secret_storage: bool
     #: Which providers have a key stored. The keys themselves never leave the
@@ -338,6 +339,7 @@ class SettingsIn(BaseModel):
     clips: dict[str, Any] | None = None
     ingest: dict[str, Any] | None = None
     export: dict[str, Any] | None = None
+    resources: dict[str, Any] | None = None
     youtube: dict[str, Any] | None = None
 
 

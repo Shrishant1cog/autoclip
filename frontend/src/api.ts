@@ -187,6 +187,17 @@ export interface Settings {
     music_ducking: boolean
     ducking_amount_db: number
   }
+  /** Absent on a server older than Phase 16. */
+  resources?: {
+    ffmpeg_threads: number
+    max_parallel_ffmpeg: number
+    work_retention_days: number
+    export_retention_days: number
+    raw_retention_days: number
+    cleanup_on_start: boolean
+    max_output_tokens: number
+    max_llm_calls_per_job: number
+  }
   youtube: {
     client_id: string
     redirect_uri: string
@@ -227,6 +238,74 @@ export interface SystemStatus {
   gpu_name: string | null
   compute_type: string
   diarization_available: boolean
+}
+
+/** One area of AutoClip's storage. */
+export interface ResourceDirectory {
+  name: string
+  path: string
+  size_bytes: number
+  size_human: string
+  file_count: number
+}
+
+/** What one job consumed. Every number is measured, not estimated. */
+export interface JobResourceUsage {
+  job_id: string
+  status: string
+  title: string
+  llm_calls: number
+  llm_input_tokens: number
+  llm_output_tokens: number
+  llm_total_tokens: number
+  ffmpeg_runs: number
+  ffmpeg_seconds: number
+  export_bytes: number
+  windows_skipped: number
+  updated_at: string
+}
+
+export interface ResourceOverview {
+  disk: {
+    directories: ResourceDirectory[]
+    database_bytes: number
+    database_human: string
+    total_bytes: number
+    total_human: string
+  }
+  limits: {
+    ffmpeg_threads: number
+    max_parallel_ffmpeg: number
+    work_retention_days: number
+    export_retention_days: number
+    raw_retention_days: number
+    cleanup_on_start: boolean
+    max_output_tokens: number
+    max_llm_calls_per_job: number
+  }
+  usage: {
+    totals: {
+      llm_calls: number
+      llm_input_tokens: number
+      llm_output_tokens: number
+      llm_total_tokens: number
+      ffmpeg_runs: number
+      ffmpeg_seconds: number
+      export_bytes: number
+      export_human: string
+      windows_skipped: number
+    }
+    jobs: JobResourceUsage[]
+  }
+}
+
+export interface CleanupReport {
+  removed_files: number
+  removed_directories: number
+  freed_bytes: number
+  freed_human: string
+  details: string[]
+  changed: boolean
 }
 
 export interface JobSettingsOverrides {
@@ -769,6 +848,11 @@ export const api = {
         ? JSON.stringify({ ratio: '9:16', style: 'bold_pop', write_srt: false })
         : undefined,
     }),
+
+  // -- Resource usage and cleanup (Phase 16) --------------------------------
+  resources: () => request<ResourceOverview>('/api/resources'),
+  cleanupResources: () =>
+    request<CleanupReport>('/api/resources/cleanup', { method: 'POST' }),
 }
 
 /** Format seconds as m:ss, or h:mm:ss past an hour. */

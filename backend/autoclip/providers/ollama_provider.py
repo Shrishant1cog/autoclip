@@ -61,7 +61,10 @@ class OllamaProvider(LLMProvider):
             # Ollama's JSON mode constrains decoding to valid JSON, which is the
             # single biggest reliability win for small local models.
             "format": "json",
-            "options": {"temperature": config.temperature},
+            "options": {
+                "temperature": config.temperature,
+                "num_predict": config.max_output_tokens,
+            },
         }
 
         try:
@@ -87,6 +90,10 @@ class OllamaProvider(LLMProvider):
         except httpx.HTTPStatusError as exc:
             raise _translate_status(exc, self.name, self.model) from exc
 
+        self._record_usage(
+            input_tokens=data.get("prompt_eval_count", 0) or 0,
+            output_tokens=data.get("eval_count", 0) or 0,
+        )
         return data.get("response", "")
 
     async def health_check(self) -> ProviderStatus:

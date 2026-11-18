@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import logging
 import re
-import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .. import resources
 from . import ffmpeg
 
 log = logging.getLogger(__name__)
@@ -46,6 +46,8 @@ def extract_audio(
     *,
     duration_s: float | None = None,
     on_progress: Callable[[float], None] | None = None,
+    threads: int = 0,
+    usage: resources.Usage | None = None,
 ) -> Path:
     """Extract mono 16 kHz PCM WAV from any input."""
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -64,6 +66,8 @@ def extract_audio(
         ],
         total_duration_s=duration_s,
         on_progress=on_progress,
+        threads=threads,
+        usage=usage,
     )
     return destination
 
@@ -74,6 +78,8 @@ def generate_thumbnails(
     *,
     interval_s: int = THUMBNAIL_INTERVAL_S,
     width: int = THUMBNAIL_WIDTH,
+    threads: int = 0,
+    usage: resources.Usage | None = None,
 ) -> list[Path]:
     """Write one thumbnail every ``interval_s`` seconds for UI scrubbing.
 
@@ -93,7 +99,9 @@ def generate_thumbnails(
                 "-q:v",
                 "5",
                 str(pattern),
-            ]
+            ],
+            threads=threads,
+            usage=usage,
         )
     except ffmpeg.FFmpegError:
         # Audio-only input has no video stream to sample.
@@ -134,9 +142,7 @@ def detect_silences(
         "null",
         "-",
     ]
-    proc = subprocess.run(
-        command, capture_output=True, text=True, check=False, encoding="utf-8", errors="replace"
-    )
+    proc = ffmpeg.run_captured(command)
     if proc.returncode != 0:
         log.warning("silencedetect failed; boundary refinement will fall back to fixed padding.")
         return []

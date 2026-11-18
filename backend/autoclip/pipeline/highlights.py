@@ -15,6 +15,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 
+from .. import resources
 from ..db.models import Clip, new_id
 from ..providers import ClipCandidate, DetectionConfig, LLMProvider, TranscriptWindow
 from . import boundaries
@@ -127,11 +128,37 @@ async def detect(
     job_id: str,
     silences: list[Silence] | None = None,
     on_progress: Callable[[float], None] | None = None,
+    usage: resources.Usage | None = None,
+    max_calls: int = 0,
 ) -> list[Clip]:
-    """Run detection across the whole transcript and return ranked clips."""
+    """Run detection across the whole transcript and return ranked clips.
+
+    ``usage`` accumulates what the calls actually cost — the token counts the
+    provider reports, not an estimate.
+
+    ``max_calls`` caps how many windows are sent to the model. 0 is
+    unlimited. When the cap bites, the windows that were never sent are
+    counted and said out loud: analysing less of the video than the job
+    claims to would be a quiet lie.
+    """
     windows = build_windows(transcript)
     if not windows:
         raise HighlightError("The transcript is empty, so there is nothing to clip.")
+
+    skipped = 0
+    if max_calls and max_calls > 0 and len(windows) > max_calls:
+        skipped = len(windows) - max_calls
+        windows = windows[:max_calls]
+        # Recorded straight away: a job that then fails must still say how
+        # much of the video it never looked at.
+        if usage is not None:
+            usage.windows_skipped = skipped
+        log.warning(
+            "Detection budget capped at %d window(s); %d window(s) of this video "
+            "will not be analysed.",
+            max_calls,
+            skipped,
+        )
 
     log.info("Detecting highlights across %d window(s) with %s.", len(windows), provider.name)
 
@@ -141,6 +168,11 @@ async def detect(
     failures = 0
     last_error: Exception | None = None
     lock = asyncio.Lock()
+
+    # The windows run concurrently against one provider, so the provider's
+    # "last call" figure is a race between them. The running total is not:
+    # taking its difference attributes every token to exactly one call.
+    usage_before = provider.total_usage.snapshot()
 
     async def run_window(window: TranscriptWindow) -> list[ClipCandidate]:
         nonlocal completed, failures, last_error
@@ -166,7 +198,13 @@ async def detect(
                     on_progress(completed / len(windows))
             return candidates
 
-    results = await asyncio.gather(*(run_window(w) for w in windows))
+    try:
+        results = await asyncio.gather(*(run_window(w) for w in windows))
+    finally:
+        # Taken even when the gather raises: the tokens spent on the calls
+        # that did succeed are still tokens spent.
+        if usage is not None:
+            usage.llm.add(usage_before.delta(provider.total_usage))
     candidates = [c for group in results for c in group]
 
     if not candidates:

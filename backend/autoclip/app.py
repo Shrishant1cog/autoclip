@@ -51,6 +51,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     paths.ensure_layout()
     db.init()
 
+    # Phase 16: apply the configured resource limits, then reclaim what the
+    # retention settings allow. The cleanup runs in a thread and its failure
+    # is logged, never fatal — a disk that cannot be tidied must not stop the
+    # app from starting.
+    from . import config, resources
+
+    try:
+        settings = config.load()
+        resources.apply_ffmpeg_limit(settings)
+        if settings.resources.cleanup_on_start:
+            await asyncio.to_thread(resources.cleanup, settings)
+    except Exception:  # noqa: BLE001
+        log.warning("Startup resource cleanup failed.", exc_info=True)
+
     # Phase 4: import the pre-multi-era YouTube connection as the default
     # account/channel row (no-op when already migrated or nothing connected).
     from .youtube import accounts as yt_accounts

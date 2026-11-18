@@ -18,11 +18,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import paths
+from .. import paths, resources
 from ..config import Settings
 from ..config import load as load_settings
 from ..db import store
-from ..db.models import Clip, Export, Job, Source, new_id, utcnow
+from ..db.models import Clip, Export, Job, JobResources, Source, new_id, utcnow
 from ..db.models import Transcript as TranscriptRow
 from ..providers import LLMProvider, build_provider, detection_config
 from ..providers.base import looks_like_auth_failure, looks_like_transient_failure
@@ -166,6 +166,8 @@ class PipelineRunner:
         self._completed_weight = 0.0
         self._notices: dict[Stage, str] = {}
         self._last_overall = 0.0
+        #: What this job consumed (Phase 16). Measured as the work happens.
+        self.usage = resources.Usage()
 
     # -- progress ----------------------------------------------------------
 
@@ -247,16 +249,42 @@ class PipelineRunner:
             self._stage_export(clips, transcript, crop_paths)
         except JobCancelled:
             store.update_job(self.job.id, status="cancelled", finished_at=utcnow(), progress=0.0)
+            self._record_usage()
             raise
         except Exception as exc:
             log.exception("Job %s failed.", self.job.id)
             store.update_job(self.job.id, status="failed", error=str(exc), finished_at=utcnow())
+            self._record_usage()
             _notify_job_failed(self.job, exc)
             raise
 
         store.update_job(self.job.id, status="done", progress=1.0, finished_at=utcnow())
+        self._record_usage()
         _notify_job_done(self.job, clips)
         return clips
+
+    def _record_usage(self) -> None:
+        """Persist what this job consumed (Phase 16).
+
+        Written even when the job failed: the work spent up to the failure is
+        still work spent, and a failed job that burned a lot of tokens is
+        exactly the one worth knowing about.
+        """
+        try:
+            store.upsert_job_resources(
+                JobResources(
+                    job_id=self.job.id,
+                    llm_calls=self.usage.llm.calls,
+                    llm_input_tokens=self.usage.llm.input_tokens,
+                    llm_output_tokens=self.usage.llm.output_tokens,
+                    ffmpeg_runs=self.usage.ffmpeg_runs,
+                    ffmpeg_seconds=self.usage.ffmpeg_seconds,
+                    export_bytes=self.usage.export_bytes,
+                    windows_skipped=self.usage.windows_skipped,
+                )
+            )
+        except Exception:  # noqa: BLE001 — accounting must never fail a job
+            log.debug("Could not record resource usage for job %s.", self.job.id, exc_info=True)
 
     # -- stages ------------------------------------------------------------
 
@@ -289,10 +317,17 @@ class PipelineRunner:
                 self.workspace.audio,
                 duration_s=self.source.duration_s,
                 on_progress=lambda fraction: report(base + scale * fraction),
+                threads=self.settings.resources.ffmpeg_threads,
+                usage=self.usage,
             )
 
         if self.source.has_video and not self.workspace.thumbnails.exists():
-            prepare.generate_thumbnails(source_path, self.workspace.thumbnails)
+            prepare.generate_thumbnails(
+                source_path,
+                self.workspace.thumbnails,
+                threads=self.settings.resources.ffmpeg_threads,
+                usage=self.usage,
+            )
 
         self._finish_stage(stage)
         return self.workspace.audio
@@ -421,6 +456,7 @@ class PipelineRunner:
         config = detection_config(self.settings)
 
         self._emit(stage, 0.0, f"Finding highlights with {provider.name}")
+        max_calls = self.settings.resources.max_llm_calls_per_job
         try:
             clips = await highlights.detect(
                 transcript,
@@ -429,6 +465,8 @@ class PipelineRunner:
                 job_id=self.job.id,
                 silences=silences,
                 on_progress=self._stage_progress(stage),
+                usage=self.usage,
+                max_calls=max_calls,
             )
         except highlights.HighlightError as exc:
             fallback = self._ollama_fallback(provider_name, exc)
@@ -445,6 +483,16 @@ class PipelineRunner:
                 job_id=self.job.id,
                 silences=silences,
                 on_progress=self._stage_progress(stage),
+                usage=self.usage,
+                max_calls=max_calls,
+            )
+
+        if self.usage.windows_skipped:
+            # Never let a truncated analysis pass as a full one.
+            self._set_notice(
+                stage,
+                f"Detection budget reached — {self.usage.windows_skipped} part(s) of this "
+                "video were not analysed.",
             )
 
         store.replace_clips(self.job.id, clips)
@@ -604,6 +652,8 @@ class PipelineRunner:
                 settings=self.settings.export,
                 on_progress=clip_progress,
                 cancelled=self._is_cancelled,
+                threads=self.settings.resources.ffmpeg_threads,
+                usage=self.usage,
             )
 
             destination = self._maybe_narrate(destination, clip, index, len(clips), stage)

@@ -29,6 +29,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from ..resources import TokenUsage
+
 log = logging.getLogger(__name__)
 
 PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
@@ -171,6 +173,10 @@ class DetectionConfig:
     #: iterate on prompts without touching code.
     prompt_version: str = "highlight_v1"
     temperature: float = 0.3
+    #: Cap on the tokens the model may return for one call (Phase 16). Each
+    #: vendor has its own default and they differ; one explicit number makes
+    #: the cost of a job predictable.
+    max_output_tokens: int = 4096
 
 
 @dataclass
@@ -198,6 +204,15 @@ class LLMProvider(ABC):
         self.model = model
         self.api_key = api_key
         self.base_url = base_url
+        #: What the most recent call cost (Phase 16). Reset on every call, so
+        #: a caller can read it straight after a request without having to
+        #: subtract anything.
+        self.last_usage = TokenUsage()
+        #: What every call through this provider has cost. Detection runs
+        #: several windows concurrently against one provider, so the
+        #: "last call" figure is a race between them — only the running
+        #: total can be attributed exactly.
+        self.total_usage = TokenUsage()
 
     # -- to implement ------------------------------------------------------
 
@@ -208,6 +223,27 @@ class LLMProvider(ABC):
     @abstractmethod
     async def health_check(self) -> ProviderStatus:
         """Report whether this provider is usable right now."""
+
+    # -- shared behaviour --------------------------------------------------
+
+    def _record_usage(self, input_tokens: int = 0, output_tokens: int = 0) -> None:
+        """Record what the last call cost.
+
+        Only real numbers are recorded. A provider that does not report usage
+        leaves the counters at zero rather than guessing — an estimate that
+        reads as "cheap" would make the cost controls look effective when they
+        are not.
+
+        Both the per-call figure and the running total are updated, so a
+        concurrent caller can take the difference of the total and attribute
+        every token to exactly one call.
+        """
+        self.last_usage = TokenUsage(
+            calls=1,
+            input_tokens=max(0, int(input_tokens)),
+            output_tokens=max(0, int(output_tokens)),
+        )
+        self.total_usage.add(self.last_usage)
 
     # -- shared behaviour --------------------------------------------------
 

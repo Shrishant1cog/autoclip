@@ -8,7 +8,7 @@ import logging
 import httpx
 from fastapi import APIRouter, HTTPException
 
-from .. import config, models, system
+from .. import config, models, resources, system
 from ..providers import PROVIDERS, build_provider
 from ..providers.base import ProviderStatus
 from .schemas import ProviderStatusOut, SecretIn, SettingsIn, SettingsOut, SystemOut
@@ -28,6 +28,7 @@ def _settings_out(settings: config.Settings) -> SettingsOut:
         clips=payload["clips"],
         ingest=payload["ingest"],
         export=payload["export"],
+        resources=payload["resources"],
         youtube=payload["youtube"],
         insecure_secret_storage=payload["insecure_secret_storage"],
         keys_present={
@@ -59,7 +60,15 @@ async def put_settings(payload: SettingsIn) -> SettingsOut:
             )
         settings.active_provider = updates["active_provider"]
 
-    for section in ("whisper", "transcription", "clips", "ingest", "export", "youtube"):
+    for section in (
+        "whisper",
+        "transcription",
+        "clips",
+        "ingest",
+        "export",
+        "resources",
+        "youtube",
+    ):
         if section in updates:
             current = getattr(settings, section)
             try:
@@ -95,6 +104,9 @@ async def put_settings(payload: SettingsIn) -> SettingsOut:
             )
 
     config.save(settings)
+    # The ffmpeg concurrency limit is process-wide, so a change to the
+    # settings has to reach the running gate, not just the file.
+    resources.apply_ffmpeg_limit(settings)
     return _settings_out(settings)
 
 

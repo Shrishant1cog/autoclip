@@ -51,7 +51,7 @@ class GeminiProvider(LLMProvider):
             temperature=config.temperature,
             # Gemini enforces JSON natively, which removes most parse failures.
             response_mime_type="application/json",
-            max_output_tokens=8192,
+            max_output_tokens=config.max_output_tokens,
         )
 
         last_error: Exception | None = None
@@ -86,6 +86,12 @@ class GeminiProvider(LLMProvider):
         if response is None:
             assert last_error is not None
             raise _translate(last_error, self.name, self.model) from last_error
+
+        usage = getattr(response, "usage_metadata", None)
+        self._record_usage(
+            input_tokens=getattr(usage, "prompt_token_count", 0) or 0,
+            output_tokens=getattr(usage, "candidates_token_count", 0) or 0,
+        )
 
         return getattr(response, "text", "") or ""
 

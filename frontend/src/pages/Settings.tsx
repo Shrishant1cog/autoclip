@@ -666,8 +666,194 @@ export function Settings() {
         </Section>
       )}
 
+      <ResourcesSection settings={settings} onPatch={patch} onError={setError} />
+
       <LearningSection onError={setError} />
     </div>
+  )
+}
+
+/** Mirrors the backend defaults; used when the server predates Phase 16. */
+const DEFAULT_RESOURCES = {
+  ffmpeg_threads: 0,
+  max_parallel_ffmpeg: 2,
+  work_retention_days: 7,
+  export_retention_days: 0,
+  raw_retention_days: 0,
+  cleanup_on_start: true,
+  max_output_tokens: 4096,
+  max_llm_calls_per_job: 0,
+}
+
+/** Phase 16: what AutoClip is using, what it may use, and what can go. */
+function ResourcesSection({
+  settings,
+  onPatch,
+  onError,
+}: {
+  settings: SettingsData
+  onPatch: (update: Partial<SettingsData>) => void
+  onError: (err: Error) => void
+}) {
+  const [overview, setOverview] = useState<Awaited<ReturnType<typeof api.resources>> | null>(null)
+  const [cleaning, setCleaning] = useState(false)
+  const [report, setReport] = useState<Awaited<ReturnType<typeof api.cleanupResources>> | null>(
+    null,
+  )
+
+  const limits = settings.resources ?? DEFAULT_RESOURCES
+
+  const load = () => {
+    void api
+      .resources()
+      .then(setOverview)
+      .catch(() => undefined)
+  }
+
+  useEffect(load, [])
+
+  const patchResources = (update: Partial<typeof limits>) => {
+    onPatch({ resources: { ...limits, ...update } })
+    load()
+  }
+
+  const clean = async () => {
+    setCleaning(true)
+    try {
+      setReport(await api.cleanupResources())
+      load()
+    } catch (err) {
+      onError(err as Error)
+    } finally {
+      setCleaning(false)
+    }
+  }
+
+  return (
+    <Section
+      title="Resources"
+      note="What AutoClip is using, what it is allowed to use, and what can be reclaimed."
+    >
+      {overview && (
+        <>
+          <dl className="grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
+            {overview.disk.directories.map((directory) => (
+              <Row
+                key={directory.name}
+                label={`${directory.name} (${directory.file_count} files)`}
+                value={directory.size_human}
+              />
+            ))}
+            <Row label="database" value={overview.disk.database_human} />
+            <Row label="total on disk" value={overview.disk.total_human} />
+          </dl>
+
+          <div className="mt-6 border-t border-ink-850 pt-5">
+            <h3 className="text-sm text-ink-100">Measured use</h3>
+            <p className="mt-1 text-xs text-ink-500">
+              Token counts are what the provider reported; ffmpeg time is the wall clock around
+              the real process. Nothing here is estimated.
+            </p>
+            <dl className="mt-4 grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
+              <Row label="Model calls" value={overview.usage.totals.llm_calls.toLocaleString()} />
+              <Row
+                label="Tokens in / out"
+                value={`${overview.usage.totals.llm_input_tokens.toLocaleString()} / ${overview.usage.totals.llm_output_tokens.toLocaleString()}`}
+              />
+              <Row label="ffmpeg runs" value={overview.usage.totals.ffmpeg_runs.toLocaleString()} />
+              <Row
+                label="ffmpeg time"
+                value={`${Math.round(overview.usage.totals.ffmpeg_seconds / 60)} min`}
+              />
+              <Row label="Exported" value={overview.usage.totals.export_human} />
+              {overview.usage.totals.windows_skipped > 0 && (
+                <Row
+                  label="Windows not analysed"
+                  value={String(overview.usage.totals.windows_skipped)}
+                />
+              )}
+            </dl>
+          </div>
+        </>
+      )}
+
+      <div className="mt-8 border-t border-ink-800 pt-6">
+        <h3 className="text-sm text-ink-100">Limits</h3>
+        <div className="mt-4 grid gap-5 sm:grid-cols-2">
+          <NumberField
+            label="Parallel ffmpeg processes"
+            value={limits.max_parallel_ffmpeg}
+            onCommit={(value) => patchResources({ max_parallel_ffmpeg: value })}
+          />
+          <NumberField
+            label="ffmpeg threads (0 = automatic)"
+            value={limits.ffmpeg_threads}
+            onCommit={(value) => patchResources({ ffmpeg_threads: value })}
+          />
+          <NumberField
+            label="Max output tokens per call"
+            value={limits.max_output_tokens}
+            onCommit={(value) => patchResources({ max_output_tokens: value })}
+          />
+          <NumberField
+            label="Detection calls per job (0 = no limit)"
+            value={limits.max_llm_calls_per_job}
+            onCommit={(value) => patchResources({ max_llm_calls_per_job: value })}
+          />
+        </div>
+
+        <div className="mt-5 grid gap-5 sm:grid-cols-2">
+          <NumberField
+            label="Keep scratch files for (days, 0 = forever)"
+            value={limits.work_retention_days}
+            onCommit={(value) => patchResources({ work_retention_days: value })}
+          />
+          <NumberField
+            label="Keep published clips for (days, 0 = forever)"
+            value={limits.export_retention_days}
+            onCommit={(value) => patchResources({ export_retention_days: value })}
+          />
+          <NumberField
+            label="Keep downloaded videos for (days, 0 = forever)"
+            value={limits.raw_retention_days}
+            onCommit={(value) => patchResources({ raw_retention_days: value })}
+          />
+        </div>
+
+        <label className="mt-4 flex items-center gap-3 text-sm text-ink-200">
+          <input
+            type="checkbox"
+            checked={limits.cleanup_on_start}
+            onChange={(e) => patchResources({ cleanup_on_start: e.target.checked })}
+            className="size-4 accent-sodium-500"
+          />
+          Clean up when the app starts
+        </label>
+
+        <p className="mt-4 text-xs leading-relaxed text-ink-500">
+          Cleanup never removes an unpublished clip, an uploaded source file, or the scratch
+          directory of a failed job — that is what lets a failed job resume instead of starting
+          over.
+        </p>
+
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <button
+            onClick={clean}
+            disabled={cleaning}
+            className="btn btn-primary disabled:opacity-50"
+          >
+            {cleaning ? 'Cleaning…' : 'Clean up now'}
+          </button>
+          {report && (
+            <span className="text-xs text-ink-400">
+              {report.changed
+                ? `Removed ${report.removed_files} file(s) and ${report.removed_directories} directory(ies), freeing ${report.freed_human}.`
+                : 'Nothing to reclaim.'}
+            </span>
+          )}
+        </div>
+      </div>
+    </Section>
   )
 }
 

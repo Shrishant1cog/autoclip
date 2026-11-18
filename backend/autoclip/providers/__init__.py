@@ -90,4 +90,5 @@ def detection_config(settings: Settings | None = None) -> DetectionConfig:
         max_duration_s=settings.clips.max_duration_s,
         max_clips=settings.clips.max_clips,
         language=settings.whisper.language,
+        max_output_tokens=settings.resources.max_output_tokens,
     )

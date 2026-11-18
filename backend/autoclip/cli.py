@@ -717,6 +717,121 @@ def update_ytdlp() -> None:
         console.print("[green]Update complete.[/green]")
 
 
+def _retention_summary(settings: config.Settings) -> str:
+    """The retention windows, phrased the way a person would say them."""
+    limits = settings.resources
+    parts = []
+    for label, days in (
+        ("work", limits.work_retention_days),
+        ("exports", limits.export_retention_days),
+        ("raw", limits.raw_retention_days),
+    ):
+        parts.append(f"{label} {'forever' if not days else f'{days}d'}")
+    return ", ".join(parts)
+
+
+@app.command("resources")
+def resources_cmd() -> None:
+    """Show what AutoClip is using: disk, tokens, and ffmpeg time."""
+    from . import db, resources
+    from .db import store
+
+    db.init()
+    usage = resources.disk_usage()
+    totals = store.total_job_resources()
+
+    table = Table(title="Disk usage", header_style="bold", title_justify="left")
+    table.add_column("Area", width=10)
+    table.add_column("Size", width=12, justify="right")
+    table.add_column("Files", width=8, justify="right")
+
+    for directory in usage.directories:
+        table.add_row(
+            directory.name,
+            resources.format_bytes(directory.size_bytes),
+            str(directory.file_count),
+        )
+    table.add_row("database", resources.format_bytes(usage.database_bytes), "1")
+    table.add_row(
+        "[bold]total[/bold]",
+        f"[bold]{resources.format_bytes(usage.total_bytes)}[/bold]",
+        "",
+    )
+
+    console.print()
+    console.print(table)
+
+    usage_table = Table(title="Model and render usage", header_style="bold", title_justify="left")
+    usage_table.add_column("Measure", width=24)
+    usage_table.add_column("Value", width=16, justify="right")
+    usage_table.add_row("Model calls", str(totals.llm_calls))
+    usage_table.add_row(
+        "Tokens (in / out)",
+        f"{totals.llm_input_tokens:,} / {totals.llm_output_tokens:,}",
+    )
+    usage_table.add_row("ffmpeg runs", str(totals.ffmpeg_runs))
+    usage_table.add_row("ffmpeg time", f"{totals.ffmpeg_seconds / 60:.1f} min")
+    usage_table.add_row("Exported", resources.format_bytes(totals.export_bytes))
+    if totals.windows_skipped:
+        usage_table.add_row(
+            "Windows not analysed",
+            f"[yellow]{totals.windows_skipped}[/yellow]",
+        )
+
+    console.print()
+    console.print(usage_table)
+
+    settings = config.load()
+    limits = settings.resources
+    console.print(
+        f"\n[dim]Limits: {limits.max_parallel_ffmpeg} parallel ffmpeg, "
+        f"{limits.ffmpeg_threads or 'auto'} threads, "
+        f"max {limits.max_output_tokens:,} output tokens, "
+        f"{limits.max_llm_calls_per_job or 'no'} detection-call cap.[/dim]"
+    )
+    console.print(f"[dim]Retention: {_retention_summary(settings)}.[/dim]")
+
+
+@app.command()
+def cleanup(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report only; delete nothing.")
+) -> None:
+    """Reclaim disk space according to the retention settings.
+
+    Only removes what the settings allow: scratch directories of finished
+    jobs, files of already-published clips past their retention, downloaded
+    YouTube videos past their retention, and files no row points at.
+    """
+    from . import db, resources
+
+    db.init()
+    settings = config.load()
+
+    if dry_run:
+        usage = resources.disk_usage()
+        console.print(
+            f"[bold]{resources.format_bytes(usage.total_bytes)}[/bold] on disk now. "
+            "A real run would remove what the retention settings allow."
+        )
+        console.print(f"[dim]Retention: {_retention_summary(settings)}.[/dim]")
+        return
+
+    report = resources.cleanup(settings)
+    if not report.changed:
+        console.print("[green]Nothing to reclaim.[/green]")
+        return
+
+    console.print(
+        f"[green]Removed {report.removed_files} file(s) and "
+        f"{report.removed_directories} directory(ies), freeing "
+        f"{resources.format_bytes(report.freed_bytes)}.[/green]"
+    )
+    for detail in report.details[:20]:
+        console.print(f"  [dim]{detail}[/dim]")
+    if len(report.details) > 20:
+        console.print(f"  [dim]…and {len(report.details) - 20} more.[/dim]")
+
+
 @app.command()
 def serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Interface to bind."),

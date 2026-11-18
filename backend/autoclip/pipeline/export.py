@@ -14,6 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .. import resources
 from ..config import ExportSettings
 from ..system import report
 from . import captions as captions_module
@@ -253,15 +254,19 @@ def _source_has_audio(path: Path) -> bool:
         return True
 
 
-def encoder_args(settings: ExportSettings) -> list[str]:
+def encoder_args(settings: ExportSettings, *, threads: int = 0) -> list[str]:
     """Pick the video encoder and its quality settings.
 
     NVENC is materially faster where available. Its quality knob is ``-cq``
     rather than ``-crf``, and the two scales are close enough that reusing the
     configured value keeps output consistent between machines.
+
+    ``threads`` caps the encoder's worker threads. Left unset, libx264 spawns
+    one per core, which is the right choice for a single render and the wrong
+    one when a second ffmpeg is already running.
     """
     if settings.prefer_hardware_encoder and report().ffmpeg.nvenc_works:
-        return [
+        args = [
             "-c:v",
             "h264_nvenc",
             "-preset",
@@ -275,16 +280,20 @@ def encoder_args(settings: ExportSettings) -> list[str]:
             "-profile:v",
             "high",
         ]
-    return [
-        "-c:v",
-        "libx264",
-        "-preset",
-        "medium",
-        "-crf",
-        str(settings.crf),
-        "-profile:v",
-        "high",
-    ]
+    else:
+        args = [
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            str(settings.crf),
+            "-profile:v",
+            "high",
+        ]
+    if threads and threads > 0:
+        args += ["-threads", str(threads)]
+    return args
 
 
 # --------------------------------------------------------------------------
@@ -299,6 +308,8 @@ def export_clip(
     settings: ExportSettings | None = None,
     on_progress: Callable[[float], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
+    threads: int = 0,
+    usage: resources.Usage | None = None,
 ) -> Path:
     """Render one clip to an MP4 and return the output path.
 
@@ -383,7 +394,7 @@ def export_clip(
     args.extend(audio_filter_args)
     args.extend(
         [
-            *encoder_args(settings),
+            *encoder_args(settings, threads=threads),
             "-pix_fmt",
             "yuv420p",
             "-c:a",
@@ -405,12 +416,17 @@ def export_clip(
             on_progress=on_progress,
             cancelled=cancelled,
             cwd=render_cwd,
+            threads=threads,
+            usage=usage,
         )
     except ffmpeg.FFmpegError as exc:
         raise ExportError(f"Could not render {request.destination.name}.\n{exc}") from exc
 
     if not request.destination.exists() or request.destination.stat().st_size == 0:
         raise ExportError(f"ffmpeg reported success but {request.destination.name} is empty.")
+
+    if usage is not None:
+        usage.export_bytes += request.destination.stat().st_size
 
     if settings.write_srt and request.words:
         captions_module.write_srt(

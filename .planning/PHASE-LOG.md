@@ -138,6 +138,86 @@ Each phase: implement → test → typecheck/build → commit → push. Log upda
 - Live-verified over HTTP: batch create → add real source → detail (item pending with
   source title) → delete. Defect fixed: module-vs-singleton import in app + API.
 
+### Phase 16 — Resource optimisation: measure, bound, reclaim, expose (COMPLETE)
+
+- **Measure.** `resources.py` owns the accounting. `disk_usage()` walks the
+  four storage areas (`raw`, `media`, `work`, `exports`) plus the database and
+  reports real bytes and file counts — no estimates. `Usage` accumulates what
+  one job actually consumed, gathered where the work happens: the token counts
+  are **what the provider reported** (`AnthropicProvider`, `OpenAIProvider`,
+  `GeminiProvider`, `OllamaProvider` each record their own usage — a provider
+  that reports nothing leaves the counter at zero rather than guessing),
+  and the ffmpeg seconds are the wall clock around the real process.
+  Migration **v11** adds `job_resources` (llm calls/tokens, ffmpeg runs and
+  seconds, export bytes, windows skipped), written by the runner on success,
+  on failure *and* on cancellation — the work spent up to a failure is still
+  work spent. Verified on a copy of the real database: v10 → v11 preserved all
+  8 sources / 8 jobs / 32 clips / 31 exports / 31 uploads / 6 workflows /
+  1 batch / 6 notifications / 1 account / 1 channel, foreign-key check clean,
+  re-running is a no-op.
+- **Bound.** A new `ResourceSettings` section (every default preserves current
+  behaviour): `max_parallel_ffmpeg` (2), `ffmpeg_threads` (0 = automatic),
+  `max_output_tokens` (4096), `max_llm_calls_per_job` (0 = unlimited),
+  and three retention windows. `ConcurrencyGate` is a resizable counting gate
+  — a semaphore cannot be resized, and the limit is a setting the user can
+  change while the app runs — and **every** ffmpeg/ffprobe invocation takes a
+  slot, so a thumbnail pass cannot start on top of an export. A detection
+  budget that bites says so: the skipped windows are counted and reported
+  (`usage.windows_skipped`), because analysing less of the video than the job
+  claims to would be a quiet lie.
+- **Reclaim.** `cleanup()` removes only what the settings allow: scratch
+  directories of *finished* jobs past retention, files of *already-published*
+  clips past retention (the export row survives — it is the record the
+  duplicate check reads), downloaded YouTube videos past retention, and files
+  no row points at any more. Never removed: an unpublished clip, an uploaded
+  source file (it cannot be downloaded again), a failed job's scratch (that is
+  what lets "run it again" resume instead of re-transcribing), or anything a
+  queued/running job owns. Startup runs a cleanup pass (failure logged, never
+  fatal).
+- **Expose.** `GET /api/resources` (disk, limits, measured totals, per-job
+  usage) and `POST /api/resources/cleanup`; CLI `autoclip resources` and
+  `autoclip cleanup [--dry-run]`; Settings → **Resources** in the frontend
+  (disk per area, measured use, editable limits, "Clean up now").
+- **Four real defects found and fixed by this phase's live run:**
+  1. *The orphan sweep would have deleted every clip thumbnail.* A thumbnail
+     is the export path with a `.jpg` suffix — an artifact of the export, not
+     a row — so the orphan check removed it along with the row it belonged to.
+     Exports now own their `.jpg`/`.srt` siblings, and a published clip's
+     thumbnail is reclaimed with the video.
+  2. *A source's sidecar files were treated as orphans.* yt-dlp writes
+     `source.info.json` and friends beside the video. Ownership is now derived
+     from the row's own path (the directory holding the file) rather than a
+     reconstructed `media/{source_id}` layout.
+  3. *Cleanup could race a running job.* The export stage writes the file
+     *before* the database row that describes it, so a cleanup running at that
+     moment would see an unreferenced file and delete a clip the job was about
+     to publish. A live job's directory is now untouchable.
+  4. *The token counter double-counted every concurrent window.* Detection
+     runs several transcript windows in parallel against one provider, and the
+     usage was read from the provider's "last call" slot — a race between
+     them. The regression test reproduces it exactly: 8 real calls were
+     recorded as 16. Providers now keep a running total as well, and the
+     detection stage attributes the *difference* of that total, so every
+     token is charged to exactly one call.
+- Verified live against the real project:
+  - the user's long-running job (`798a3104e2a4494a`) finished under the new
+    code and recorded **17 ffmpeg runs / 690.3 s / 399 MB exported** — real
+    measurements, not estimates;
+  - `GET /api/resources` reports the real 4.1 GB on disk (media 2.4 GB, work
+    722.3 MB, exports 1.0 GB, database 320 KB);
+  - the startup cleanup reclaimed the one genuine orphan and left **all six**
+    work directories (including the cancelled and running ones) and every
+    referenced export untouched;
+  - the Settings → Resources section was exercised in the browser: disk and
+    measured-use figures render, "Clean up now" posts and reports "Nothing to
+    reclaim" (correct — everything is referenced and within retention), and a
+    limit edited in the UI round-tripped to `config.json` and back through
+    `GET /api/settings`; no console errors;
+  - `autoclip resources` and `autoclip cleanup --dry-run` both work from the
+    command line.
+- Tests: 49 new (`tests/test_resources.py`, `tests/test_cli_resources.py`);
+  suite **603 passed** (up from 554); ruff + tsc + build clean.
+
 ### Phase 15 — Unified error handling and the recovery centre (COMPLETE)
 
 - `errors.py`: one taxonomy for the whole app. Stable codes — `auth`,

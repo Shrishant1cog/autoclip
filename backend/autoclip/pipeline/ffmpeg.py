@@ -21,9 +21,12 @@ import logging
 import re
 import shutil
 import subprocess
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+from .. import resources
 
 log = logging.getLogger(__name__)
 
@@ -150,6 +153,25 @@ def escape_filter_value(value: str) -> str:
 # --------------------------------------------------------------------------
 
 
+def run_captured(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    """Run a command with the ffmpeg gate held, capturing its output.
+
+    Every external media process goes through here so the process-wide
+    concurrency limit actually applies to ffprobe as well as ffmpeg. Without
+    it, a validation probe can start a third decoder while two encodes are
+    already running.
+    """
+    with resources.ffmpeg_gate.slot():
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+
 def probe(path: Path) -> MediaInfo:
     """Inspect a media file with ffprobe.
 
@@ -165,7 +187,7 @@ def probe(path: Path) -> MediaInfo:
         "-show_streams",
         str(path),
     ]
-    proc = subprocess.run(command, capture_output=True, text=True, check=False, encoding="utf-8")
+    proc = run_captured(command)
     if proc.returncode != 0:
         raise FFmpegError(f"Could not read {path.name}.", command=command, stderr=proc.stderr or "")
 
@@ -226,7 +248,7 @@ def volumedetect(path: Path) -> float | None:
         "null",
         "-",
     ]
-    proc = subprocess.run(command, capture_output=True, text=True, check=False, encoding="utf-8")
+    proc = run_captured(command)
     stderr = proc.stderr or ""
     if proc.returncode != 0 and "does not contain any stream" in stderr:
         raise FFmpegError(
@@ -313,11 +335,20 @@ def run(
     on_progress: ProgressCallback | None = None,
     cancelled: Callable[[], bool] | None = None,
     cwd: Path | None = None,
-) -> None:
+    threads: int = 0,
+    usage: resources.Usage | None = None,
+) -> float:
     """Run ffmpeg, optionally reporting progress as a 0..1 fraction.
 
     ``args`` excludes the executable name and the flags this function supplies
     (``-hide_banner``, ``-y``, ``-nostdin``, and the progress plumbing).
+
+    ``threads`` caps the decoder and filter threads. ffmpeg otherwise spawns
+    one worker per core, which oversubscribes the machine as soon as a second
+    ffmpeg is running.
+
+    Returns the wall-clock seconds the process took. ``usage``, when given,
+    accumulates the same numbers so a job can report what it actually spent.
 
     Preconditions:
         total_duration_s is the expected output duration when on_progress is set;
@@ -331,43 +362,56 @@ def run(
         "-loglevel",
         "error",
     ]
+    if threads and threads > 0:
+        # Placed before -i, so these apply to the decoder and the filtergraph.
+        command += ["-threads", str(threads), "-filter_threads", str(threads)]
     if on_progress and total_duration_s:
         command += ["-progress", "pipe:1", "-nostats"]
     command += list(args)
 
     log.debug("ffmpeg %s", " ".join(command[1:]))
 
-    proc = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        cwd=str(cwd) if cwd else None,
-    )
-
+    started = time.monotonic()
     try:
-        if on_progress and total_duration_s and proc.stdout is not None:
-            _pump_progress(proc, total_duration_s, on_progress, cancelled)
-        elif cancelled is not None:
-            _wait_cancellable(proc, cancelled)
+        with resources.ffmpeg_gate.slot():
+            proc = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=str(cwd) if cwd else None,
+            )
 
-        stdout, stderr = proc.communicate()
-    except BaseException:
-        proc.kill()
-        proc.wait()
-        raise
+            try:
+                if on_progress and total_duration_s and proc.stdout is not None:
+                    _pump_progress(proc, total_duration_s, on_progress, cancelled)
+                elif cancelled is not None:
+                    _wait_cancellable(proc, cancelled)
 
-    if proc.returncode != 0:
-        raise FFmpegError(
-            f"ffmpeg exited with code {proc.returncode}.",
-            command=command,
-            stderr=stderr or "",
-        )
+                stdout, stderr = proc.communicate()
+            except BaseException:
+                proc.kill()
+                proc.wait()
+                raise
 
-    if on_progress:
-        on_progress(1.0)
+        if proc.returncode != 0:
+            raise FFmpegError(
+                f"ffmpeg exited with code {proc.returncode}.",
+                command=command,
+                stderr=stderr or "",
+            )
+
+        if on_progress:
+            on_progress(1.0)
+    finally:
+        elapsed = time.monotonic() - started
+        if usage is not None:
+            usage.ffmpeg_runs += 1
+            usage.ffmpeg_seconds += elapsed
+
+    return elapsed
 
 
 class Cancelled(RuntimeError):

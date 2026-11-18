@@ -50,7 +50,7 @@ class AnthropicProvider(LLMProvider):
         try:
             message = await client.messages.create(
                 model=self.model,
-                max_tokens=4096,
+                max_tokens=config.max_output_tokens,
                 temperature=config.temperature,
                 system=system,
                 messages=[
@@ -62,6 +62,12 @@ class AnthropicProvider(LLMProvider):
             )
         except Exception as exc:
             raise _translate(exc, self.name, self.model) from exc
+
+        usage = getattr(message, "usage", None)
+        self._record_usage(
+            input_tokens=getattr(usage, "input_tokens", 0) or 0,
+            output_tokens=getattr(usage, "output_tokens", 0) or 0,
+        )
 
         text = "".join(block.text for block in message.content if hasattr(block, "text"))
         # Put back the brace we prefilled.

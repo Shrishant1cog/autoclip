@@ -262,6 +262,42 @@ NotificationSeverity = Literal["info", "success", "warning", "error"]
 
 
 @dataclass
+class JobResources:
+    """What one job consumed (Phase 16).
+
+    Measured, never estimated — see the ``job_resources`` table.
+    """
+
+    job_id: str
+    llm_calls: int = 0
+    llm_input_tokens: int = 0
+    llm_output_tokens: int = 0
+    ffmpeg_runs: int = 0
+    ffmpeg_seconds: float = 0.0
+    export_bytes: int = 0
+    windows_skipped: int = 0
+    updated_at: str = field(default_factory=utcnow)
+
+    @property
+    def llm_total_tokens(self) -> int:
+        return self.llm_input_tokens + self.llm_output_tokens
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> JobResources:
+        return cls(
+            job_id=row["job_id"],
+            llm_calls=row["llm_calls"],
+            llm_input_tokens=row["llm_input_tokens"],
+            llm_output_tokens=row["llm_output_tokens"],
+            ffmpeg_runs=row["ffmpeg_runs"],
+            ffmpeg_seconds=row["ffmpeg_seconds"],
+            export_bytes=row["export_bytes"],
+            windows_skipped=row["windows_skipped"],
+            updated_at=row["updated_at"],
+        )
+
+
+@dataclass
 class Notification:
     """One user-visible event waiting in the notification centre.
 

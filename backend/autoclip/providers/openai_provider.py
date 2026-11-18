@@ -71,6 +71,7 @@ class OpenAIProvider(LLMProvider):
         request = {
             "model": self.model,
             "temperature": config.temperature,
+            "max_tokens": config.max_output_tokens,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -95,6 +96,12 @@ class OpenAIProvider(LLMProvider):
         choices = response.choices or []
         if not choices:
             raise ProviderError("The endpoint returned no choices.", provider=self.name)
+
+        usage = getattr(response, "usage", None)
+        self._record_usage(
+            input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+            output_tokens=getattr(usage, "completion_tokens", 0) or 0,
+        )
         return choices[0].message.content or ""
 
     async def health_check(self) -> ProviderStatus:
