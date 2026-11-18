@@ -138,6 +138,54 @@ Each phase: implement → test → typecheck/build → commit → push. Log upda
 - Live-verified over HTTP: batch create → add real source → detail (item pending with
   source title) → delete. Defect fixed: module-vs-singleton import in app + API.
 
+### Phase 14 — The notification centre (COMPLETE)
+
+- **Migration v10** adds a `notifications` table: kind, severity
+  (info/success/warning/error), title, body, an in-app `link`, the `entity_id`
+  it refers to, a read flag and a timestamp. Verified on a copy of the real
+  database: v9 → v10 preserves all 8 sources / 8 jobs / 15 clips / 21 exports
+  / 21 uploads / 6 workflows / 1 batch, with a clean foreign-key check, and
+  re-running the migration is a no-op.
+- `notifications/events.py`: the one place that knows how to describe an
+  event — job done, job failed, clip exported, clip failed validation, upload
+  published, upload failed, upload skipped, batch finished. Every value is
+  the real one (the clip's own title, the upload's own error string, the
+  number of clips actually found). Every helper is wrapped so a failed insert
+  can never break the work it describes.
+- Wired into the real event points: the pipeline runner (job done/failed),
+  the export endpoint (render passed/failed validation), the upload queue
+  (published/failed/skipped) and the batch runner (batch finished).
+- `api/notifications.py`: `GET /api/notifications`, `/unread-count`,
+  `POST /{id}/read`, `POST /read-all`, `DELETE /{id}`, `POST /clear`. The
+  inbox is pruned to the newest 500 rows.
+- Frontend: a **notification bell** in the masthead with an unread badge, a
+  panel with severity dots, relative timestamps and per-row links, plus
+  "Mark all read" and "Clear read". Polled every 5 s — a local-first app has
+  no push channel.
+- **Two real bugs found and fixed by this phase's live run:**
+  1. *Duplicate detection compared the wrong key.* It compared the internal
+     `channel_row_id`, so the legacy row (`''`) and its imported channel
+     profile looked like different destinations — even though both point at
+     the same YouTube channel (`UChaj0U8h_RTMizn00n7EbRA`). A re-export of an
+     already-published clip therefore published a second copy. The comparison
+     now resolves each row to its **YouTube channel id**
+     (`duplicates.destination_channel_id`), so the two rows are correctly
+     recognised as one destination. Re-verified live: the re-export is now
+     **skipped** instead of published.
+  2. *Upload notifications said "Untitled clip".* The worker notified from a
+     snapshot taken before metadata generation wrote the title, and a skipped
+     upload never generates metadata at all. The title now falls back
+     upload row → clip row → "Untitled clip".
+- Verified live end-to-end: a real 52 s export produced a real
+  `clip_exported` notification naming the clip, the upload worker published
+  for real (`youtu.be/OoA4bvUJbAg`) and the `upload_done` notification carried
+  the channel and video id; the next export was correctly skipped as a
+  duplicate; the bell, badge, panel, "Mark all read" and click-through
+  navigation were all confirmed in the browser with no console errors. The
+  verification artefacts were then removed from the real database and the
+  exported file.
+- Suite **528 passed**, ruff/tsc/build clean.
+
 ### Phase 13 — The project-aware assistant (COMPLETE)
 
 - `chat/context.py`: a read-only snapshot of **real** project state — the

@@ -426,6 +426,32 @@ def _migration_v9(conn: sqlite3.Connection) -> None:
     conn.executescript(_V9)
 
 
+# --- v10: notification centre (Phase 14) ------------------------------------
+
+_V10 = """
+-- One row per user-visible event. The notification centre is local-first:
+-- nothing is pushed anywhere; the rows are the inbox.
+CREATE TABLE notifications (
+    id         TEXT PRIMARY KEY,
+    kind       TEXT NOT NULL DEFAULT '',
+    severity   TEXT NOT NULL DEFAULT 'info'
+               CHECK (severity IN ('info','success','warning','error')),
+    title      TEXT NOT NULL DEFAULT '',
+    body       TEXT NOT NULL DEFAULT '',
+    link       TEXT NOT NULL DEFAULT '',
+    entity_id  TEXT NOT NULL DEFAULT '',
+    read       INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX idx_notifications_created ON notifications(created_at);
+CREATE INDEX idx_notifications_unread ON notifications(read, created_at);
+"""
+
+
+def _migration_v10(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V10)
+
+
 #: Ordered migrations. Index + 1 is the resulting ``user_version``.
 #: Append only — never edit a migration that has shipped.
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
@@ -438,6 +464,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v7,
     _migration_v8,
     _migration_v9,
+    _migration_v10,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)

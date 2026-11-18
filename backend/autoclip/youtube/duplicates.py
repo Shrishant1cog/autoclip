@@ -40,6 +40,62 @@ REASON_LABELS: dict[str, str] = {
 _ACTIONABLE = {"pending", "uploading"}
 
 
+def destination_channel_id(channel_row_id: str, cache: dict[str, str] | None = None) -> str:
+    """The YouTube channel id an upload row targets.
+
+    Two rows are the same destination when they resolve to the same YouTube
+    channel — not when they name the same internal row. The legacy path stores
+    ``''`` instead of a channel row, but it targets the connected channel,
+    which is the same UC id as the imported channel profile. Comparing raw row
+    ids would therefore treat a re-export of an already-published clip as a
+    fresh destination and publish it a second time.
+
+    The result is a YouTube channel id (``UC…``) where one can be resolved, and
+    a namespaced fallback otherwise so two genuinely different destinations
+    never collide.
+    """
+    cache = cache if cache is not None else {}
+    if channel_row_id in cache:
+        return cache[channel_row_id]
+
+    resolved = ""
+    if channel_row_id:
+        try:
+            from . import accounts as accounts_store
+
+            channel = accounts_store.get_channel(channel_row_id)
+            if channel and channel.get("channel_id"):
+                resolved = str(channel["channel_id"])
+        except Exception:  # noqa: BLE001
+            resolved = ""
+        if not resolved:
+            resolved = f"row:{channel_row_id}"
+    else:
+        # The legacy single-account path: the connected channel.
+        try:
+            from .. import config
+
+            legacy = config.load().youtube.channel_id
+            if legacy:
+                resolved = legacy
+        except Exception:  # noqa: BLE001
+            resolved = ""
+        if not resolved:
+            try:
+                from . import accounts as accounts_store
+
+                default = accounts_store.default_channel()
+                if default and default.get("channel_id"):
+                    resolved = str(default["channel_id"])
+            except Exception:  # noqa: BLE001
+                resolved = ""
+        if not resolved:
+            resolved = "legacy"
+
+    cache[channel_row_id] = resolved
+    return resolved
+
+
 @dataclass
 class DuplicateGroup:
     """One primary upload plus the rows that would duplicate it."""
@@ -68,12 +124,18 @@ def conflict_for(upload: YouTubeUpload) -> YouTubeUpload | None:
     done: list[YouTubeUpload] = []
     in_flight: list[YouTubeUpload] = []
     queued: list[YouTubeUpload] = []
+    destinations: dict[str, str] = {}
+    target = destination_channel_id(upload.channel_row_id, destinations)
     for row in rows:
         if row.id == upload.id:
             continue
         # The same clip legitimately fans out to several channels; a duplicate
-        # is only a duplicate within one destination channel.
-        if row.clip_id != upload.clip_id or row.channel_row_id != upload.channel_row_id:
+        # is only a duplicate within one destination channel. The destination
+        # is the YouTube channel, so the legacy row and its imported profile
+        # count as the same place.
+        if row.clip_id != upload.clip_id:
+            continue
+        if destination_channel_id(row.channel_row_id, destinations) != target:
             continue
         if row.status == "done":
             done.append(row)
@@ -206,12 +268,16 @@ def _identical_files(
 
 def _same_title(rows: list[YouTubeUpload], claimed: set[str]) -> list[DuplicateGroup]:
     by_title: dict[tuple[str, str], list[YouTubeUpload]] = defaultdict(list)
+    destinations: dict[str, str] = {}
     for row in rows:
         if row.id in claimed:
             continue
         title = _normalise(row.title)
         if title:
-            by_title[(title, row.channel_row_id)].append(row)
+            # Group by the resolved YouTube channel, so a legacy row and its
+            # imported channel profile are recognised as the same place.
+            key = (title, destination_channel_id(row.channel_row_id, destinations))
+            by_title[key].append(row)
 
     groups: list[DuplicateGroup] = []
     for same_title in by_title.values():

@@ -12,6 +12,7 @@ from . import (
     jobs,
     learning,
     music,
+    notifications,
     routing,
     settings,
     sources,
@@ -38,3 +39,4 @@ api_router.include_router(music.router)
 api_router.include_router(learning.router)
 api_router.include_router(trends.router)
 api_router.include_router(chat.router)
+api_router.include_router(notifications.router)

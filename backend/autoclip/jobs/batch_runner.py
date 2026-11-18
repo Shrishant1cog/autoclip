@@ -165,6 +165,23 @@ class BatchRunner:
         else:
             batches.set_batch_status(batch_id, "done")
         log.info("Batch %s complete: %s", batch_id, progress)
+        self._notify_complete(batch_id, progress)
+
+    def _notify_complete(self, batch_id: str, progress: dict[str, int]) -> None:
+        """Tell the user the batch finished. Never raises."""
+        try:
+            from ..notifications import events
+
+            batch = batches.get_batch(batch_id) or {}
+            name = batch.get("name") or "Untitled batch"
+            events.batch_done(
+                batch_id,
+                name,
+                progress.get("done", 0),
+                progress.get("failed", 0),
+            )
+        except Exception:  # noqa: BLE001
+            log.debug("Could not record the batch notification.", exc_info=True)
 
     def _enqueue_job(self, batch_id: str, item: dict) -> str | None:
         source = store.get_source(item["source_id"])

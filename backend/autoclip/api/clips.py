@@ -44,6 +44,21 @@ def _clip_out(clip) -> ClipOut:
     return ClipOut.of(clip, edit=edit, exports=exports, uploads=uploads)
 
 
+def _notify_export(clip, *, ok: bool, failures: list[str]) -> None:
+    """Record the export outcome in the notification centre. Never raises."""
+    try:
+        from ..notifications import events
+
+        events.clip_exported(
+            clip.id,
+            clip.title or f"Clip {clip.rank}",
+            ok=ok,
+            failures=failures,
+        )
+    except Exception:  # noqa: BLE001
+        log.debug("Could not record the export notification.", exc_info=True)
+
+
 async def list_clips_for_job(job_id: str) -> list[ClipOut]:
     job = await asyncio.to_thread(store.get_job, job_id)
     if job is None:
@@ -296,7 +311,10 @@ async def export_clip(clip_id: str, payload: ExportRequestIn) -> ExportOut:
             clip_id,
             "; ".join(report.failures()),
         )
+        _notify_export(clip, ok=False, failures=report.failures())
         return ExportOut.of(record, None)
+
+    _notify_export(clip, ok=True, failures=[])
 
     uploads: list = []
     try:

@@ -18,6 +18,7 @@ from .models import (
     Export,
     Job,
     JobStatus,
+    Notification,
     Source,
     Transcript,
     UploadStatus,
@@ -585,3 +586,110 @@ def requeue_interrupted_uploads() -> None:
         conn.execute(
             "UPDATE youtube_uploads SET status = 'pending', error = NULL WHERE status = 'uploading'"
         )
+
+
+# --------------------------------------------------------------------------
+# Notifications (Phase 14)
+# --------------------------------------------------------------------------
+
+
+def create_notification(
+    notification: Notification,
+) -> Notification:
+    """Store one notification row."""
+    with connection() as conn:
+        conn.execute(
+            "INSERT INTO notifications (id, kind, severity, title, body, link,"
+            " entity_id, read, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                notification.id,
+                notification.kind,
+                notification.severity,
+                notification.title,
+                notification.body,
+                notification.link,
+                notification.entity_id,
+                1 if notification.read else 0,
+                notification.created_at,
+            ),
+        )
+    return notification
+
+
+def list_notifications(
+    limit: int = 50, *, unread_only: bool = False
+) -> list[Notification]:
+    """Recent notifications, newest first.
+
+    ``rowid`` breaks ties: timestamps have second precision, so two events in
+    the same second would otherwise come back in arbitrary order. ``rowid``
+    increases with insertion, which is the true order they happened.
+    """
+    query = "SELECT * FROM notifications"
+    params: list[Any] = []
+    if unread_only:
+        query += " WHERE read = 0"
+    query += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+    params.append(max(1, min(limit, 500)))
+    with connection() as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [Notification.from_row(r) for r in rows]
+
+
+def unread_notification_count() -> int:
+    """How many notifications the user has not read yet."""
+    with connection() as conn:
+        row = conn.execute("SELECT COUNT(*) FROM notifications WHERE read = 0").fetchone()
+    return int(row[0])
+
+
+def get_notification(notification_id: str) -> Notification | None:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM notifications WHERE id = ?", (notification_id,)
+        ).fetchone()
+    return Notification.from_row(row) if row else None
+
+
+def mark_notification_read(notification_id: str) -> bool:
+    """Mark one notification read. Returns False when the id is unknown."""
+    with connection() as conn:
+        cursor = conn.execute(
+            "UPDATE notifications SET read = 1 WHERE id = ?", (notification_id,)
+        )
+    return cursor.rowcount > 0
+
+
+def mark_all_notifications_read() -> int:
+    """Mark every unread notification read. Returns how many changed."""
+    with connection() as conn:
+        cursor = conn.execute("UPDATE notifications SET read = 1 WHERE read = 0")
+    return cursor.rowcount
+
+
+def delete_notification(notification_id: str) -> bool:
+    """Remove one notification. Returns False when the id is unknown."""
+    with connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM notifications WHERE id = ?", (notification_id,)
+        )
+    return cursor.rowcount > 0
+
+
+def clear_read_notifications() -> int:
+    """Remove every read notification, keeping the unread inbox intact."""
+    with connection() as conn:
+        cursor = conn.execute("DELETE FROM notifications WHERE read = 1")
+    return cursor.rowcount
+
+
+def prune_notifications(keep: int = 500) -> int:
+    """Trim the inbox to the newest ``keep`` rows. Returns how many went."""
+    with connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM notifications WHERE rowid NOT IN ("
+            "  SELECT rowid FROM notifications ORDER BY created_at DESC, rowid DESC LIMIT ?"
+            ")",
+            (max(1, keep),),
+        )
+    return cursor.rowcount

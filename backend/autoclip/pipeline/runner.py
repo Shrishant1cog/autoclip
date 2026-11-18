@@ -49,6 +49,34 @@ def _maybe_enqueue_upload(export_id: str, settings: Settings) -> None:
         log.exception("Could not queue a YouTube upload for export %s.", export_id)
 
 
+def _job_title(job: Job) -> str:
+    """The human name of the video a job is processing."""
+    source = store.get_source(job.source_id)
+    if source is None:
+        return job.source_id
+    return source.title or source.filename or job.source_id
+
+
+def _notify_job_done(job: Job, clips: list[Clip]) -> None:
+    """Tell the user the pipeline finished. Never raises."""
+    try:
+        from ..notifications import events
+
+        events.job_done(job.id, _job_title(job), len(clips))
+    except Exception:  # noqa: BLE001
+        log.debug("Could not record the job-done notification.", exc_info=True)
+
+
+def _notify_job_failed(job: Job, error: BaseException) -> None:
+    """Tell the user the pipeline failed. Never raises."""
+    try:
+        from ..notifications import events
+
+        events.job_failed(job.id, _job_title(job), str(error))
+    except Exception:  # noqa: BLE001
+        log.debug("Could not record the job-failed notification.", exc_info=True)
+
+
 #: Weight of each stage in the overall progress bar. Rough proportions of wall
 #: time on a mid-range machine — transcription and export dominate.
 STAGE_WEIGHTS: dict[Stage, float] = {
@@ -223,9 +251,11 @@ class PipelineRunner:
         except Exception as exc:
             log.exception("Job %s failed.", self.job.id)
             store.update_job(self.job.id, status="failed", error=str(exc), finished_at=utcnow())
+            _notify_job_failed(self.job, exc)
             raise
 
         store.update_job(self.job.id, status="done", progress=1.0, finished_at=utcnow())
+        _notify_job_done(self.job, clips)
         return clips
 
     # -- stages ------------------------------------------------------------

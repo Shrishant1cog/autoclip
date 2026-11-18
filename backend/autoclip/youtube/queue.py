@@ -93,15 +93,67 @@ class UploadQueue:
             video_id = await uploads.process_upload(upload, settings)
         except uploads.DuplicateUploadError as exc:
             log.info("YouTube upload %s skipped: %s", upload_id, exc)
-            store.update_upload(upload_id, status="skipped", error=_message(exc))
+            message = _message(exc)
+            store.update_upload(upload_id, status="skipped", error=message)
+            _notify(upload, "skipped", message)
         except Exception as exc:  # one bad upload must not stop the queue
             log.warning("YouTube upload %s failed: %s", upload_id, exc)
-            store.update_upload(upload_id, status="failed", error=_message(exc))
+            message = _message(exc)
+            store.update_upload(upload_id, status="failed", error=message)
+            _notify(upload, "failed", message)
         else:
             store.update_upload(upload_id, status="done", video_id=video_id, clear_error=True)
             log.info("YouTube upload %s finished as %s.", upload_id, video_id)
+            _notify(upload, "done", video_id)
         finally:
             self._current = None
+
+
+def _channel_title(upload) -> str:
+    """The destination channel's title, when the upload names one."""
+    if not upload.channel_row_id:
+        return ""
+    try:
+        from . import accounts as accounts_store
+
+        channel = accounts_store.get_channel(upload.channel_row_id)
+        return str(channel.get("title", "")) if channel else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _notify(upload, outcome: str, detail: str = "") -> None:
+    """Record an upload outcome in the notification centre. Never raises."""
+    try:
+        from ..notifications import events
+
+        title = _upload_title(upload)
+        if outcome == "done":
+            events.upload_done(upload.id, title, detail, _channel_title(upload))
+        elif outcome == "skipped":
+            events.upload_skipped(upload.id, title, detail)
+        else:
+            events.upload_failed(upload.id, title, detail)
+    except Exception:  # noqa: BLE001
+        log.debug("Could not record the upload notification.", exc_info=True)
+
+
+def _upload_title(upload) -> str:
+    """The name to show for an upload.
+
+    The generated title is written to the row during metadata creation, after
+    the snapshot this worker holds was read. A skipped upload never reaches
+    metadata generation at all, so the clip's own title is the fallback.
+    """
+    fresh = store.get_upload(upload.id)
+    if fresh is not None and fresh.title:
+        return fresh.title
+    if upload.title:
+        return upload.title
+    clip = store.get_clip(upload.clip_id)
+    if clip is not None and clip.title:
+        return clip.title
+    return "Untitled clip"
 
 
 #: Module-level singleton, matching the job queue's shape.

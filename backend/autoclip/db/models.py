@@ -256,3 +256,40 @@ class YouTubeUpload:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
+
+
+NotificationSeverity = Literal["info", "success", "warning", "error"]
+
+
+@dataclass
+class Notification:
+    """One user-visible event waiting in the notification centre.
+
+    ``link`` is an in-app route, so clicking a notification takes the user to
+    the thing it is about. ``entity_id`` is the row it refers to (a job, a
+    clip, an upload), which lets the UI cross-link.
+    """
+
+    id: str
+    kind: str = ""
+    severity: NotificationSeverity = "info"
+    title: str = ""
+    body: str = ""
+    link: str = ""
+    entity_id: str = ""
+    read: bool = False
+    created_at: str = field(default_factory=utcnow)
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> Notification:
+        return cls(
+            id=row["id"],
+            kind=row["kind"],
+            severity=row["severity"],
+            title=row["title"],
+            body=row["body"],
+            link=row["link"],
+            entity_id=row["entity_id"],
+            read=bool(row["read"]),
+            created_at=row["created_at"],
+        )

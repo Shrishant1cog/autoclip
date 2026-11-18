@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 
 import { api, type SystemStatus, type YouTubeStatus } from './api'
+import { NotificationBell } from './components/NotificationBell'
 
 /**
  * Application shell.
@@ -37,7 +38,8 @@ export function App() {
             <TopLink to="/settings">Settings</TopLink>
           </nav>
 
-          <div className="ml-auto flex items-baseline gap-5">
+          <div className="ml-auto flex items-center gap-4">
+            <NotificationBell />
             <YouTubeControls />
             {system && <SystemBadge system={system} />}
           </div>

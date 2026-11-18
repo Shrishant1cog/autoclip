@@ -202,6 +202,53 @@ def test_duplicates_are_scoped_per_channel(initialised_db: int) -> None:
     assert done.id != other_channel.id
 
 
+def test_legacy_row_and_its_channel_profile_are_one_destination(
+    initialised_db: int,
+) -> None:
+    """The legacy row and the imported profile are the same YouTube channel.
+
+    A re-export of an already-published clip must not publish a second copy,
+    even though one row stores the legacy '' and the other names the channel
+    profile.
+    """
+    _, _, clip = _seed_clip()
+    account, primary, _extra = _account_with_channels()
+
+    settings = config.load()
+    settings.youtube.channel_id = primary["channel_id"]
+    config.save(settings)
+
+    legacy_export = Export(id=new_id(), clip_id=clip.id, path="C:/out.mp4")
+    store.create_export(legacy_export)
+    store.create_upload(
+        YouTubeUpload(
+            id=new_id(),
+            export_id=legacy_export.id,
+            clip_id=clip.id,
+            channel_row_id="",
+            status="done",
+            video_id="vid-legacy",
+        )
+    )
+
+    new_export = Export(id=new_id(), clip_id=clip.id, path="C:/out2.mp4")
+    store.create_export(new_export)
+    pending = store.create_upload(
+        YouTubeUpload(
+            id=new_id(),
+            export_id=new_export.id,
+            clip_id=clip.id,
+            channel_row_id=primary["id"],
+            status="pending",
+        )
+    )
+
+    assert account["id"]
+    assert duplicates.destination_channel_id("") == primary["channel_id"]
+    assert duplicates.destination_channel_id(primary["id"]) == primary["channel_id"]
+    assert duplicates.conflict_for(pending) is not None
+
+
 # --------------------------------------------------------------------------
 # Channel-aware worker
 # --------------------------------------------------------------------------

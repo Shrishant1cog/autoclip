@@ -438,6 +438,18 @@ export interface TrendResearch {
   region: string
 }
 
+export interface Notification {
+  id: string
+  kind: string
+  severity: 'info' | 'success' | 'warning' | 'error'
+  title: string
+  body: string
+  link: string
+  entity_id: string
+  read: boolean
+  created_at: string
+}
+
 export const api = {
   health: () => request<{ status: string; version: string }>('/api/health'),
   system: () => request<SystemStatus>('/api/system'),
@@ -693,6 +705,25 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ message, history }),
     }),
+
+  // -- Notification centre (Phase 14) ---------------------------------------
+  listNotifications: (limit = 50, unreadOnly = false) =>
+    request<Notification[]>(
+      `/api/notifications?limit=${limit}${unreadOnly ? '&unread_only=true' : ''}`,
+    ),
+  unreadNotificationCount: () => request<{ unread: number }>('/api/notifications/unread-count'),
+  markNotificationRead: (id: string) =>
+    request<{ read: boolean }>(`/api/notifications/${encodeURIComponent(id)}/read`, {
+      method: 'POST',
+    }),
+  markAllNotificationsRead: () =>
+    request<{ marked: number }>('/api/notifications/read-all', { method: 'POST' }),
+  deleteNotification: (id: string) =>
+    request<{ deleted: boolean }>(`/api/notifications/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
+  clearReadNotifications: () =>
+    request<{ removed: number }>('/api/notifications/clear', { method: 'POST' }),
 }
 
 /** Format seconds as m:ss, or h:mm:ss past an hour. */
