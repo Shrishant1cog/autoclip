@@ -405,6 +405,39 @@ export interface Batch {
   progress?: BatchProgress
 }
 
+// -- Trending research (Phase 12) --------------------------------------------
+
+export interface TrendingVideo {
+  video_id: string
+  title: string
+  channel: string
+  published_at: string
+  view_count: number
+  category_id: string
+  tags: string[]
+  url: string
+}
+
+export interface TrendTheme {
+  theme: string
+  why: string
+  fit: string
+}
+
+export interface TrendResearch {
+  videos: TrendingVideo[]
+  themes: TrendTheme[]
+  formats: string[]
+  avoid: string[]
+  provider: string
+  fetched_at: number
+  from_cache: boolean
+  error: string
+  niche: string
+  category_id: string
+  region: string
+}
+
 export const api = {
   health: () => request<{ status: string; version: string }>('/api/health'),
   system: () => request<SystemStatus>('/api/system'),
@@ -615,6 +648,34 @@ export const api = {
       `/api/learning/channel-note/${encodeURIComponent(channelId)}`,
       { method: 'PUT', body: JSON.stringify({ channel_id: channelId, note }) },
     ),
+
+  // -- Trending research (Phase 12) -----------------------------------------
+  currentTrends: (niche = '', categoryId = '', region = 'US') => {
+    const params = new URLSearchParams()
+    if (niche) params.set('niche', niche)
+    if (categoryId) params.set('category_id', categoryId)
+    if (region) params.set('region', region)
+    const query = params.toString()
+    return request<TrendResearch>(`/api/trends/current${query ? `?${query}` : ''}`)
+  },
+  refreshTrends: (payload: {
+    niche?: string
+    category_id?: string
+    region?: string
+    force?: boolean
+  }) =>
+    request<TrendResearch>('/api/trends/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ force: true, ...payload }),
+    }),
+  trendContext: () =>
+    request<{
+      available: boolean
+      section: string
+      video_count: number
+      fetched_at: number
+      provider: string
+    }>('/api/trends/context'),
 }
 
 /** Format seconds as m:ss, or h:mm:ss past an hour. */

@@ -240,6 +240,14 @@ class LLMProvider(ABC):
         except Exception:  # noqa: BLE001
             log.debug("Could not load improve.txt feedback.", exc_info=True)
 
+        # Phase 12: current YouTube trends inform which angles to prefer.
+        try:
+            from ..trends import research as trend_research
+
+            system += trend_research.prompt_section(trend_research.cached_context())
+        except Exception:  # noqa: BLE001
+            log.debug("Could not load the trend context.", exc_info=True)
+
         raw = await self._complete(system, user, config)
         try:
             return self._parse(raw, window)

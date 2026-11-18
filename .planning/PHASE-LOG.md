@@ -138,6 +138,34 @@ Each phase: implement → test → typecheck/build → commit → push. Log upda
 - Live-verified over HTTP: batch create → add real source → detail (item pending with
   source title) → delete. Defect fixed: module-vs-singleton import in app + API.
 
+### Phase 12 — Trending research (COMPLETE)
+
+- `trends/research.py`: real trend signal from YouTube itself — the Data API's
+  `videos.list?chart=mostPopular` (1 quota unit per call) for the channel's
+  category and region, cached for 6 hours. The list is parsed into
+  `TrendingVideo` records (title, channel, views, tags, URL).
+- AI analysis over the provider fallback chain reads the real titles into
+  themes / working formats / saturated angles for the user's niche. A provider
+  failure is **not** fatal: the raw chart is still returned with `error` set.
+  Themes are never invented.
+- `providers/base.py`: the cached trend digest is appended to the highlight
+  detection system prompt as a "What is trending right now" block — read
+  network-free, so detection never blocks on a fetch. A broken trend cache
+  cannot break detection (guarded read).
+- `api/trends.py`: `GET /api/trends/current` (cached read, fetches when empty),
+  `POST /api/trends/refresh` (force re-fetch + re-analysis), and
+  `GET /api/trends/context` (the exact prompt block, for verification).
+- Frontend: a new **Trends** page (`/trends`, in the top nav) — niche input,
+  category and region pickers, Refresh, the analyst's themes with fit badges,
+  working formats, saturated angles, and the real chart with view counts.
+- Verified live against the real YouTube Data API: 50 trending videos fetched
+  for category 24 / US, analysed by Google Gemini into 3–4 themes + formats +
+  avoid list; `from_cache` flips to true on the second call and false after a
+  forced refresh; `/api/trends/context` contains the "What is trending right
+  now" header; the UI shows the real chart with no console errors, and typing a
+  niche visibly re-steers the analysis. Suite **491 passed**, ruff/tsc/build
+  clean.
+
 ### Phase 11 — Analytics and the learning engine (COMPLETE)
 
 - `learning/analytics.py`: honest outcome aggregates — pipeline summary

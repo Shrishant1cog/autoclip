@@ -14,6 +14,7 @@ from . import (
     routing,
     settings,
     sources,
+    trends,
     workflows,
     youtube,
     youtube_accounts,
@@ -34,3 +35,4 @@ api_router.include_router(routing.router)
 api_router.include_router(batches.router)
 api_router.include_router(music.router)
 api_router.include_router(learning.router)
+api_router.include_router(trends.router)

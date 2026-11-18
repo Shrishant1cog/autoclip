@@ -9,6 +9,7 @@ import { Ingest } from './pages/Ingest'
 import { JobProgress } from './pages/JobProgress'
 import { Review } from './pages/Review'
 import { Settings } from './pages/Settings'
+import { Trends } from './pages/Trends'
 import { Workflows } from './pages/Workflows'
 
 const router = createBrowserRouter([
@@ -18,6 +19,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <Ingest /> },
       { path: 'clips', element: <Clips /> },
+      { path: 'trends', element: <Trends /> },
       { path: 'workflows', element: <Workflows /> },
       { path: 'jobs/:jobId', element: <JobProgress /> },
       { path: 'jobs/:jobId/clips', element: <Review /> },
