@@ -68,6 +68,21 @@ async def create_workflow(payload: WorkflowIn) -> dict:
     return wf_store.create_workflow(payload.name, payload.definition, payload.description)
 
 
+@router.get("/runs")
+async def runs(workflow_id: str | None = None, limit: int = 50) -> list[dict]:
+    return wf_store.list_runs(workflow_id, limit)
+
+
+@router.get("/runs/{run_id}")
+async def run_detail(run_id: str) -> dict:
+    runs = wf_store.list_runs(limit=1000)
+    run = next((r for r in runs if r["id"] == run_id), None)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    run["nodes"] = wf_store.list_node_runs(run_id)
+    return run
+
+
 @router.get("/{workflow_id}")
 async def get_workflow(workflow_id: str) -> dict:
     workflow = wf_store.get_workflow(workflow_id)
@@ -157,18 +172,3 @@ async def run_workflow(workflow_id: str, payload: RunIn) -> dict:
         "status": "failed" if failed else "succeeded",
         "nodes": [{"node_id": r.node_id, "status": r.status, "error": r.error} for r in results],
     }
-
-
-@router.get("/runs")
-async def runs(workflow_id: str | None = None, limit: int = 50) -> list[dict]:
-    return wf_store.list_runs(workflow_id, limit)
-
-
-@router.get("/runs/{run_id}")
-async def run_detail(run_id: str) -> dict:
-    runs = wf_store.list_runs(limit=1000)
-    run = next((r for r in runs if r["id"] == run_id), None)
-    if run is None:
-        raise HTTPException(status_code=404, detail="Run not found.")
-    run["nodes"] = wf_store.list_node_runs(run_id)
-    return run

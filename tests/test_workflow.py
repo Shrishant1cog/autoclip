@@ -354,3 +354,18 @@ def test_migration_v4_creates_workflow_tables(initialised_db: int) -> None:
         }
     assert version >= 4
     assert {"workflows", "workflow_runs", "workflow_node_runs"} <= tables
+
+
+# --------------------------------------------------------------------------
+# API route ordering (regression: /runs was shadowed by /{workflow_id})
+# --------------------------------------------------------------------------
+
+
+def test_runs_endpoint_is_not_shadowed_by_workflow_id_route() -> None:
+    from autoclip.app import create_app
+    from fastapi.testclient import TestClient
+
+    with TestClient(create_app()) as client:
+        response = client.get("/api/workflows/runs")
+    assert response.status_code == 200
+    assert response.json() == []

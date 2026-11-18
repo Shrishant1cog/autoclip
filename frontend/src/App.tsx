@@ -31,6 +31,7 @@ export function App() {
               New
             </TopLink>
             <TopLink to="/clips">Clips</TopLink>
+            <TopLink to="/workflows">Workflows</TopLink>
             <TopLink to="/settings">Settings</TopLink>
           </nav>
 

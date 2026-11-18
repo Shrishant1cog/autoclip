@@ -138,6 +138,20 @@ Each phase: implement → test → typecheck/build → commit → push. Log upda
 - Live-verified over HTTP: batch create → add real source → detail (item pending with
   source title) → delete. Defect fixed: module-vs-singleton import in app + API.
 
+### Phase 7 — Visual workflow builder UI (COMPLETE)
+
+- `frontend/src/pages/Workflows.tsx`: n8n-inspired builder — infinite pan/zoom canvas
+  (SVG bezier edges + HTML node cards in world coordinates), node palette (all 8 types),
+  drag to move, output→input linking with live preview, per-node ON/OFF toggle,
+  config inspector, delete, workflow list with version display, Run button, and
+  per-workflow run history panel.
+- `api.ts`: typed Workflow/Batch client surfaces (nodes, CRUD, run, runs, batches).
+- Backend fix found by live UI testing: `/api/workflows/runs` was shadowed by
+  `/{workflow_id}` (route ordering) — moved above and added a regression test.
+- Verified live in the browser: create "UI builder smoke" via palette click → save →
+  run (succeeded) → history; node disable → save v3 → run shows `skipped/node disabled`;
+  re-enable → v5 saved. Suite **435 passed**; tsc + build clean.
+
 ### Phase 2 — Workflow engine foundation (COMPLETE — commit `b07e759`)
 
 - Migration v4: `workflows` (versioned, active flag), `workflow_runs`, `workflow_node_runs`.

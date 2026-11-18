@@ -277,6 +277,119 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+// -- Workflows & batches (Phase 6/7) ----------------------------------------
+
+export interface WorkflowNodeSpec {
+  type: string
+  name: string
+  category: string
+  description: string
+  inputs: string[]
+  output: string
+  config_schema: Record<string, string>
+  optional: boolean
+  max_retries: number
+}
+
+export interface WorkflowNodeSpecAlias {
+  /** A registered node type in the palette. */
+  spec: WorkflowNodeSpec
+}
+
+export interface WorkflowNode {
+  id: string
+  type: string
+  enabled?: boolean
+  config?: Record<string, unknown>
+  position?: { x: number; y: number }
+}
+
+export interface WorkflowEdge {
+  from: string
+  to: string
+}
+
+export interface WorkflowDefinition {
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
+}
+
+export interface Workflow {
+  id: string
+  name: string
+  description: string
+  definition: WorkflowDefinition
+  version: number
+  active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkflowRunNode {
+  node_id: string
+  node_type: string
+  status: string
+  attempt: number
+  input: unknown
+  output: unknown
+  error: string | null
+  started_at: string | null
+  finished_at: string | null
+}
+
+export interface WorkflowRun {
+  id: string
+  workflow_id: string
+  job_id: string | null
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled'
+  trigger: string
+  started_at: string
+  finished_at: string | null
+  error: string | null
+  workflow_name: string
+  nodes?: WorkflowRunNode[]
+}
+
+export interface WorkflowRunResult {
+  run_id: string
+  status: string
+  nodes: { node_id: string; status: string; error: string | null }[]
+}
+
+export interface BatchItem {
+  id: string
+  batch_id: string
+  source_id: string
+  job_id: string | null
+  position: number
+  status: 'pending' | 'processing' | 'done' | 'failed' | 'skipped' | 'cancelled'
+  error: string | null
+  created_at: string
+  updated_at: string
+  source_title?: string
+}
+
+export interface BatchProgress {
+  total: number
+  pending: number
+  processing: number
+  done: number
+  failed: number
+  skipped: number
+  cancelled: number
+}
+
+export interface Batch {
+  id: string
+  name: string
+  status: 'queued' | 'running' | 'paused' | 'done' | 'failed' | 'cancelled'
+  settings: Record<string, unknown>
+  created_at: string
+  updated_at: string
+  items?: BatchItem[]
+  progress?: BatchProgress
+}
+
 export const api = {
   health: () => request<{ status: string; version: string }>('/api/health'),
   system: () => request<SystemStatus>('/api/system'),
@@ -370,6 +483,49 @@ export const api = {
     request<void>(`/api/settings/secrets/${key}`, { method: 'DELETE' }),
 
   mediaUrl: (jobId: string) => `/api/jobs/${jobId}/media`,
+
+  // -- Workflows (Phase 7 visual builder) -----------------------------------
+  workflowNodes: () => request<WorkflowNodeSpec[]>(`/api/workflows/nodes`),
+  listWorkflows: () => request<Workflow[]>(`/api/workflows`),
+  createWorkflow: (name: string, definition: WorkflowDefinition, description = '') =>
+    request<Workflow>(`/api/workflows`, {
+      method: 'POST',
+      body: JSON.stringify({ name, description, definition }),
+    }),
+  getWorkflow: (id: string) => request<Workflow>(`/api/workflows/${id}`),
+  saveWorkflow: (id: string, definition: WorkflowDefinition, name?: string) =>
+    request<Workflow>(`/api/workflows/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ definition, name: name ?? null }),
+    }),
+  deleteWorkflow: (id: string) => request<void>(`/api/workflows/${id}`, { method: 'DELETE' }),
+  runWorkflow: (id: string, jobId?: string) =>
+    request<WorkflowRunResult>(`/api/workflows/${id}/run`, {
+      method: 'POST',
+      body: JSON.stringify({ job_id: jobId ?? null }),
+    }),
+  workflowRuns: (workflowId?: string, limit = 50) =>
+    request<WorkflowRun[]>(
+      `/api/workflows/runs?${workflowId ? `workflow_id=${workflowId}&` : ''}limit=${limit}`,
+    ),
+  workflowRunDetail: (runId: string) => request<WorkflowRun>(`/api/workflows/runs/${runId}`),
+
+  // -- Batches --------------------------------------------------------------
+  listBatches: (limit = 50) => request<Batch[]>(`/api/batches?limit=${limit}`),
+  createBatch: (name: string, settings: Record<string, unknown> = {}) =>
+    request<Batch>(`/api/batches`, { method: 'POST', body: JSON.stringify({ name, settings }) }),
+  getBatch: (id: string) => request<Batch>(`/api/batches/${id}`),
+  deleteBatch: (id: string) => request<void>(`/api/batches/${id}`, { method: 'DELETE' }),
+  addBatchSources: (id: string, sourceIds: string[]) =>
+    request<{ added: number }>(`/api/batches/${id}/sources`, {
+      method: 'POST',
+      body: JSON.stringify({ source_ids: sourceIds }),
+    }),
+  launchBatch: (id: string) => request<Batch>(`/api/batches/${id}/launch`, { method: 'POST' }),
+  pauseBatch: (id: string) => request<Batch>(`/api/batches/${id}/pause`, { method: 'POST' }),
+  cancelBatch: (id: string) => request<Batch>(`/api/batches/${id}/cancel`, { method: 'POST' }),
+  retryBatchFailed: (id: string) =>
+    request<{ requeued: number }>(`/api/batches/${id}/retry-failed`, { method: 'POST' }),
 }
 
 /** Format seconds as m:ss, or h:mm:ss past an hour. */
