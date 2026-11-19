@@ -111,12 +111,24 @@ def cut(source: Path, output: Path, start: float, seconds: float) -> Path:
 
     ffmpeg.run(
         [
-            "-ss", f"{start:.3f}",
-            "-i", str(source),
-            "-t", f"{seconds:.3f}",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
-            "-c:a", "aac", "-b:a", "128k",
-            "-movflags", "+faststart",
+            "-ss",
+            f"{start:.3f}",
+            "-i",
+            str(source),
+            "-t",
+            f"{seconds:.3f}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "26",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-movflags",
+            "+faststart",
             str(output),
         ]
     )
@@ -127,8 +139,14 @@ def run_tests(output: Path, extra: list[str]) -> int:
     """Run the e2e suite with ``AUTOCLIP_E2E_MEDIA`` pointing at ``output``."""
     env = {**os.environ, "AUTOCLIP_E2E_MEDIA": str(output)}
     command = [
-        sys.executable, "-m", "pytest",
-        "tests/test_pipeline_e2e.py", "-q", "-rs", "-p", "no:randomly",
+        sys.executable,
+        "-m",
+        "pytest",
+        "tests/test_pipeline_e2e.py",
+        "-q",
+        "-rs",
+        "-p",
+        "no:randomly",
         *extra,
     ]
     print(f"\n$ {' '.join(command)}", flush=True)
@@ -145,20 +163,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--source", help="Video to cut from (default: pick from the media library)."
     )
-    parser.add_argument(
-        "--output", default=str(DEFAULT_OUTPUT), help="Where to write the segment."
-    )
+    parser.add_argument("--output", default=str(DEFAULT_OUTPUT), help="Where to write the segment.")
     parser.add_argument("--start", type=float, default=None, help="Start offset in seconds.")
     parser.add_argument(
         "--seconds", type=float, default=DEFAULT_SECONDS, help="Length of the segment."
     )
-    parser.add_argument(
-        "--run", action="store_true", help="Run the e2e tests against the segment."
-    )
+    parser.add_argument("--run", action="store_true", help="Run the e2e tests against the segment.")
     parser.add_argument("--list", action="store_true", help="List usable sources and exit.")
-    parser.add_argument(
-        "pytest_args", nargs="*", help="Extra arguments passed through to pytest."
-    )
+    parser.add_argument("pytest_args", nargs="*", help="Extra arguments passed through to pytest.")
     args = parser.parse_args(argv)
 
     if args.list:
@@ -183,8 +195,10 @@ def main(argv: list[str] | None = None) -> int:
 
     written = ffmpeg.probe(output)
     print(f"Wrote {output}")
-    print(f"  {written.duration_s:.1f}s  {written.width}x{written.height}  "
-          f"audio={written.has_audio}  {output.stat().st_size / 1e6:.1f}MB")
+    print(
+        f"  {written.duration_s:.1f}s  {written.width}x{written.height}  "
+        f"audio={written.has_audio}  {output.stat().st_size / 1e6:.1f}MB"
+    )
 
     if not args.run:
         print("\nNext: run the tests with")

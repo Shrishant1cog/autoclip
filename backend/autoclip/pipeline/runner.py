@@ -517,9 +517,7 @@ class PipelineRunner:
         """
         if provider_name == "ollama":
             return None
-        if not (
-            looks_like_auth_failure(error) or looks_like_transient_failure(error)
-        ):
+        if not (looks_like_auth_failure(error) or looks_like_transient_failure(error)):
             return None
 
         try:
@@ -725,9 +723,7 @@ class PipelineRunner:
         if self.settings.transcription.voiceover != "muxed":
             return destination
 
-        self._emit(
-            stage, (index + 0.5) / total, f"Narrating clip {index + 1}"
-        )
+        self._emit(stage, (index + 0.5) / total, f"Narrating clip {index + 1}")
         try:
             from ..speech import tts
 
@@ -736,12 +732,8 @@ class PipelineRunner:
                 return destination
 
             narration_path = destination.with_suffix(".narration.mp3")
-            voice_id = (
-                self.settings.transcription.voice_id.strip() or tts.DEFAULT_VOICE_ID
-            )
-            tts.synthesize_speech(
-                narration_text, narration_path, voice_id=voice_id
-            )
+            voice_id = self.settings.transcription.voice_id.strip() or tts.DEFAULT_VOICE_ID
+            tts.synthesize_speech(narration_text, narration_path, voice_id=voice_id)
             final = destination.with_suffix(".narrated.mp4")
             tts.mux_voiceover(destination, narration_path, final)
             final.replace(destination)
