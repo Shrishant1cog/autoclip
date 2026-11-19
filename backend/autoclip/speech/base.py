@@ -33,6 +33,15 @@ class SpeechCancelled(SpeechError):
     """
 
 
+class SpeechConsentDenied(SpeechError):
+    """An external speech engine may not be contacted.
+
+    Distinct from a generic failure because the remedy is different: the
+    service did not break, the user's external-processing settings blocked it.
+    The runner says so instead of reporting "ElevenLabs unavailable".
+    """
+
+
 class SpeechEngine(Protocol):
     """One speech-to-text backend."""
 

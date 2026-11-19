@@ -13,6 +13,7 @@ from . import (
     learning,
     music,
     notifications,
+    privacy,
     recovery,
     resources,
     restarts,
@@ -46,3 +47,4 @@ api_router.include_router(notifications.router)
 api_router.include_router(recovery.router)
 api_router.include_router(resources.router)
 api_router.include_router(restarts.router)
+api_router.include_router(privacy.router)

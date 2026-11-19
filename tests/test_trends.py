@@ -326,6 +326,8 @@ def test_detection_prompt_includes_trend_context(
 
     class DummyProvider(providers_base.LLMProvider):
         name = "dummy"
+        #: Loopback, so the egress policy treats it as a local provider.
+        DEFAULT_ENDPOINT = "http://localhost:11434"
 
         def __init__(self):
             super().__init__("dummy-model")
@@ -366,6 +368,8 @@ def test_detection_prompt_survives_missing_trend_context(
 
     class DummyProvider(providers_base.LLMProvider):
         name = "dummy"
+        #: Loopback, so the egress policy treats it as a local provider.
+        DEFAULT_ENDPOINT = "http://localhost:11434"
 
         def __init__(self):
             super().__init__("dummy-model")

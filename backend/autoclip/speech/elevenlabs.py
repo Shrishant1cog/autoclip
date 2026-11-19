@@ -12,6 +12,7 @@ grouping words on sentence ends, because Scribe returns none.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -19,7 +20,10 @@ import httpx
 
 from ..config import TranscriptionSettings, get_secret
 from ..pipeline.transcript import Segment, Transcript, Word
-from .base import SpeechCancelled, SpeechError
+from ..security import consent
+from ..security.egress import Transfer, gateway
+from ..security.urlpolicy import ConsentRequired
+from .base import SpeechCancelled, SpeechConsentDenied, SpeechError
 
 log = logging.getLogger(__name__)
 
@@ -102,6 +106,28 @@ class ElevenLabsSTT:
         if on_progress:
             on_progress(0.1)
 
+        # The audio is about to leave the machine. The gateway classifies the
+        # destination, checks the user's consent decision and records the
+        # transfer. A refusal is a SpeechError, not a silent substitution —
+        # the runner decides whether that means "fall back to local Whisper"
+        # (in ``auto``) or "stop" (when the engine is pinned).
+        transfer = Transfer(
+            operation=consent.Operation.TRANSCRIPTION,
+            url=API_URL,
+            data_summary=f"Extracted audio ({audio.name}) for speech-to-text.",
+            provider="elevenlabs",
+            configured=True,
+        )
+        try:
+            gateway.require(transfer)
+        except ConsentRequired as exc:
+            raise SpeechConsentDenied(
+                "External transcription is not allowed: "
+                f"{exc}. Allow it in Settings → External processing, or set "
+                "the transcription engine to 'local'."
+            ) from exc
+
+        started = time.perf_counter()
         try:
             with httpx.Client(timeout=REQUEST_TIMEOUT) as client, audio.open("rb") as handle:
                 # Stream the upload so a multi-hundred-MB WAV is not slurped
@@ -113,7 +139,20 @@ class ElevenLabsSTT:
                     files={"file": (audio.name, handle, "audio/wav")},
                 )
         except httpx.HTTPError as exc:
+            gateway.record(
+                transfer,
+                "failed",
+                detail=str(exc),
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            )
             raise SpeechError(f"ElevenLabs request failed: {exc}") from exc
+
+        gateway.record(
+            transfer,
+            "ok" if response.status_code < 400 else "failed",
+            detail=f"HTTP {response.status_code}",
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
 
         if response.status_code >= 400:
             detail = response.text[:300]

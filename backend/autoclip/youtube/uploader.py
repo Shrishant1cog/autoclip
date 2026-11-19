@@ -13,6 +13,9 @@ from pathlib import Path
 import httpx
 
 from .. import config
+from ..security import consent
+from ..security.egress import Transfer, gateway
+from ..security.urlpolicy import UrlRejected
 from . import oauth
 from .metadata import ClipMetadata
 
@@ -78,6 +81,22 @@ def upload_video(
         "X-Upload-Content-Type": "video/mp4",
     }
 
+    # The rendered clip is about to leave the machine. Publishing is an
+    # explicit owner action, so it is recorded rather than consent-gated — but
+    # it still goes through the gateway, so the destination is classified and
+    # the transfer is in the log the user can read.
+    transfer = Transfer(
+        operation=consent.Operation.PUBLISHING,
+        url=UPLOAD_URL,
+        data_summary=f"The rendered clip {path.name} and its metadata.",
+        provider="youtube",
+        requires_consent=False,
+    )
+    try:
+        gateway.authorize(transfer)
+    except UrlRejected as exc:
+        raise YouTubeError(f"YouTube was refused as a destination: {exc}") from exc
+
     try:
         init = httpx.post(
             UPLOAD_URL,
@@ -87,12 +106,15 @@ def upload_video(
             timeout=60.0,
         )
     except httpx.HTTPError as exc:
+        gateway.record(transfer, "failed", detail=str(exc))
         raise YouTubeError(f"Could not reach YouTube: {exc}") from exc
 
     if init.status_code >= 400:
+        gateway.record(transfer, "failed", detail=f"HTTP {init.status_code}")
         raise _translate(init)
     location = init.headers.get("location") or init.headers.get("Location")
     if not location:
+        gateway.record(transfer, "failed", detail="no session URL")
         raise YouTubeError("YouTube did not return an upload session URL.")
 
     size = path.stat().st_size
@@ -108,14 +130,18 @@ def upload_video(
                 timeout=_UPLOAD_TIMEOUT,
             )
     except httpx.HTTPError as exc:
+        gateway.record(transfer, "failed", detail=str(exc))
         raise YouTubeError(f"The upload was interrupted: {exc}") from exc
 
     if response.status_code >= 400:
+        gateway.record(transfer, "failed", detail=f"HTTP {response.status_code}")
         raise _translate(response)
 
     video_id = response.json().get("id", "")
     if not video_id:
+        gateway.record(transfer, "failed", detail="no video id in the response")
         raise YouTubeError("YouTube accepted the upload but returned no video id.")
+    gateway.record(transfer, "ok")
     log.info("Uploaded %s to YouTube as %s.", path.name, video_id)
     return video_id
 

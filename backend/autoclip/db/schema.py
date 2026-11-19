@@ -570,6 +570,51 @@ def _migration_v14(conn: sqlite3.Connection) -> None:
     conn.executescript(_V14)
 
 
+# --- v15: external-transfer consent and the egress log ---------------------
+
+_V15 = """
+-- Two tables for the M0.5 governance layer.
+--
+-- egress_consents records the user's answer to "may this operation reach a
+-- host of this class?". The key is (operation, destination_class) rather
+-- than a hostname on purpose: a consent decision is about the *kind* of
+-- destination, and a base_url that changes from a public host to a private
+-- one must stop matching the public decision.
+--
+-- egress_log records what actually happened. It is append-only and holds no
+-- content - only a description of what left, where it went, and whether the
+-- call succeeded.
+CREATE TABLE IF NOT EXISTS egress_consents (
+    operation         TEXT NOT NULL,
+    destination_class TEXT NOT NULL,
+    granted           INTEGER NOT NULL DEFAULT 0,
+    source            TEXT NOT NULL DEFAULT '',
+    decided_at        TEXT NOT NULL,
+    note              TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (operation, destination_class)
+);
+
+CREATE TABLE IF NOT EXISTS egress_log (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    occurred_at       TEXT NOT NULL,
+    operation         TEXT NOT NULL,
+    provider          TEXT NOT NULL DEFAULT '',
+    destination       TEXT NOT NULL DEFAULT '',
+    destination_class TEXT NOT NULL DEFAULT '',
+    data_summary      TEXT NOT NULL DEFAULT '',
+    outcome           TEXT NOT NULL,
+    detail            TEXT NOT NULL DEFAULT '',
+    duration_ms       INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_egress_log_occurred_at ON egress_log(occurred_at);
+"""
+
+
+def _migration_v15(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V15)
+
+
 #: Ordered migrations. Index + 1 is the resulting ``user_version``.
 #: Append only — never edit a migration that has shipped.
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
@@ -587,6 +632,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v12,
     _migration_v13,
     _migration_v14,
+    _migration_v15,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)

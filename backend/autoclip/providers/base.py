@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +31,9 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from ..resources import TokenUsage
+from ..security import consent
+from ..security.egress import Transfer, gateway
+from ..security.urlpolicy import ConsentRequired, UrlRejected
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +51,16 @@ class ProviderError(RuntimeError):
     def __str__(self) -> str:
         base = super().__str__()
         return f"{base}\n\n{self.hint}" if self.hint else base
+
+
+class ProviderConsentRequired(ProviderError):
+    """The provider's destination may not be contacted.
+
+    Distinct from a generic provider failure on purpose: a refused transfer is
+    not "the model is down", and the caller must not respond by trying a
+    different external provider. The only acceptable continuation is a local
+    one, which sends nothing anywhere.
+    """
 
 
 #: Phrases that mean a provider rejected the credentials rather than the
@@ -199,6 +213,10 @@ class LLMProvider(ABC):
     name: str = ""
     #: Whether the provider needs an API key.
     requires_key: bool = True
+    #: Where this adapter sends its requests when no ``base_url`` is set. The
+    #: vendor SDKs have their own defaults; naming them here means the egress
+    #: policy classifies the real destination instead of guessing.
+    DEFAULT_ENDPOINT: str = ""
 
     def __init__(self, model: str, *, api_key: str | None = None, base_url: str | None = None):
         self.model = model
@@ -214,6 +232,11 @@ class LLMProvider(ABC):
         #: total can be attributed exactly.
         self.total_usage = TokenUsage()
 
+    @property
+    def endpoint(self) -> str:
+        """The URL this provider will actually contact."""
+        return self.base_url or self.DEFAULT_ENDPOINT
+
     # -- to implement ------------------------------------------------------
 
     @abstractmethod
@@ -225,6 +248,84 @@ class LLMProvider(ABC):
         """Report whether this provider is usable right now."""
 
     # -- shared behaviour --------------------------------------------------
+
+    def _authorize(self, data_summary: str) -> None:
+        """Check that this provider's destination may be contacted.
+
+        The check happens here, in the base class, because this is the one
+        place every adapter's request passes through. A provider that forgets
+        to ask cannot send anything anywhere.
+
+        A refusal raises :class:`ProviderConsentRequired`, which the caller
+        treats differently from a provider failure: it is not retried against
+        another external provider.
+        """
+        endpoint = self.endpoint
+        if not endpoint:
+            raise ProviderError(
+                f"{self.name} has no configured endpoint.",
+                provider=self.name,
+                hint="Set the provider's base URL in Settings → Providers.",
+            )
+        transfer = Transfer(
+            operation=consent.Operation.HIGHLIGHTS,
+            url=endpoint,
+            data_summary=data_summary,
+            provider=self.name,
+            configured=bool(self.api_key),
+        )
+        try:
+            gateway.require(transfer)
+        except ConsentRequired as exc:
+            raise ProviderConsentRequired(
+                f"{self.name} may not be contacted: {exc}",
+                provider=self.name,
+                hint=(
+                    "Allow AI processing to reach public destinations in "
+                    "Settings → External processing, or switch to a local model."
+                ),
+            ) from exc
+        except UrlRejected as exc:
+            raise ProviderConsentRequired(
+                f"{self.name} points at an address AutoClip will not contact: {exc}",
+                provider=self.name,
+                hint="Change the provider's base URL in Settings → Providers.",
+            ) from exc
+
+    async def _send(self, system: str, user: str, config: DetectionConfig) -> str:
+        """Authorize, then perform the request.
+
+        Every provider call goes through here, so the consent check cannot be
+        forgotten by an adapter.
+        """
+        self._authorize("Transcript text and standing instructions for AI analysis.")
+        started = time.perf_counter()
+        try:
+            raw = await self._complete(system, user, config)
+        except Exception as exc:
+            gateway.record(
+                Transfer(
+                    operation=consent.Operation.HIGHLIGHTS,
+                    url=self.endpoint,
+                    data_summary="Transcript text and standing instructions.",
+                    provider=self.name,
+                ),
+                "failed",
+                detail=str(exc),
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            )
+            raise
+        gateway.record(
+            Transfer(
+                operation=consent.Operation.HIGHLIGHTS,
+                url=self.endpoint,
+                data_summary="Transcript text and standing instructions.",
+                provider=self.name,
+            ),
+            "ok",
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+        return raw
 
     def _record_usage(self, input_tokens: int = 0, output_tokens: int = 0) -> None:
         """Record what the last call cost.
@@ -254,7 +355,7 @@ class LLMProvider(ABC):
         Providers only see a system/user pair, so no extra implementations are
         needed.
         """
-        return await self._complete(system, user, DetectionConfig(temperature=temperature))
+        return await self._send(system, user, DetectionConfig(temperature=temperature))
 
     async def detect_highlights(
         self, window: TranscriptWindow, config: DetectionConfig
@@ -284,7 +385,7 @@ class LLMProvider(ABC):
         except Exception:  # noqa: BLE001
             log.debug("Could not load the trend context.", exc_info=True)
 
-        raw = await self._complete(system, user, config)
+        raw = await self._send(system, user, config)
         try:
             return self._parse(raw, window)
         except (ValidationError, ValueError) as first_error:
@@ -296,7 +397,7 @@ class LLMProvider(ABC):
                 "Respond again with ONLY the corrected JSON object. No prose, no "
                 "markdown fences."
             )
-            raw = await self._complete(system, repair, config)
+            raw = await self._send(system, repair, config)
             try:
                 return self._parse(raw, window)
             except (ValidationError, ValueError) as second_error:

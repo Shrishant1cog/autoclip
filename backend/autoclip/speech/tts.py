@@ -9,11 +9,15 @@ speaker stays faintly audible under the voiceover.
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 import httpx
 
 from ..config import get_secret
+from ..security import consent
+from ..security.egress import Transfer, gateway
+from ..security.urlpolicy import ConsentRequired
 from .base import SpeechError
 
 log = logging.getLogger(__name__)
@@ -42,15 +46,47 @@ def synthesize_speech(
     if not text.strip():
         raise SpeechError("Nothing to synthesize — the narration text is empty.")
 
-    response = httpx.post(
-        API_URL.format(voice_id=voice_id),
-        headers={"xi-api-key": api_key, "accept": "audio/mpeg"},
-        json={
-            "text": text,
-            "model_id": model_id,
-            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
-        },
-        timeout=REQUEST_TIMEOUT,
+    url = API_URL.format(voice_id=voice_id)
+    transfer = Transfer(
+        operation=consent.Operation.VOICEOVER,
+        url=url,
+        data_summary=f"Narration text ({len(text)} characters) for text-to-speech.",
+        provider="elevenlabs",
+        configured=True,
+    )
+    try:
+        gateway.require(transfer)
+    except ConsentRequired as exc:
+        raise SpeechError(
+            f"External voiceover is not allowed: {exc}. Allow it in Settings → External processing."
+        ) from exc
+
+    started = time.perf_counter()
+    try:
+        response = httpx.post(
+            url,
+            headers={"xi-api-key": api_key, "accept": "audio/mpeg"},
+            json={
+                "text": text,
+                "model_id": model_id,
+                "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+            },
+            timeout=REQUEST_TIMEOUT,
+        )
+    except httpx.HTTPError as exc:
+        gateway.record(
+            transfer,
+            "failed",
+            detail=str(exc),
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+        raise SpeechError(f"ElevenLabs TTS request failed: {exc}") from exc
+
+    gateway.record(
+        transfer,
+        "ok" if response.status_code < 400 else "failed",
+        detail=f"HTTP {response.status_code}",
+        duration_ms=int((time.perf_counter() - started) * 1000),
     )
     if response.status_code >= 400:
         raise SpeechError(f"ElevenLabs TTS returned {response.status_code}: {response.text[:300]}")

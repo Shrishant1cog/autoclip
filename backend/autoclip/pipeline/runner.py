@@ -390,13 +390,24 @@ class PipelineRunner:
             if pinned:
                 raise
             fallback = LocalWhisperSTT()
+            # A consent refusal is not a service failure, and saying "the
+            # engine failed" would send the user looking in the wrong place.
+            blocked = isinstance(exc, speech.SpeechConsentDenied)
             log.warning(
                 "Transcription engine %s failed (%s); falling back to local.", engine.name, exc
             )
-            self._emit(stage, 0.0, f"{engine.name} unavailable — using local Whisper")
-            self._set_notice(
-                stage, f"{engine.name} transcription failed — used local Whisper instead."
-            )
+            if blocked:
+                self._emit(stage, 0.0, "External transcription blocked — using local Whisper")
+                self._set_notice(
+                    stage,
+                    "External transcription is blocked in Settings → External processing "
+                    "— used local Whisper instead.",
+                )
+            else:
+                self._emit(stage, 0.0, f"{engine.name} unavailable — using local Whisper")
+                self._set_notice(
+                    stage, f"{engine.name} transcription failed — used local Whisper instead."
+                )
             transcript = fallback.transcribe(
                 audio,
                 self.settings.transcription,

@@ -16,6 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import paths
+from .security import consent
+from .security.egress import Transfer, gateway
+from .security.urlpolicy import UrlRejected
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +78,24 @@ def ensure(key: str, *, timeout: float = 120.0) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
     log.info("Downloading %s (~%.1f MB)...", spec.filename, spec.approx_bytes / 1_048_576)
 
+    # This is an outbound request the user did not ask for, so it is classified
+    # and recorded. No user content is involved — a model file — so it is
+    # logged rather than consent-gated, and the Settings screen says so.
+    transfer = Transfer(
+        operation=consent.Operation.MODEL_DOWNLOAD,
+        url=spec.url,
+        data_summary=f"The {spec.key} model file ({spec.approx_bytes / 1_048_576:.1f} MB).",
+        provider="model-host",
+        requires_consent=False,
+    )
+    try:
+        gateway.authorize(transfer)
+    except UrlRejected as exc:
+        raise ModelDownloadError(
+            f"The {spec.key} model host was refused: {exc}\n\n"
+            f"Download the file manually and place it at {destination}."
+        ) from exc
+
     # Download to a temp file and move into place, so an interrupted fetch can
     # never leave a truncated model that then fails cryptically at inference.
     temporary = destination.with_suffix(destination.suffix + ".part")
@@ -86,6 +107,7 @@ def ensure(key: str, *, timeout: float = 120.0) -> Path:
             shutil.copyfileobj(response, handle)
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
         temporary.unlink(missing_ok=True)
+        gateway.record(transfer, "failed", detail=str(exc))
         raise ModelDownloadError(
             f"Could not download the {spec.key} model.\n"
             f"URL: {spec.url}\n"
@@ -93,6 +115,8 @@ def ensure(key: str, *, timeout: float = 120.0) -> Path:
             f"If this machine has no internet access, download the file manually "
             f"and place it at {destination}."
         ) from exc
+
+    gateway.record(transfer, "ok")
 
     if temporary.stat().st_size == 0:
         temporary.unlink(missing_ok=True)

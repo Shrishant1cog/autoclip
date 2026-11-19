@@ -486,6 +486,39 @@ export interface MusicTrack {
   path: string
 }
 
+// -- External processing (M0.5) -----------------------------------------------
+
+/** One stored answer to "may this operation reach this class of host?". */
+export interface ConsentDecision {
+  destination_class: string
+  granted: boolean
+  source: string
+  decided_at: string
+  note: string
+}
+
+/** One external operation, with the user's decision for each destination class. */
+export interface PrivacyOperation {
+  operation: string
+  title: string
+  data: string
+  why: string
+  decisions: ConsentDecision[]
+}
+
+/** One recorded outbound transfer. Never contains the content itself. */
+export interface TransferRecord {
+  occurred_at: string
+  operation: string
+  provider: string
+  destination: string
+  destination_class: string
+  data_summary: string
+  outcome: string
+  detail: string
+  duration_ms: number
+}
+
 export interface Batch {
   id: string
   name: string
@@ -803,6 +836,20 @@ export const api = {
   },
   deleteMusicTrack: (name: string) =>
     request<void>(`/api/music/tracks/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+
+  // -- External processing (M0.5) ---------------------------------------------
+  listConsents: () => request<PrivacyOperation[]>('/api/privacy/consents'),
+  putConsent: (operation: string, destinationClass: string, granted: boolean) =>
+    request<PrivacyOperation[]>('/api/privacy/consents', {
+      method: 'PUT',
+      body: JSON.stringify({
+        operation,
+        destination_class: destinationClass,
+        granted,
+      }),
+    }),
+  listTransfers: (limit = 50) =>
+    request<TransferRecord[]>(`/api/privacy/transfers?limit=${limit}`),
 
   // -- Learning (Phase 11) ---------------------------------------------------
   learningSummary: () =>

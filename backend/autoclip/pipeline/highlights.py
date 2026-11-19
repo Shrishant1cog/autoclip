@@ -18,6 +18,7 @@ from collections.abc import Callable
 from .. import resources
 from ..db.models import Clip, new_id
 from ..providers import ClipCandidate, DetectionConfig, LLMProvider, TranscriptWindow
+from ..providers.base import ProviderConsentRequired
 from . import boundaries
 from .prepare import Silence
 from .transcript import Transcript
@@ -180,6 +181,12 @@ async def detect(
             try:
                 result = await provider.detect_highlights(window, config)
                 candidates = result.clips
+            except ProviderConsentRequired:
+                # The provider's destination may not be contacted. This is not
+                # a per-window failure: continuing would analyse the video
+                # with nothing but a log line, and the job would finish with
+                # no clips and no explanation. Stop, and say why.
+                raise
             except Exception as exc:
                 # One bad window shouldn't lose the whole video's other windows.
                 log.warning(

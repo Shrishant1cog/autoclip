@@ -21,6 +21,8 @@ SUGGESTED_MODELS = [
 class AnthropicProvider(LLMProvider):
     name = "anthropic"
     requires_key = True
+    #: Where the Anthropic SDK sends requests when no base_url is configured.
+    DEFAULT_ENDPOINT = "https://api.anthropic.com"
 
     def __init__(self, model: str = "", *, api_key: str | None = None, base_url: str | None = None):
         super().__init__(model or DEFAULT_MODEL, api_key=api_key, base_url=base_url)

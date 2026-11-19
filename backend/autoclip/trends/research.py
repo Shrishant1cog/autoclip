@@ -28,6 +28,9 @@ import httpx
 from .. import config
 from ..providers import resolver
 from ..providers.base import ProviderError, extract_json_object
+from ..security import consent
+from ..security.egress import Transfer, gateway
+from ..security.urlpolicy import UrlRejected
 
 log = logging.getLogger(__name__)
 
@@ -203,6 +206,21 @@ def fetch_trending_videos(
     if category_id:
         params["videoCategoryId"] = category_id
 
+    # No user content is sent — a public chart is read with the account's
+    # token — but the request still leaves the machine, so it is classified
+    # and recorded.
+    trend_transfer = Transfer(
+        operation=consent.Operation.TRENDS,
+        url=TRENDING_URL,
+        data_summary="The public most-popular chart.",
+        provider="youtube",
+        requires_consent=False,
+    )
+    try:
+        gateway.authorize(trend_transfer)
+    except UrlRejected as exc:
+        raise ProviderError(f"The YouTube trending chart was refused: {exc}") from exc
+
     try:
         response = httpx.get(
             TRENDING_URL,
@@ -211,7 +229,10 @@ def fetch_trending_videos(
             timeout=30.0,
         )
     except httpx.HTTPError as exc:
+        gateway.record(trend_transfer, "failed", detail=str(exc))
         raise ProviderError(f"Could not reach YouTube: {exc}") from exc
+
+    gateway.record(trend_transfer, "ok" if response.status_code < 400 else "failed")
 
     if response.status_code >= 400:
         detail = response.text[:300]

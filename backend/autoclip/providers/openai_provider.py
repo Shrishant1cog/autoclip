@@ -36,6 +36,11 @@ KNOWN_ENDPOINTS = {
 class OpenAIProvider(LLMProvider):
     name = "openai"
     requires_key = True
+    #: Where the OpenAI SDK sends requests when no base_url is configured.
+    #: The endpoint is named here so the egress policy can classify the real
+    #: destination — the SDK's default appears nowhere in this repository as a
+    #: literal, so a URL scan would miss it.
+    DEFAULT_ENDPOINT = "https://api.openai.com/v1"
 
     def __init__(self, model: str = "", *, api_key: str | None = None, base_url: str | None = None):
         super().__init__(model or DEFAULT_MODEL, api_key=api_key, base_url=base_url)

@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from . import urlpolicy
+from . import consent, egress, urlpolicy
 
-__all__ = ["urlpolicy"]
+__all__ = ["consent", "egress", "urlpolicy"]

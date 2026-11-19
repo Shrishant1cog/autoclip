@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react'
 
-import { api, type MusicTrack, type ProviderStatus, type Settings as SettingsData, type SystemStatus, type YouTubeStatus } from '../api'
+import {
+  api,
+  type MusicTrack,
+  type PrivacyOperation,
+  type ProviderStatus,
+  type Settings as SettingsData,
+  type SystemStatus,
+  type TransferRecord,
+  type YouTubeStatus,
+} from '../api'
 import { ErrorNote } from '../components/ErrorNote'
 
 const SECRET_LABELS: Record<string, string> = {
@@ -326,6 +335,8 @@ export function Settings() {
           </p>
         )}
       </Section>
+
+      <ExternalProcessingSection onError={setError} />
 
       <Section title="Ingest">
         <div className="grid gap-5 sm:grid-cols-2">
@@ -1024,6 +1035,181 @@ function LearningSection({ onError }: { onError: (err: Error) => void }) {
           )}
         </div>
       </div>
+    </Section>
+  )
+}
+
+/**
+ * M0.5 — external processing.
+ *
+ * One switch per operation and per kind of destination. A blocked operation
+ * stops the job at that step with an explanation; AutoClip never quietly
+ * picks a different service to work around a refusal.
+ *
+ * Below the switches is the transfer log: what actually left this machine,
+ * where it went, and whether it worked. It never contains the content — only
+ * a description of it.
+ */
+function ExternalProcessingSection({ onError }: { onError: (err: Error) => void }) {
+  const [operations, setOperations] = useState<PrivacyOperation[]>([])
+  const [transfers, setTransfers] = useState<TransferRecord[]>([])
+  const [pending, setPending] = useState('')
+
+  const reload = async () => {
+    try {
+      setOperations(await api.listConsents())
+      setTransfers(await api.listTransfers(50))
+    } catch (err) {
+      onError(err as Error)
+    }
+  }
+
+  useEffect(() => {
+    void reload()
+  }, [])
+
+  const decide = async (operation: string, destinationClass: string, granted: boolean) => {
+    const key = `${operation}:${destinationClass}`
+    setPending(key)
+    try {
+      setOperations(await api.putConsent(operation, destinationClass, granted))
+      setTransfers(await api.listTransfers(50))
+    } catch (err) {
+      onError(err as Error)
+      // Put the switch back where the server says it is, so the screen never
+      // shows a decision that was not recorded.
+      await reload()
+    } finally {
+      setPending('')
+    }
+  }
+
+  const classLabel = (destinationClass: string) =>
+    destinationClass === 'private' ? 'Private network' : 'Public services'
+
+  const classHint = (destinationClass: string) =>
+    destinationClass === 'private'
+      ? 'Devices on your own network, such as a model server running at home.'
+      : 'Services on the internet operated by someone else.'
+
+  return (
+    <Section
+      title="External processing"
+      note="What AutoClip may send off this machine, and what it has sent."
+    >
+      <p className="max-w-2xl text-sm leading-relaxed text-ink-400">
+        Local work — transcription with Whisper, a local model, rendering, and the music
+        library — never leaves this machine. The switches below cover the steps that can.
+        Anything running on this machine itself is always allowed, but a tunnel or reverse
+        proxy on localhost can forward it somewhere else, so treat localhost services with
+        the same care as a public one.
+      </p>
+
+      <div className="mt-6 space-y-4">
+        {operations.length === 0 && (
+          <p className="text-sm text-ink-500">Loading external-processing settings…</p>
+        )}
+
+        {operations.map((operation) => (
+          <div key={operation.operation} className="border border-ink-800 p-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-sm text-ink-100">{operation.title}</p>
+              <p className="text-xs text-ink-500">
+                {operation.decisions.every((decision) => decision.granted)
+                  ? 'allowed'
+                  : operation.decisions.some((decision) => decision.granted)
+                    ? 'partly allowed'
+                    : 'blocked'}
+              </p>
+            </div>
+
+            <p className="mt-2 text-xs leading-relaxed text-ink-400">{operation.data}</p>
+            <p className="mt-1 text-xs leading-relaxed text-ink-500">{operation.why}</p>
+
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              {operation.decisions.map((decision) => {
+                const key = `${operation.operation}:${decision.destination_class}`
+                const note =
+                  decision.source === 'configured'
+                    ? ' — allowed because you configured this destination'
+                    : decision.source === 'user' && decision.note
+                      ? ` — ${decision.note}`
+                      : ''
+                return (
+                  <label
+                    key={decision.destination_class}
+                    className="flex items-start gap-3 text-sm text-ink-200"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={decision.granted}
+                      disabled={pending !== ''}
+                      aria-busy={pending === key}
+                      onChange={(e) =>
+                        decide(
+                          operation.operation,
+                          decision.destination_class,
+                          e.target.checked,
+                        )
+                      }
+                      className="mt-0.5 size-4 accent-sodium-500"
+                    />
+                    <span>
+                      {classLabel(decision.destination_class)}
+                      <span className="mt-0.5 block text-xs leading-snug text-ink-500">
+                        {decision.granted ? 'Allowed' : 'Blocked'}
+                        {note}
+                      </span>
+                      <span className="mt-0.5 block text-xs leading-snug text-ink-600">
+                        {classHint(decision.destination_class)}
+                      </span>
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <details className="mt-6 border border-ink-800 p-4 text-sm text-ink-300">
+        <summary className="cursor-pointer text-ink-200">
+          Recent transfers{transfers.length > 0 ? ` (${transfers.length})` : ''}
+        </summary>
+        {transfers.length === 0 ? (
+          <p className="mt-3 text-xs text-ink-500">
+            Nothing has left this machine yet.
+          </p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {transfers.map((transfer, index) => (
+              <li
+                key={`${transfer.occurred_at}-${index}`}
+                className="border-b border-ink-850 pb-2 last:border-b-0"
+              >
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="text-xs text-ink-200">{transfer.data_summary}</span>
+                  <span
+                    className={`text-xs ${
+                      transfer.outcome === 'ok' ? 'text-signal-good' : 'text-signal-bad'
+                    }`}
+                  >
+                    {transfer.outcome === 'ok' ? 'sent' : transfer.outcome}
+                  </span>
+                </div>
+                <span className="numeric mt-0.5 block truncate text-xs text-ink-600">
+                  {transfer.occurred_at} · {transfer.provider || transfer.operation} ·{' '}
+                  {transfer.destination}
+                  {transfer.duration_ms > 0 ? ` · ${transfer.duration_ms} ms` : ''}
+                </span>
+                {transfer.detail && (
+                  <span className="mt-0.5 block text-xs text-ink-600">{transfer.detail}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </details>
     </Section>
   )
 }

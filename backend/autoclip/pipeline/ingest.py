@@ -25,6 +25,9 @@ from pathlib import Path
 from .. import paths
 from ..config import IngestSettings
 from ..db.models import Source, new_id
+from ..security import consent
+from ..security.egress import Transfer, gateway
+from ..security.urlpolicy import UrlRejected, yt_dlp_hardening_args
 from . import ffmpeg
 
 log = logging.getLogger(__name__)
@@ -144,6 +147,27 @@ def download_youtube(
     target_dir = download_target_dir(source.id, settings)
     target_dir.mkdir(parents=True, exist_ok=True)
 
+    # The URL is about to be handed to yt-dlp, which will contact it and
+    # whatever hosts it redirects to. Classify it first, refuse the addresses
+    # that are never legitimate download targets, and record the transfer.
+    transfer = Transfer(
+        operation=consent.Operation.MEDIA_DOWNLOAD,
+        url=source.url,
+        data_summary="A page and its media are fetched from the URL you supplied.",
+        provider="yt-dlp",
+        requires_consent=False,
+    )
+    try:
+        permit = gateway.authorize(transfer)
+    except UrlRejected as exc:
+        raise IngestError(f"That URL will not be downloaded: {exc}") from exc
+    if permit.destination_class == "private":
+        raise IngestError(
+            "That URL points at a private network address, which AutoClip will not "
+            "download from. Use a public address, or run the download yourself and "
+            "upload the file."
+        )
+
     # No height cap or format filter: yt-dlp's default selection is the best
     # available video plus the best available audio.
     command = [
@@ -166,6 +190,7 @@ def download_youtube(
         "bestvideo*+bestaudio/best",
         "--output",
         str(target_dir / "source.%(ext)s"),
+        *yt_dlp_hardening_args(),
     ]
     if settings.cookies_from_browser:
         command += ["--cookies-from-browser", settings.cookies_from_browser]

@@ -24,6 +24,8 @@ class ScriptedProvider(LLMProvider):
 
     name = "scripted"
     requires_key = False
+    #: Loopback, so the egress policy treats it as a local provider.
+    DEFAULT_ENDPOINT = "http://localhost:11434"
 
     def __init__(self, responses: list[str]) -> None:
         super().__init__("test-model")

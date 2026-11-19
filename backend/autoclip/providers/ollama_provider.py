@@ -37,6 +37,8 @@ _REQUEST_TIMEOUT = httpx.Timeout(600.0, connect=5.0)
 class OllamaProvider(LLMProvider):
     name = "ollama"
     requires_key = False
+    #: Ollama is local by definition; the endpoint is the loopback address.
+    DEFAULT_ENDPOINT = DEFAULT_BASE_URL
 
     def __init__(self, model: str = "", *, api_key: str | None = None, base_url: str | None = None):
         super().__init__(model, api_key=api_key, base_url=base_url or DEFAULT_BASE_URL)

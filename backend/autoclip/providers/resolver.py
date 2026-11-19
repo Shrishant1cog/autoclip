@@ -14,7 +14,7 @@ from typing import Any
 
 from ..config import Settings
 from . import keypool
-from .base import LLMProvider, ProviderError
+from .base import LLMProvider, ProviderConsentRequired, ProviderError
 from .presets import PRESETS, TASK_CAPABILITY, ProviderPreset
 
 log = logging.getLogger(__name__)
@@ -105,12 +105,27 @@ async def run_with_fallback(
     when nothing in the chain answers — never a fabricated string.
     """
     errors: list[str] = []
+    # Once an external provider is refused, no *other* external provider may be
+    # tried: sending the same text to a different vendor without the user
+    # choosing it is exactly the silent substitution the consent layer exists
+    # to prevent. A local provider is still allowed — nothing leaves the
+    # machine that way.
+    external_refused = False
+
     for preset in resolve_chain(task, settings, override_chain=chain):
+        if external_refused and not preset.is_local:
+            errors.append(f"{preset.label}: skipped — an external provider was refused")
+            continue
         try:
             provider = build_preset_provider(preset, settings)
             output = await provider.generate_text(
                 prompt_system, prompt_user, temperature=temperature
             )
+        except ProviderConsentRequired as exc:
+            external_refused = True
+            errors.append(f"{preset.label}: {exc}")
+            log.warning("Provider %s refused for %s: %s", preset.label, task, exc)
+            continue
         except ProviderError as exc:
             errors.append(f"{preset.label}: {exc}")
             log.warning("Provider %s failed for %s: %s", preset.label, task, exc)
