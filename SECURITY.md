@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please **don't** open a public issue for a security problem. Use GitHub's
-[private vulnerability reporting](https://github.com/artbyjazi/autoclip/security/advisories/new)
+[private vulnerability reporting](https://github.com/Shrishant1cog/autoclip/security/advisories/new)
 instead, and I'll respond as quickly as I can.
 
 ## What AutoClip does with your data

@@ -46,6 +46,8 @@ tests/fixtures/**/*.wav
 .DS_Store
 Thumbs.db
 desktop.ini
+# Windows shortcuts carry an absolute path to the machine that made them.
+*.lnk
 
 # Secrets — never commit
 .env

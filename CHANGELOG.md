@@ -14,17 +14,41 @@ being validated against a fixed golden video set — see
 - **Pipeline** — ingest (YouTube via yt-dlp, or file upload), audio preparation,
   transcription with word-level timings, LLM highlight detection, speaker-tracked
   reframing, ASS caption generation, and export at 9:16 / 1:1 / 16:9.
-- **Four LLM providers** behind one interface: Anthropic, OpenAI-compatible (any
-  `base_url`, covering OpenRouter, Groq, DeepSeek, LM Studio), Google Gemini, and
-  Ollama. Malformed responses are retried once with the validation error attached.
+- **Sixteen LLM providers** behind one interface — Anthropic, OpenAI-compatible
+  (any `base_url`, covering OpenRouter, Groq, DeepSeek, LM Studio), Google
+  Gemini, and Ollama, plus eleven more presets. Each provider carries a pool of
+  keys: rotation picks the healthiest, auth failures disable a key, rate limits
+  impose a self-recovering cooldown, and capability-aware fallback chains move
+  to the next provider on a transient failure. Malformed responses are retried
+  once with the validation error attached.
 - **Reframing** with shot detection, MediaPipe face tracking, active-speaker
   selection from mouth movement correlated against diarization, and a
   One Euro Filter with dead zone and velocity clamp. Shots are framed as TRACK,
   WIDE, or GENERAL; subjects too far apart to crop get a fitted frame over a
   blurred fill rather than someone being cut out.
 - **Four caption styles** with bundled OFL fonts, so nothing is fetched at runtime.
-- **Web UI** — ingest, live job progress over SSE, clip review with word-snapping
-  trim handles and caption editing, and export.
+- **Web UI** — thirteen screens: ingest, live job progress over SSE, clip review
+  with word-snapping trim handles and caption editing, export, a provider and
+  key-pool manager, Google accounts and YouTube channels, content routing,
+  batch queues, a visual workflow builder, a project-aware assistant, trend
+  research, a recovery centre, and settings.
+- **Workflow engine** — versioned graphs over a node registry (six pipeline
+  stages plus conditional and log nodes), with validation, per-node run history,
+  and a native n8n-inspired canvas to build them.
+- **Multi-account and multi-channel publishing** — several Google accounts, each
+  with its own channels, each channel with its own privacy, category, title
+  suffix and auto-publish policy.
+- **Content classification and routing** — a clip is classified into one of ten
+  categories and routed to the channels you assign that category to.
+- **Batch queues** — queue many sources, watch them run, pause, cancel, retry the
+  failures.
+- **Resource accounting and reclamation** — disk, token and ffmpeg-time totals
+  per job and overall, bounded by retention settings, with a cleanup pass that
+  never touches unpublished work.
+- **Notification centre and recovery centre** — one inbox for what happened, and
+  a screen that explains what failed and what will fix it.
+- **Restart recovery** — interrupted work is resumed on startup and the restart
+  is recorded with the real counts and the exact job ids involved.
 - **Resumable stages.** Artifacts live on disk per job, so a retry restarts at the
   stage that failed.
 - **`autoclip doctor`** — probes ffmpeg features, GPU acceleration, compute-type
