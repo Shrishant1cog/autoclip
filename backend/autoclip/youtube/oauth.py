@@ -231,9 +231,7 @@ def _cache_token(access_token: str, expires_in: int) -> None:
     _token_cache["expires_at"] = time.monotonic() + max(expires_in - 60, 30)
 
 
-def access_token(
-    settings: config.Settings | None = None, account_id: str | None = None
-) -> str:
+def access_token(settings: config.Settings | None = None, account_id: str | None = None) -> str:
     """Return a valid access token, refreshing it when necessary.
 
     With ``account_id`` the token belongs to that connected Google account;

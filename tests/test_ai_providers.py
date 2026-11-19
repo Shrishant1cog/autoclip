@@ -70,8 +70,8 @@ def test_rate_limit_cooldown_not_disable(isolated_pools) -> None:
     keypool.record_failure("openai", "primary", "429 rate limit exceeded", retryable=True)
 
     records = {r.label: r for r in keypool.list_keys("openai")}
-    assert records["primary"].enabled is True          # not disabled
-    assert records["primary"].cooldown_until > 0       # cooling down
+    assert records["primary"].enabled is True  # not disabled
+    assert records["primary"].cooldown_until > 0  # cooling down
 
     picked = keypool.pick_key("openai")
     assert picked is not None and picked[0] == "backup"
@@ -107,9 +107,22 @@ def test_success_resets_failures_and_cooldown(isolated_pools) -> None:
 
 def test_preset_registry_covers_required_providers() -> None:
     required = {
-        "openai", "gemini", "anthropic", "freellmapi", "ollama", "openrouter",
-        "groq", "cerebras", "together", "deepseek", "mistral", "huggingface",
-        "nvidia", "lmstudio", "llamacpp", "vllm",
+        "openai",
+        "gemini",
+        "anthropic",
+        "freellmapi",
+        "ollama",
+        "openrouter",
+        "groq",
+        "cerebras",
+        "together",
+        "deepseek",
+        "mistral",
+        "huggingface",
+        "nvidia",
+        "lmstudio",
+        "llamacpp",
+        "vllm",
     }
     assert required <= set(PRESETS.keys())
 
@@ -198,9 +211,7 @@ def test_run_with_fallback_tries_next_provider_on_failure(
     monkeypatch.setattr(res, "build_preset_provider", build)
     import asyncio
 
-    output, label = asyncio.run(
-        res.run_with_fallback("clip_analysis", "sys", "user", _settings())
-    )
+    output, label = asyncio.run(res.run_with_fallback("clip_analysis", "sys", "user", _settings()))
     assert output == "ok"
     assert calls["n"] >= 1
     assert label  # a provider was credited

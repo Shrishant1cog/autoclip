@@ -303,6 +303,7 @@ CREATE TABLE routing_rules (
 CREATE INDEX idx_routing_rules_priority ON routing_rules(enabled, priority);
 """
 
+
 def _migration_v6(conn: sqlite3.Connection) -> None:
     conn.executescript(_V6)
 
@@ -336,6 +337,7 @@ CREATE TABLE batch_items (
 );
 CREATE INDEX idx_batch_items_batch ON batch_items(batch_id, position);
 """
+
 
 def _migration_v7(conn: sqlite3.Connection) -> None:
     conn.executescript(_V7)

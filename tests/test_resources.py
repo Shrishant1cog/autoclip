@@ -210,9 +210,7 @@ def test_cleanup_keeps_a_clip_whose_upload_is_still_pending(
     export = Export(id=new_id(), clip_id=clip.id, path=str(file), created_at="2020-01-01T00:00:00")
     store.create_export(export)
     store.create_upload(
-        YouTubeUpload(
-            id=new_id(), export_id=export.id, clip_id=clip.id, status="pending"
-        )
+        YouTubeUpload(id=new_id(), export_id=export.id, clip_id=clip.id, status="pending")
     )
 
     resources.cleanup(_settings(export_retention_days=7))
@@ -236,9 +234,7 @@ def test_cleanup_removes_an_old_youtube_download(autoclip_home: Path, initialise
     assert not raw.exists()
 
 
-def test_cleanup_never_removes_an_uploaded_source(
-    autoclip_home: Path, initialised_db: int
-) -> None:
+def test_cleanup_never_removes_an_uploaded_source(autoclip_home: Path, initialised_db: int) -> None:
     """An uploaded file cannot be downloaded again, so it is never deleted."""
     media = _write(autoclip_home / "media" / "src" / "mine.mp4", 4096)
     source = _seed_source(kind="upload", path=str(media))
@@ -695,9 +691,7 @@ def test_the_encoder_respects_the_thread_cap() -> None:
     assert args[args.index("-threads") + 1] == "3"
 
 
-def test_the_detection_budget_caps_the_windows(
-    autoclip_home: Path, initialised_db: int
-) -> None:
+def test_the_detection_budget_caps_the_windows(autoclip_home: Path, initialised_db: int) -> None:
     """A capped budget must say how much of the video it skipped."""
     import asyncio
 
@@ -743,9 +737,7 @@ def test_the_detection_budget_caps_the_windows(
     assert usage.windows_skipped == len(windows) - 2
 
 
-def test_an_unlimited_budget_skips_nothing(
-    autoclip_home: Path, initialised_db: int
-) -> None:
+def test_an_unlimited_budget_skips_nothing(autoclip_home: Path, initialised_db: int) -> None:
     import asyncio
 
     from autoclip.pipeline import highlights
@@ -840,6 +832,7 @@ def test_concurrent_windows_are_each_charged_exactly_once(
 # --------------------------------------------------------------------------
 # The schema
 # --------------------------------------------------------------------------
+
 
 def test_the_schema_migrates_to_the_current_version(autoclip_home: Path) -> None:
     from autoclip import db

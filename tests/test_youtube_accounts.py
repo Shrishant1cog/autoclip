@@ -130,7 +130,10 @@ def test_first_channel_is_default_and_switches(initialised_db: int) -> None:
 def test_channel_profile_defaults(initialised_db: int) -> None:
     account = store.create_account()
     channel = store.add_channel(
-        account["id"], {"id": "UC_gaming"}, privacy="unlisted", category_id="20",
+        account["id"],
+        {"id": "UC_gaming"},
+        privacy="unlisted",
+        category_id="20",
         auto_upload=True,
     )
     assert channel["privacy"] == "unlisted"

@@ -178,22 +178,32 @@ def test_duplicates_are_scoped_per_channel(initialised_db: int) -> None:
     store.create_export(export)
     done = store.create_upload(
         YouTubeUpload(
-            id=new_id(), export_id=export.id, clip_id=clip.id,
-            channel_row_id="channel-a", status="done", video_id="vid-a",
+            id=new_id(),
+            export_id=export.id,
+            clip_id=clip.id,
+            channel_row_id="channel-a",
+            status="done",
+            video_id="vid-a",
         )
     )
     other_export = Export(id=new_id(), clip_id=clip.id, path="C:/out2.mp4")
     store.create_export(other_export)
     same_channel = store.create_upload(
         YouTubeUpload(
-            id=new_id(), export_id=other_export.id, clip_id=clip.id,
-            channel_row_id="channel-a", status="pending",
+            id=new_id(),
+            export_id=other_export.id,
+            clip_id=clip.id,
+            channel_row_id="channel-a",
+            status="pending",
         )
     )
     other_channel = store.create_upload(
         YouTubeUpload(
-            id=new_id(), export_id=other_export.id, clip_id=clip.id,
-            channel_row_id="channel-b", status="pending",
+            id=new_id(),
+            export_id=other_export.id,
+            clip_id=clip.id,
+            channel_row_id="channel-b",
+            status="pending",
         )
     )
 
@@ -261,8 +271,12 @@ def test_retry_keeps_channel_privacy(initialised_db: int) -> None:
     store.create_export(export)
     row = store.create_upload(
         YouTubeUpload(
-            id=new_id(), export_id=export.id, clip_id=clip.id,
-            channel_row_id=channel["id"], status="failed", error="boom",
+            id=new_id(),
+            export_id=export.id,
+            clip_id=clip.id,
+            channel_row_id=channel["id"],
+            status="failed",
+            error="boom",
         )
     )
     accounts_store.update_channel(channel["id"], privacy="unlisted")
@@ -284,14 +298,23 @@ async def test_process_upload_uses_the_row_channel_and_suffix(
     store.create_export(export)
     row = store.create_upload(
         YouTubeUpload(
-            id=new_id(), export_id=export.id, clip_id=clip.id,
-            channel_row_id=channel["id"], privacy="unlisted",
+            id=new_id(),
+            export_id=export.id,
+            clip_id=clip.id,
+            channel_row_id=channel["id"],
+            privacy="unlisted",
         )
     )
 
     clip_obj = SimpleNamespace(
-        id=clip.id, job_id=clip.job_id, title="Steak", hook="", reason="",
-        start_word=0, end_word=3, duration_s=40.0,
+        id=clip.id,
+        job_id=clip.job_id,
+        title="Steak",
+        hook="",
+        reason="",
+        start_word=0,
+        end_word=3,
+        duration_s=40.0,
     )
     monkeypatch.setattr(uploads.store, "get_export", lambda _: export)
     monkeypatch.setattr(uploads.store, "get_clip", lambda _: clip_obj)

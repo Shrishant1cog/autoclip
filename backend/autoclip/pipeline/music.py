@@ -53,9 +53,7 @@ def resolve_track(setting: str) -> Path | None:
     library = music_dir() / value
     if library.is_file():
         return library
-    log.warning(
-        "Music track %r is not in %s; exporting without the bed.", value, music_dir()
-    )
+    log.warning("Music track %r is not in %s; exporting without the bed.", value, music_dir())
     return None
 
 

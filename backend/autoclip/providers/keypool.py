@@ -37,7 +37,7 @@ def _pool_path():
 
 @dataclass
 class KeyRecord:
-    label: str              # stable identifier within the provider
+    label: str  # stable identifier within the provider
     enabled: bool = True
     failures: int = 0
     last_used: float = 0.0

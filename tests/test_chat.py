@@ -314,9 +314,7 @@ def test_chat_api_answers(
         assert body["context"]["summary"]["clips"] == 1
 
 
-def test_chat_api_rejects_an_empty_message(
-    autoclip_home, initialised_db: int
-) -> None:
+def test_chat_api_rejects_an_empty_message(autoclip_home, initialised_db: int) -> None:
     from autoclip.app import create_app
 
     with TestClient(create_app()) as client:
@@ -343,9 +341,7 @@ def test_chat_api_reports_provider_failure_honestly(
         assert "answer" not in body
 
 
-def test_chat_context_endpoint_shows_the_snapshot(
-    autoclip_home, initialised_db: int
-) -> None:
+def test_chat_context_endpoint_shows_the_snapshot(autoclip_home, initialised_db: int) -> None:
     from autoclip.app import create_app
 
     source = _seed_source("Visible Video")

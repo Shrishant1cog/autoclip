@@ -262,9 +262,7 @@ class ClipOut(BaseModel):
             validation=clip.validation,
             caption_style=edit.caption_style if edit else "bold_pop",
             ratio=edit.ratio if edit else "9:16",
-            exports=[
-                ExportOut.of(e, uploads=uploads.get(e.id, [])) for e in (exports or [])
-            ],
+            exports=[ExportOut.of(e, uploads=uploads.get(e.id, [])) for e in (exports or [])],
         )
 
 

@@ -32,8 +32,7 @@ def test_migration_v8_adds_validation_column(initialised_db: int) -> None:
 
 def _transcript(seconds: float = 120.0) -> Transcript:
     words = [
-        Word(text=f"word{i}", start=i * 0.5, end=i * 0.5 + 0.45)
-        for i in range(int(seconds / 0.5))
+        Word(text=f"word{i}", start=i * 0.5, end=i * 0.5 + 0.45) for i in range(int(seconds / 0.5))
     ]
     return Transcript(words=words)
 
@@ -163,10 +162,26 @@ def test_validate_media_catches_silent_track(tmp_path) -> None:
     path = tmp_path / "quiet.mp4"
     subprocess.run(
         [
-            ffmpeg.ffmpeg_path(), "-y", "-loglevel", "error",
-            "-f", "lavfi", "-i", "testsrc=size=270x480:rate=24:duration=2",
-            "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
-            "-t", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+            ffmpeg.ffmpeg_path(),
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=270x480:rate=24:duration=2",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=48000:cl=stereo",
+            "-t",
+            "2",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
             str(path),
         ],
         check=True,

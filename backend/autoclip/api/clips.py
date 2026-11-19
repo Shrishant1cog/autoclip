@@ -321,9 +321,7 @@ async def export_clip(clip_id: str, payload: ExportRequestIn) -> ExportOut:
         from ..youtube import uploads as youtube_uploads
         from ..youtube.queue import upload_queue
 
-        uploads = await asyncio.to_thread(
-            youtube_uploads.enqueue_export_all, record.id, settings
-        )
+        uploads = await asyncio.to_thread(youtube_uploads.enqueue_export_all, record.id, settings)
         if uploads:
             upload_queue.notify()
     except Exception:  # the export succeeded; a queue failure is not fatal

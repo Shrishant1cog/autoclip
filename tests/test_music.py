@@ -113,6 +113,7 @@ def test_export_args_include_music_input(monkeypatch: pytest.MonkeyPatch, tmp_pa
         from pathlib import Path as _Path
 
         _Path(args[-1]).write_bytes(b"rendered")
+
     monkeypatch.setattr(export.ffmpeg, "run", fake_run)
 
     source = tmp_path / "src.mp4"

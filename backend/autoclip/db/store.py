@@ -590,9 +590,7 @@ def requeue_interrupted_uploads() -> list[str]:
     the user can be told what was resumed.
     """
     with connection() as conn:
-        rows = conn.execute(
-            "SELECT id FROM youtube_uploads WHERE status = 'uploading'"
-        ).fetchall()
+        rows = conn.execute("SELECT id FROM youtube_uploads WHERE status = 'uploading'").fetchall()
         ids = [row["id"] for row in rows]
         if ids:
             conn.execute(
@@ -614,9 +612,7 @@ def requeue_interrupted_uploads() -> list[str]:
 def mark_job_resumed(job_id: str) -> None:
     """Record that a restart interrupted this job and the queue resumed it."""
     with connection() as conn:
-        conn.execute(
-            "UPDATE jobs SET last_resumed_at = ? WHERE id = ?", (utcnow(), job_id)
-        )
+        conn.execute("UPDATE jobs SET last_resumed_at = ? WHERE id = ?", (utcnow(), job_id))
 
 
 def record_restart(
@@ -716,9 +712,7 @@ def upsert_job_resources(resources: JobResources) -> JobResources:
 
 def get_job_resources(job_id: str) -> JobResources | None:
     with connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM job_resources WHERE job_id = ?", (job_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM job_resources WHERE job_id = ?", (job_id,)).fetchone()
     return JobResources.from_row(row) if row else None
 
 
@@ -791,9 +785,7 @@ def create_notification(
     return notification
 
 
-def list_notifications(
-    limit: int = 50, *, unread_only: bool = False
-) -> list[Notification]:
+def list_notifications(limit: int = 50, *, unread_only: bool = False) -> list[Notification]:
     """Recent notifications, newest first.
 
     ``rowid`` breaks ties: timestamps have second precision, so two events in
@@ -829,9 +821,7 @@ def get_notification(notification_id: str) -> Notification | None:
 def mark_notification_read(notification_id: str) -> bool:
     """Mark one notification read. Returns False when the id is unknown."""
     with connection() as conn:
-        cursor = conn.execute(
-            "UPDATE notifications SET read = 1 WHERE id = ?", (notification_id,)
-        )
+        cursor = conn.execute("UPDATE notifications SET read = 1 WHERE id = ?", (notification_id,))
     return cursor.rowcount > 0
 
 
@@ -845,9 +835,7 @@ def mark_all_notifications_read() -> int:
 def delete_notification(notification_id: str) -> bool:
     """Remove one notification. Returns False when the id is unknown."""
     with connection() as conn:
-        cursor = conn.execute(
-            "DELETE FROM notifications WHERE id = ?", (notification_id,)
-        )
+        cursor = conn.execute("DELETE FROM notifications WHERE id = ?", (notification_id,))
     return cursor.rowcount > 0
 
 

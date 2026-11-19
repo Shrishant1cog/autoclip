@@ -320,9 +320,8 @@ def test_a_missing_rule_is_a_404(client: TestClient) -> None:
     assert client.put("/api/routing/rules/nope", json={"priority": 1}).status_code == 404
     assert client.delete("/api/routing/rules/nope").status_code == 204
 
-def test_an_unclassified_clip_has_no_classification(
-    client: TestClient, source: Source
-) -> None:
+
+def test_an_unclassified_clip_has_no_classification(client: TestClient, source: Source) -> None:
     from autoclip.db import store
 
     job = store.create_job(Job(id=new_id(), source_id=source.id, status="done"))

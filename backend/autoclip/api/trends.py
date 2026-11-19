@@ -97,9 +97,7 @@ async def refresh(payload: RefreshIn) -> dict:
     """Re-fetch the trending chart and re-run the analysis."""
     settings = config.load()
     resolved_account = _resolve_account(payload.account_id)
-    category = payload.category_id or _category_for(
-        resolved_account, research.DEFAULT_CATEGORY
-    )
+    category = payload.category_id or _category_for(resolved_account, research.DEFAULT_CATEGORY)
 
     result = await research.research(
         settings,

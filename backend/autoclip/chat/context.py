@@ -293,9 +293,7 @@ def build_context(
                 "status": clip.status,
                 "duration_s": round(clip.duration_s, 2),
                 "reason": clip.reason,
-                "source_title": _source_title(
-                    job.source_id if job else "", titles
-                ),
+                "source_title": _source_title(job.source_id if job else "", titles),
                 "upload_status": upload.status if upload else "",
                 "upload_error": upload.error or "" if upload else "",
             }
@@ -318,8 +316,7 @@ def build_context(
                 {
                     "kind": "upload failed",
                     "detail": (
-                        f"{upload.title or upload.clip_id}: "
-                        f"{upload.error or 'unknown error'}"
+                        f"{upload.title or upload.clip_id}: {upload.error or 'unknown error'}"
                     ),
                 }
             )

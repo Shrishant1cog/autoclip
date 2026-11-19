@@ -22,10 +22,25 @@ from autoclip.pipeline.reframe.croppath import CropPath, CropSegment  # noqa: E4
 def make_source(path: Path, seconds: float) -> None:
     subprocess.run(
         [
-            ffmpeg.ffmpeg_path(), "-y", "-loglevel", "error",
-            "-f", "lavfi", "-i", f"testsrc=size=1280x720:rate=30:duration={seconds}",
-            "-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest",
+            ffmpeg.ffmpeg_path(),
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc=size=1280x720:rate=30:duration={seconds}",
+            "-f",
+            "lavfi",
+            "-i",
+            f"sine=frequency=440:duration={seconds}",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-shortest",
             str(path),
         ],
         check=True,
@@ -35,8 +50,14 @@ def make_source(path: Path, seconds: float) -> None:
 def make_music(path: Path, seconds: float) -> None:
     subprocess.run(
         [
-            ffmpeg.ffmpeg_path(), "-y", "-loglevel", "error",
-            "-f", "lavfi", "-i", f"sine=frequency=220:duration={seconds}",
+            ffmpeg.ffmpeg_path(),
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            f"sine=frequency=220:duration={seconds}",
             str(path),
         ],
         check=True,
@@ -46,10 +67,18 @@ def make_music(path: Path, seconds: float) -> None:
 def probe(path: Path) -> dict:
     out = subprocess.run(
         [
-            ffmpeg.ffprobe_path(), "-v", "error", "-show_entries",
-            "stream=codec_type,duration:format=duration", "-of", "json", str(path),
+            ffmpeg.ffprobe_path(),
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_type,duration:format=duration",
+            "-of",
+            "json",
+            str(path),
         ],
-        check=True, capture_output=True, text=True,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     return json.loads(out.stdout)
 

@@ -102,9 +102,7 @@ def classify_transcript_sync(
         return None
 
 
-def save_classification(
-    clip_id: str, result: dict[str, Any] | None
-) -> dict[str, Any] | None:
+def save_classification(clip_id: str, result: dict[str, Any] | None) -> dict[str, Any] | None:
     """Persist a classification result; None clears (no row is written)."""
     if result is None:
         return None
@@ -113,8 +111,15 @@ def save_classification(
             "INSERT INTO content_classifications"
             " (id, clip_id, category, confidence, provider, reason, created_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (new_id(), clip_id, result["category"], result["confidence"],
-             result["provider"], result["reason"], utcnow()),
+            (
+                new_id(),
+                clip_id,
+                result["category"],
+                result["confidence"],
+                result["provider"],
+                result["reason"],
+                utcnow(),
+            ),
         )
     return result
 
@@ -198,8 +203,17 @@ def add_rule(
             "INSERT INTO routing_rules (id, name, match_keyword, target_channel_id,"
             " priority, enabled, extra_channel_ids_json, created_at, updated_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (rule_id, name, match_keyword.lower(), target_channel_id, priority,
-             int(enabled), json.dumps(extra_channel_ids or []), now, now),
+            (
+                rule_id,
+                name,
+                match_keyword.lower(),
+                target_channel_id,
+                priority,
+                int(enabled),
+                json.dumps(extra_channel_ids or []),
+                now,
+                now,
+            ),
         )
     result = get_rule(rule_id)
     assert result is not None
@@ -263,7 +277,9 @@ def resolve_target_channel(
             if channel is not None:
                 log.info(
                     "Routing clip %s to %s via rule %r.",
-                    clip_id, channel["channel_id"], rule["match_keyword"],
+                    clip_id,
+                    channel["channel_id"],
+                    rule["match_keyword"],
                 )
                 return channel
 
@@ -293,7 +309,9 @@ def resolve_target_channels(
             if channel is not None:
                 log.info(
                     "Routing clip %s to %s via rule %r.",
-                    clip_id, channel["channel_id"], rule["match_keyword"],
+                    clip_id,
+                    channel["channel_id"],
+                    rule["match_keyword"],
                 )
                 primary = channel
                 for extra_id in rule.get("extra_channel_ids") or []:
@@ -322,7 +340,8 @@ def resolve_target_channels(
         if not channel.get("auto_upload"):
             log.info(
                 "Channel %s has auto-upload off; skipping fan-out for clip %s.",
-                channel["channel_id"], clip_id,
+                channel["channel_id"],
+                clip_id,
             )
             continue
         ordered.append(channel)

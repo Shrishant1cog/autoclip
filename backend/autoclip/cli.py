@@ -794,7 +794,7 @@ def resources_cmd() -> None:
 
 @app.command()
 def cleanup(
-    dry_run: bool = typer.Option(False, "--dry-run", help="Report only; delete nothing.")
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report only; delete nothing."),
 ) -> None:
     """Reclaim disk space according to the retention settings.
 

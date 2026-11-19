@@ -200,9 +200,7 @@ def recover_interrupted() -> list[str]:
     the user can see that their batch was picked back up (Phase 17).
     """
     with connection() as conn:
-        rows = conn.execute(
-            "SELECT id FROM batch_items WHERE status = 'processing'"
-        ).fetchall()
+        rows = conn.execute("SELECT id FROM batch_items WHERE status = 'processing'").fetchall()
         ids = [row["id"] for row in rows]
         if ids:
             conn.execute(

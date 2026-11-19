@@ -1,4 +1,4 @@
-﻿"""Phase 5 â€” classification and routing rule tests (no network)."""
+"""Phase 5 â€” classification and routing rule tests (no network)."""
 
 from __future__ import annotations
 
@@ -114,9 +114,15 @@ def test_classification_for_missing_clip(initialised_db: int) -> None:
 def test_rule_match_routes_to_target_channel(channels, clips) -> None:
     gaming, _ = channels
     classifier.add_rule("gaming", gaming["id"], priority=1)
-    classifier.save_classification(clips["clipX"], {
-        "category": "gaming", "confidence": 0.9, "provider": "test", "reason": "",
-    })
+    classifier.save_classification(
+        clips["clipX"],
+        {
+            "category": "gaming",
+            "confidence": 0.9,
+            "provider": "test",
+            "reason": "",
+        },
+    )
     target = classifier.resolve_target_channel(clips["clipX"])
     assert target is not None
     assert target["channel_id"] == "UC_game"
@@ -126,9 +132,15 @@ def test_no_match_falls_back_to_default(channels, clips) -> None:
     gaming, main = channels
     # main is the second account's only channel -> its default
     classifier.add_rule("gaming", gaming["id"])
-    classifier.save_classification(clips["clipY"], {
-        "category": "cooking", "confidence": 0.9, "provider": "test", "reason": "",
-    })
+    classifier.save_classification(
+        clips["clipY"],
+        {
+            "category": "cooking",
+            "confidence": 0.9,
+            "provider": "test",
+            "reason": "",
+        },
+    )
     target = classifier.resolve_target_channel(clips["clipY"])
     assert target is not None
     # No rule matched cooking â†’ the global default (first channel created).
@@ -138,9 +150,15 @@ def test_no_match_falls_back_to_default(channels, clips) -> None:
 def test_disabled_rules_are_ignored(channels, clips) -> None:
     gaming, _ = channels
     classifier.add_rule("gaming", gaming["id"], enabled=False)
-    classifier.save_classification(clips["clipZ"], {
-        "category": "gaming", "confidence": 0.9, "provider": "test", "reason": "",
-    })
+    classifier.save_classification(
+        clips["clipZ"],
+        {
+            "category": "gaming",
+            "confidence": 0.9,
+            "provider": "test",
+            "reason": "",
+        },
+    )
     target = classifier.resolve_target_channel(clips["clipZ"])
     assert target is not None
     # The disabled rule was skipped; the fallback default channel answered.
@@ -151,9 +169,15 @@ def test_first_matching_rule_by_priority_wins(channels, clips) -> None:
     gaming, main = channels
     classifier.add_rule("gaming", main["id"], priority=10)
     classifier.add_rule("gaming", gaming["id"], priority=1)
-    classifier.save_classification(clips["clipW"], {
-        "category": "gaming", "confidence": 0.9, "provider": "test", "reason": "",
-    })
+    classifier.save_classification(
+        clips["clipW"],
+        {
+            "category": "gaming",
+            "confidence": 0.9,
+            "provider": "test",
+            "reason": "",
+        },
+    )
     target = classifier.resolve_target_channel(clips["clipW"])
     assert target is not None
     assert target["channel_id"] == "UC_game"
@@ -198,4 +222,3 @@ def test_classify_transcript_with_fake_provider(
     assert result is not None
     assert result["category"] == "podcast"
     assert result["provider"]
-

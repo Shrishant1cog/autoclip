@@ -166,9 +166,7 @@ def test_row_id_extraction() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_http_errors_use_the_unified_shape(
-    autoclip_home, initialised_db: int
-) -> None:
+def test_http_errors_use_the_unified_shape(autoclip_home, initialised_db: int) -> None:
     from autoclip.app import create_app
 
     with TestClient(create_app(), raise_server_exceptions=False) as client:
@@ -201,9 +199,7 @@ def test_unhandled_errors_use_the_unified_shape(
         assert "Traceback" not in body["detail"]
 
 
-def test_validation_errors_are_classified(
-    autoclip_home, initialised_db: int
-) -> None:
+def test_validation_errors_are_classified(autoclip_home, initialised_db: int) -> None:
     from autoclip.app import create_app
 
     with TestClient(create_app()) as client:
@@ -302,9 +298,7 @@ def test_recovery_ignores_healthy_work(autoclip_home, initialised_db: int) -> No
     assert report["items"] == []
 
 
-def test_a_superseded_failure_leaves_the_recovery_list(
-    autoclip_home, initialised_db: int
-) -> None:
+def test_a_superseded_failure_leaves_the_recovery_list(autoclip_home, initialised_db: int) -> None:
     """Re-rendering the clip fixes the failure; it must not linger."""
     source = _seed_source()
     job = _seed_job(source, status="done", error=None)
@@ -340,9 +334,7 @@ def test_a_superseded_failure_leaves_the_recovery_list(
     assert report["items"] == []
 
 
-def test_a_missing_file_offers_a_re_render_not_a_retry(
-    autoclip_home, initialised_db: int
-) -> None:
+def test_a_missing_file_offers_a_re_render_not_a_retry(autoclip_home, initialised_db: int) -> None:
     """Retrying an upload whose file is gone would fail in the same way."""
     source = _seed_source()
     job = _seed_job(source, status="done", error=None)
@@ -369,9 +361,7 @@ def test_a_missing_file_offers_a_re_render_not_a_retry(
     assert item["action_label"] == "Render it again"
 
 
-def test_a_rate_limited_upload_offers_a_retry(
-    autoclip_home, initialised_db: int
-) -> None:
+def test_a_rate_limited_upload_offers_a_retry(autoclip_home, initialised_db: int) -> None:
     """A transient failure is worth trying again as it was."""
     source = _seed_source()
     job = _seed_job(source, status="done", error=None)
@@ -399,9 +389,7 @@ def test_a_rate_limited_upload_offers_a_retry(
     assert item["action_label"] == "Try publishing again"
 
 
-def test_an_auth_failure_is_not_offered_as_a_retry(
-    autoclip_home, initialised_db: int
-) -> None:
+def test_an_auth_failure_is_not_offered_as_a_retry(autoclip_home, initialised_db: int) -> None:
     """A rejected credential needs the user to fix something first."""
     source = _seed_source()
     job = _seed_job(source, status="done", error=None)

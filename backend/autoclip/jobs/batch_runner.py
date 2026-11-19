@@ -25,7 +25,7 @@ class BatchRunner:
     """Watches job completions and advances batches item by item."""
 
     def __init__(self) -> None:
-        self._active: dict[str, str] = {}   # batch_id -> item_id being processed
+        self._active: dict[str, str] = {}  # batch_id -> item_id being processed
         self._wakeup: asyncio.Event | None = None
         self._task: asyncio.Task | None = None
         self._stopping = False

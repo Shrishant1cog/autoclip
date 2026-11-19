@@ -128,9 +128,7 @@ async def run_with_fallback(
             continue
         return output, preset.label
 
-    raise AllProvidersFailedError(
-        f"All providers failed for task {task!r}. " + " | ".join(errors)
-    )
+    raise AllProvidersFailedError(f"All providers failed for task {task!r}. " + " | ".join(errors))
 
 
 def available_providers(settings: Settings) -> list[dict[str, Any]]:
@@ -138,9 +136,7 @@ def available_providers(settings: Settings) -> list[dict[str, Any]]:
     out = []
     for preset in PRESETS.values():
         keys = keypool.list_keys(preset.key)
-        healthy = [
-            k for k in keys if k.enabled
-        ]
+        healthy = [k for k in keys if k.enabled]
         out.append(
             {
                 "key": preset.key,

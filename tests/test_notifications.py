@@ -57,9 +57,7 @@ def test_notify_stores_a_row(autoclip_home, initialised_db: int) -> None:
     assert rows[0].read is False
 
 
-def test_job_done_notification_reports_the_real_count(
-    autoclip_home, initialised_db: int
-) -> None:
+def test_job_done_notification_reports_the_real_count(autoclip_home, initialised_db: int) -> None:
     source = _seed_source("My Video")
     job = _seed_job(source)
     _seed_clip(job, title="One")
@@ -75,9 +73,7 @@ def test_job_done_notification_reports_the_real_count(
     assert row.link == f"/jobs/{job.id}/clips"
 
 
-def test_job_failed_notification_carries_the_error(
-    autoclip_home, initialised_db: int
-) -> None:
+def test_job_failed_notification_carries_the_error(autoclip_home, initialised_db: int) -> None:
     source = _seed_source("Broken")
     job = _seed_job(source, status="failed", error="ffmpeg exited with code 1")
 
@@ -132,9 +128,9 @@ def test_batch_done_notification(autoclip_home, initialised_db: int) -> None:
 def test_a_broken_notify_does_not_raise(autoclip_home, monkeypatch: pytest.MonkeyPatch) -> None:
     """A notification failure must never break the work it describes."""
     monkeypatch.setattr(
-        store, "create_notification", lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            RuntimeError("disk full")
-        )
+        store,
+        "create_notification",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("disk full")),
     )
 
     assert events.notify("test", title="Nope") is None
@@ -148,9 +144,7 @@ def test_inbox_is_pruned(autoclip_home, initialised_db: int) -> None:
     assert len(rows) <= events.MAX_NOTIFICATIONS
 
 
-def test_upload_notification_uses_the_generated_title(
-    autoclip_home, initialised_db: int
-) -> None:
+def test_upload_notification_uses_the_generated_title(autoclip_home, initialised_db: int) -> None:
     """The title is written after the worker's snapshot was read."""
     from autoclip.youtube import queue as queue_module
 
@@ -323,9 +317,7 @@ def test_job_runner_records_a_notification(
     def fake_reframe(self, clips, transcript):
         return {}
 
-    monkeypatch.setattr(
-        runner_module.PipelineRunner, "_stage_highlights", fake_highlights
-    )
+    monkeypatch.setattr(runner_module.PipelineRunner, "_stage_highlights", fake_highlights)
     monkeypatch.setattr(runner_module.PipelineRunner, "_stage_reframe", fake_reframe)
     monkeypatch.setattr(
         runner_module.PipelineRunner, "_stage_captions", lambda self, clips, transcript: None

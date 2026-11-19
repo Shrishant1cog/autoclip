@@ -22,8 +22,14 @@ def _seed_clip(*, score: int, status: str = "candidate", trimmed: bool = False) 
     job = Job(id=new_id(), source_id=source.id, status="done")
     store.create_job(job)
     clip = Clip(
-        id=new_id(), job_id=job.id, start_s=1.0, end_s=20.0, rank=1,
-        score=score, status=status, user_trimmed=trimmed,
+        id=new_id(),
+        job_id=job.id,
+        start_s=1.0,
+        end_s=20.0,
+        rank=1,
+        score=score,
+        status=status,
+        user_trimmed=trimmed,
     )
     store.replace_clips(job.id, [clip])
     return clip
@@ -39,9 +45,7 @@ def test_improve_template_created_and_comments_stripped(autoclip_home) -> None:
     assert path.exists()
     assert improve.read_feedback() == ""
 
-    path.write_text(
-        "# a comment\n\nPrefer clips with numbers.\n# another\n", encoding="utf-8"
-    )
+    path.write_text("# a comment\n\nPrefer clips with numbers.\n# another\n", encoding="utf-8")
     assert improve.read_feedback() == "Prefer clips with numbers."
 
 
@@ -60,9 +64,7 @@ def test_prompt_section_appended_only_with_feedback(autoclip_home) -> None:
     assert "Editor feedback" in section
 
 
-def test_detection_prompt_includes_feedback(
-    autoclip_home, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_detection_prompt_includes_feedback(autoclip_home, monkeypatch: pytest.MonkeyPatch) -> None:
     """detect_highlights must pass the feedback through in the system prompt."""
     improve.ensure_template().write_text("Our audience loves numbers.", encoding="utf-8")
 
@@ -83,9 +85,7 @@ def test_detection_prompt_includes_feedback(
     from autoclip.providers.base import DetectionConfig, TranscriptWindow
 
     provider = DummyProvider()
-    window = TranscriptWindow(
-        first_word=0, last_word=5, text="[0]hello [1]world", speakers=[]
-    )
+    window = TranscriptWindow(first_word=0, last_word=5, text="[0]hello [1]world", speakers=[])
 
     import anyio
 
@@ -95,9 +95,7 @@ def test_detection_prompt_includes_feedback(
             DetectionConfig(min_duration_s=5, max_duration_s=60),
         )
     ) if False else __import__("asyncio").run(
-        provider.detect_highlights(
-            window, DetectionConfig(min_duration_s=5, max_duration_s=60)
-        )
+        provider.detect_highlights(window, DetectionConfig(min_duration_s=5, max_duration_s=60))
     )
 
     assert provider.system_prompts
@@ -138,12 +136,23 @@ def test_channel_outcomes_and_summary(initialised_db: int) -> None:
     export = Export(id=new_id(), clip_id=clip.id, path="C:/out.mp4")
     store.create_export(export)
     store.create_upload(
-        YouTubeUpload(id=new_id(), export_id=export.id, clip_id=clip.id,
-                      channel_row_id="chan-1", status="done")
+        YouTubeUpload(
+            id=new_id(),
+            export_id=export.id,
+            clip_id=clip.id,
+            channel_row_id="chan-1",
+            status="done",
+        )
     )
     store.create_upload(
-        YouTubeUpload(id=new_id(), export_id=export.id, clip_id=clip.id,
-                      channel_row_id="chan-2", status="failed", error="quota")
+        YouTubeUpload(
+            id=new_id(),
+            export_id=export.id,
+            clip_id=clip.id,
+            channel_row_id="chan-2",
+            status="failed",
+            error="quota",
+        )
     )
 
     rows = {row.channel_row_id: row for row in analytics.channel_outcomes()}
@@ -194,9 +203,7 @@ def test_learning_api_round_trip(autoclip_home, initialised_db: int) -> None:
         feedback = client.get("/api/learning/feedback").json()
         assert "improve.txt" in feedback["path"]
 
-        saved = client.put(
-            "/api/learning/feedback", json={"content": "# header\nBe punchier."}
-        )
+        saved = client.put("/api/learning/feedback", json={"content": "# header\nBe punchier."})
         assert saved.status_code == 200
         assert saved.json()["active_chars"] == len("Be punchier.")
         assert client.get("/api/learning/feedback").json()["content"].endswith("Be punchier.")

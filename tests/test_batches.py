@@ -15,8 +15,10 @@ def sources(initialised_db: int) -> list:
         made.append(
             store.create_source(
                 Source(
-                    id=new_id(), type="youtube",
-                    url=f"https://youtu.be/v{i}", path=f"/tmp/v{i}.mp4",
+                    id=new_id(),
+                    type="youtube",
+                    url=f"https://youtu.be/v{i}",
+                    path=f"/tmp/v{i}.mp4",
                     title=f"Video {i}",
                 )
             )
@@ -60,8 +62,13 @@ def test_next_pending_and_progress(initialised_db: int, sources: list) -> None:
 
     progress = batches.batch_progress(batch["id"])
     assert progress == {
-        "total": 2, "pending": 1, "processing": 0, "done": 1,
-        "failed": 0, "skipped": 0, "cancelled": 0,
+        "total": 2,
+        "pending": 1,
+        "processing": 0,
+        "done": 1,
+        "failed": 0,
+        "skipped": 0,
+        "cancelled": 0,
     }
 
 
@@ -135,8 +142,8 @@ def test_runner_marks_batch_done(initialised_db: int, sources: list) -> None:
     runner._advance_one(batch["id"])
     item0 = batches.get_item(i0["id"])
     store.update_job(item0["job_id"], status="done")
-    runner._advance_one(batch["id"])   # finish item0; no pending left
-    runner._advance_one(batch["id"])   # complete the batch
+    runner._advance_one(batch["id"])  # finish item0; no pending left
+    runner._advance_one(batch["id"])  # complete the batch
 
     assert batches.get_batch(batch["id"])["status"] == "done"  # type: ignore[index]
 

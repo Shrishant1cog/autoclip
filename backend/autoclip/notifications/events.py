@@ -187,9 +187,7 @@ def provider_unavailable(detail: str) -> Notification | None:
     )
 
 
-def app_restarted(
-    *, jobs: int = 0, uploads: int = 0, batch_items: int = 0
-) -> Notification | None:
+def app_restarted(*, jobs: int = 0, uploads: int = 0, batch_items: int = 0) -> Notification | None:
     """AutoClip restarted and picked interrupted work back up.
 
     Only says something when something was actually resumed: a restart with
@@ -215,10 +213,7 @@ def app_restarted(
         "app_restarted",
         severity="warning",
         title="AutoClip restarted",
-        body=(
-            f"Resumed {', '.join(parts)} that "
-            f"{'was' if total == 1 else 'were'} interrupted."
-        ),
+        body=(f"Resumed {', '.join(parts)} that {'was' if total == 1 else 'were'} interrupted."),
         link="/recovery",
     )
 

@@ -324,7 +324,13 @@ async def _metadata(
     generated: metadata_module.ClipMetadata | None = None
     try:
         generated = await _ask(
-            provider, title, hook, reason, words, clip.duration_s, language,
+            provider,
+            title,
+            hook,
+            reason,
+            words,
+            clip.duration_s,
+            language,
             channel_id=channel_id,
         )
     except Exception as exc:  # metadata must never block the upload

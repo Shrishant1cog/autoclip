@@ -89,9 +89,7 @@ def _mock_analysis(monkeypatch: pytest.MonkeyPatch, output: str) -> None:
 # --------------------------------------------------------------------------
 
 
-def test_fetch_trending_videos_parses_chart(
-    autoclip_home, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_fetch_trending_videos_parses_chart(autoclip_home, monkeypatch: pytest.MonkeyPatch) -> None:
     _mock_token(monkeypatch)
     calls = _mock_youtube(monkeypatch)
 
@@ -314,8 +312,11 @@ def test_detection_prompt_includes_trend_context(
     _mock_analysis(
         monkeypatch,
         json.dumps(
-            {"themes": [{"theme": "challenge runs", "why": "works", "fit": "high"}],
-             "formats": [], "avoid": []}
+            {
+                "themes": [{"theme": "challenge runs", "why": "works", "fit": "high"}],
+                "formats": [],
+                "avoid": [],
+            }
         ),
     )
 
@@ -343,9 +344,7 @@ def test_detection_prompt_includes_trend_context(
     window = TranscriptWindow(first_word=0, last_word=5, text="[0]hello [1]world", speakers=[])
 
     asyncio.run(
-        provider.detect_highlights(
-            window, DetectionConfig(min_duration_s=5, max_duration_s=60)
-        )
+        provider.detect_highlights(window, DetectionConfig(min_duration_s=5, max_duration_s=60))
     )
 
     assert provider.system_prompts
@@ -385,9 +384,7 @@ def test_detection_prompt_survives_missing_trend_context(
     window = TranscriptWindow(first_word=0, last_word=5, text="[0]hi", speakers=[])
 
     asyncio.run(
-        provider.detect_highlights(
-            window, DetectionConfig(min_duration_s=5, max_duration_s=60)
-        )
+        provider.detect_highlights(window, DetectionConfig(min_duration_s=5, max_duration_s=60))
     )
 
     assert provider.system_prompts
@@ -407,8 +404,11 @@ def test_trends_api(autoclip_home, initialised_db: int, monkeypatch: pytest.Monk
     _mock_analysis(
         monkeypatch,
         json.dumps(
-            {"themes": [{"theme": "challenge runs", "why": "works", "fit": "high"}],
-             "formats": ["open with stakes"], "avoid": []}
+            {
+                "themes": [{"theme": "challenge runs", "why": "works", "fit": "high"}],
+                "formats": ["open with stakes"],
+                "avoid": [],
+            }
         ),
     )
 
@@ -428,9 +428,7 @@ def test_trends_api(autoclip_home, initialised_db: int, monkeypatch: pytest.Monk
         assert context["available"] is True
         assert "What is trending right now" in context["section"]
 
-        refreshed = client.post(
-            "/api/trends/refresh", json={"niche": "gaming", "force": True}
-        )
+        refreshed = client.post("/api/trends/refresh", json={"niche": "gaming", "force": True})
         assert refreshed.status_code == 200
         assert refreshed.json()["from_cache"] is False
 

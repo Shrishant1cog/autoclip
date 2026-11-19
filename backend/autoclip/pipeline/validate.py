@@ -197,9 +197,11 @@ def validate_media(
 
     ok = all(c.ok for c in checks)
     if not ok:
-        log.warning("Validation failed for %s: %s", path.name, "; ".join(
-            f"{c.name} ({c.detail})" for c in checks if not c.ok
-        ))
+        log.warning(
+            "Validation failed for %s: %s",
+            path.name,
+            "; ".join(f"{c.name} ({c.detail})" for c in checks if not c.ok),
+        )
     return ValidationReport(
         ok=ok,
         checks=checks,

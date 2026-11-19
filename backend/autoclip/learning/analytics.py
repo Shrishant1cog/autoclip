@@ -100,9 +100,9 @@ class PipelineSummary:
             "uploads_done": self.uploads_done,
             "uploads_failed": self.uploads_failed,
             "sources": self.sources,
-            "validation_failures": dict(sorted(
-                self.validation_failures.items(), key=lambda kv: -kv[1]
-            )),
+            "validation_failures": dict(
+                sorted(self.validation_failures.items(), key=lambda kv: -kv[1])
+            ),
         }
 
 
@@ -151,9 +151,7 @@ def channel_outcomes() -> list[ChannelOutcome]:
     for upload in store.list_all_uploads():
         key = upload.channel_row_id or ""
         if key not in stats:
-            label = (
-                titles.get(key, "Unknown channel") if key else "Default channel (legacy)"
-            )
+            label = titles.get(key, "Unknown channel") if key else "Default channel (legacy)"
             stats[key] = ChannelOutcome(channel_row_id=key, channel_title=label)
             order.append(key)
         row = stats[key]

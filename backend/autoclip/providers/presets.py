@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class ProviderPreset:
-    key: str                      # settings key & registry name
+    key: str  # settings key & registry name
     label: str
     # adapters: openai | gemini | anthropic | ollama
     adapter: str
@@ -126,7 +126,7 @@ PRESETS: dict[str, ProviderPreset] = {
         label="FreeLLMAPI",
         adapter="openai",
         default_model="",
-        default_base_url=None,   # user-configured; never hardcoded
+        default_base_url=None,  # user-configured; never hardcoded
         suggested_models=[],
         capabilities=("text", "json"),
     ),

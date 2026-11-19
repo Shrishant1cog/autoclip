@@ -206,8 +206,7 @@ def build_mixed_audio_filtergraph(
 
     # Speech: loudness-normalise first, then it doubles as the ducking key.
     speech = (
-        f"[0:a]loudnorm=I={settings.loudness_lufs}:TP={LOUDNESS_TRUE_PEAK}:"
-        f"LRA={LOUDNESS_RANGE}[sp]"
+        f"[0:a]loudnorm=I={settings.loudness_lufs}:TP={LOUDNESS_TRUE_PEAK}:LRA={LOUDNESS_RANGE}[sp]"
     )
     # Bed: trim to the clip, level it, format to match the speech for the mix.
     bed = (

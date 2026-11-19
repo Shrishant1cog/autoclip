@@ -125,9 +125,7 @@ def delete_account(account_id: str) -> None:
 def default_account() -> dict[str, Any] | None:
     """The first-created account, mirroring the legacy single-account setup."""
     with connection() as conn:
-        row = conn.execute(
-            "SELECT id FROM google_accounts ORDER BY created_at LIMIT 1"
-        ).fetchone()
+        row = conn.execute("SELECT id FROM google_accounts ORDER BY created_at LIMIT 1").fetchone()
     return get_account(row[0]) if row else None
 
 
@@ -196,15 +194,27 @@ def add_channel(
     now = utcnow()
     with connection() as conn:
         if is_default:
-            conn.execute("UPDATE youtube_channels SET is_default = 0 WHERE account_id = ?",
-                         (account_id,))
+            conn.execute(
+                "UPDATE youtube_channels SET is_default = 0 WHERE account_id = ?", (account_id,)
+            )
         conn.execute(
             "INSERT INTO youtube_channels (id, account_id, channel_id, title, url,"
             " is_default, privacy, category_id, auto_upload, title_suffix, created_at, updated_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (row_id, account_id, channel["id"], channel.get("title", ""),
-             channel.get("url", ""), int(is_default), privacy, category_id,
-             int(auto_upload), title_suffix, now, now),
+            (
+                row_id,
+                account_id,
+                channel["id"],
+                channel.get("title", ""),
+                channel.get("url", ""),
+                int(is_default),
+                privacy,
+                category_id,
+                int(auto_upload),
+                title_suffix,
+                now,
+                now,
+            ),
         )
     result = get_channel(row_id)
     assert result is not None
@@ -247,9 +257,7 @@ def default_channel(account_id: str | None = None) -> dict[str, Any] | None:
                 (account_id,),
             ).fetchone()
         else:
-            row = conn.execute(
-                "SELECT id FROM youtube_channels WHERE is_default = 1"
-            ).fetchone()
+            row = conn.execute("SELECT id FROM youtube_channels WHERE is_default = 1").fetchone()
     return get_channel(row[0]) if row else None
 
 
