@@ -53,3 +53,9 @@ desktop.ini
 .env
 .env.*
 !.env.example
+
+# Branch archives. These are full working copies of the repository — they
+# duplicate the git history, carry the user's media, and are never committed.
+All-Branches/
+*.zip
+*.7z
