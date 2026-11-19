@@ -134,4 +134,6 @@ Not started. Sequence and ordering constraints are in `docs/upgrade-audit.md` §
 | 2026-11-19 | `615f0e8` | SECURITY.md corrected (docs only) |
 | 2026-11-19 | `b2fae13` | M0 deliverable set: spec, audit, matrix, egress, security, baselines, ledger, 26 SSRF xfails |
 | 2026-11-19 | `4c869c6` | Ledger changelog row for the M0 deliverable commit |
-| 2026-11-20 | *(M0.5 commits)* | SSRF policy, egress gateway, consent store, migration v15, retrofit of every existing external call, privacy API, Settings → External processing, SECURITY.md enforcement detail, 49 security tests |
+| 2026-11-20 | `ff134c8` | M0.5 — URL policy enforced; the 26 SSRF xfails became ordinary passing tests and the marker was deleted |
+| 2026-11-20 | `8fb2f03` | M0.5 — consent gateway, migration v15, retrofit of every existing external call, privacy API, Settings → External processing |
+| 2026-11-20 | `d9ad80c` | M0.5 — SECURITY.md and the audit, inventory, matrix and ledger updated with the enforcement |
