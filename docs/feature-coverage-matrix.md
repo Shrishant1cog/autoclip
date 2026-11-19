@@ -166,13 +166,13 @@ Rows marked ⚠ are gaps this upgrade must close.
 | GOV-10 | Original requirements located/copied | `docs/original/MANIFEST.md` | **Blocked — source missing** | M0 |
 | GOV-11 | Original requirements matrix | `docs/ORIGINAL_REQUIREMENTS_MATRIX.md` | Partial (blocked rows) | M0 |
 | GOV-12 | External constraints register | `docs/EXTERNAL-CONSTRAINTS.md` | Implemented | M0 |
-| GOV-13 | Consent management | — | Missing | M0.5 |
-| GOV-14 | Egress gateway (retrofit existing calls) | — | Missing | M0.5 |
-| GOV-15 | Endpoint classification | — | Missing | M0.5 |
-| GOV-16 | SSRF enforcement | — | Missing | M0.5 |
-| GOV-17 | yt-dlp network restriction | — | Missing | M0.5 |
-| GOV-18 | Updated SECURITY.md with enforcement detail | — | Missing | M0.5 |
-| GOV-19 | Security test evidence (SSRF suite flipped from xfail) | `tests/test_url_policy.py` (26 xfailed) | Partial | M0.5 |
+| GOV-13 | Consent management | `security/consent.py` (operations, decisions, SQLite store), `api/privacy.py` (`GET`/`PUT /api/privacy/consents`, `GET /api/privacy/transfers`), Settings → External processing | Implemented | M0.5 |
+| GOV-14 | Egress gateway (retrofit existing calls) | `security/egress.py`; retrofitted into ElevenLabs STT/TTS, all four LLM adapters via `LLMProvider._send`, yt-dlp ingest, FFmpeg, model download, trends, YouTube upload | Implemented | M0.5 |
+| GOV-15 | Endpoint classification | `security/urlpolicy.py:classify_url`; every adapter declares `DEFAULT_ENDPOINT` | Implemented | M0.5 |
+| GOV-16 | SSRF enforcement | `security/urlpolicy.py` — redirect re-classification, double-resolution rebinding guard, IPv4/IPv6 classification, scheme downgrade refusal, bounded chain | Implemented | M0.5 |
+| GOV-17 | yt-dlp network restriction | `pipeline/ingest.py` classifies the URL before the fetch and refuses private destinations; `yt_dlp_hardening_args()` disables proxies; FFmpeg runs with `-protocol_whitelist file,pipe` | Partial — the secondary-request surface inside yt-dlp remains a documented residual, needing a Lane B controlled test | M0.5 |
+| GOV-18 | Updated SECURITY.md with enforcement detail | `SECURITY.md` — consent model table, URL and subprocess policy | Implemented | M0.5 |
+| GOV-19 | Security test evidence (SSRF suite flipped from xfail) | `tests/test_url_policy.py` (26 ordinary passing tests, zero `xfail` markers) + `tests/test_egress.py` (23 tests) | Automated test verified | M0.5 |
 | GOV-20 | Final upgrade report | — | Missing | M5 |
 | GOV-21 | Independent audit + release package | — | Missing | M5 |
 

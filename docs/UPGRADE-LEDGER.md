@@ -14,7 +14,7 @@ milestone `In progress` and is reported as such.
 | Milestone | Status | Gate evidence |
 |---|---|---|
 | M0 — Audit and baseline | **Complete** | 16/16 gate items done or explicitly blocked; independent review folded in |
-| M0.5 — Security and consent | Not started | — |
+| M0.5 — Security and consent | **Complete** | 12/12 gate items done; 49 security tests passing; the residual yt-dlp secondary-request surface is documented, not claimed |
 | M1 — Music intelligence | Not started | — |
 | M2 — Webcam intelligence | Not started | — |
 | M3 — Creative intelligence | Not started | — |
@@ -75,17 +75,46 @@ documents before this milestone was recorded as complete.
 
 ## M0.5 — Security and consent
 
-Not started. Plan on entry:
+**Status: Complete.** The milestone ships the URL policy, the egress gateway, the consent store, the
+retrofit of every existing external call, the Settings surface, and the test evidence.
 
-1. `security/urlpolicy.py` implementing the contract in `docs/SECURITY-AUDIT.md`; flip all 26
-   xfails to passing tests and **delete the marker** (gate fails if any remains).
-2. `security/egress.py`: endpoint classification, consent records, transfer log, redaction.
-3. Retrofit E1, E2, E4, E9, E10, E11, E12, E13 and E14 through the gateway — including the existing
-   ElevenLabs and LLM calls, not only new ones.
-4. FFmpeg `-protocol_whitelist`, yt-dlp hardening args.
-5. Non-silent fallback: a refused consent must fail the operation, never route elsewhere.
-6. Update `SECURITY.md` with the enforcement detail.
-7. Migration for the consent/transfer-log tables (append-only, v15).
+| # | Gate item | State | Evidence |
+|---|---|---|---|
+| 1 | `security/urlpolicy.py` implementing the target policy | Done | scheme, IPv4/IPv6 + CGNAT + IPv4-mapped classification, per-hop redirect re-classification, scheme-downgrade refusal, bounded chain, double-resolution rebinding guard |
+| 2 | All 26 SSRF xfails flipped to passing tests, markers deleted | Done | `tests/test_url_policy.py` — 26 ordinary passing tests; zero `xfail` markers remain (gate condition) |
+| 3 | `security/egress.py`: classification, consent, transfer log, redaction | Done | `EgressGateway.authorize/require/fetch/record`, `redact()` masks a credential completely |
+| 4 | Consent storage + migration | Done | DB migration **v15** — `egress_consents`, `egress_log`; `SCHEMA_VERSION = 15` |
+| 5 | Retrofit E1, E2, E4 through the gateway | Done | `speech/elevenlabs.py`, `speech/tts.py`, `providers/base.py:LLMProvider._send` |
+| 6 | Retrofit E9, E11, E12, E14 through the gateway | Done | `youtube/uploader.py`, `pipeline/ingest.py`, `models.py`, `trends/research.py` |
+| 7 | FFmpeg `-protocol_whitelist` | Done | `pipeline/ffmpeg.py:protocol_args()` → `file,pipe`, applied to all three command builders |
+| 8 | yt-dlp hardening | Done | `yt_dlp_hardening_args()` → `--proxy ""`; the source URL is classified before the fetch and a private destination is refused |
+| 9 | Non-silent fallback | Done | `providers/resolver.py` refuses to try another **external** provider after a consent refusal; only a local provider may answer. `ProviderConsentRequired` aborts the highlights stage |
+| 10 | User-visible controls | Done | `api/privacy.py` → `GET`/`PUT /api/privacy/consents`, `GET /api/privacy/transfers`; Settings → External processing |
+| 11 | `SECURITY.md` updated with the enforcement detail | Done | consent model table, URL and subprocess policy |
+| 12 | Security test evidence | Done | `tests/test_url_policy.py` (26) + `tests/test_egress.py` (23) = 49 security tests, all passing; full suite 721 passing, 0 xfailed |
+
+### Decisions taken in M0.5
+
+| Decision | Why | Where recorded |
+|---|---|---|
+| A consent decision is keyed by **(operation, destination class)**, not by host | The useful question is "may transcript text leave the machine at all", and the class is what determines the risk. Keying by host would let a decision silently follow a `base_url` to a different machine | `security/consent.py` module docstring, `SECURITY.md` |
+| A **configured** public destination is allowed once and recorded with `source="configured"` | An existing install must keep working after the upgrade, but the decision must be visible and revocable rather than implicit forever | `security/egress.py:authorize` |
+| A private destination is **never** allowed implicitly | "The user configured it" is not evidence that a LAN address is safe to reach with content | `security/egress.py:authorize` |
+| An explicit withdrawal always wins, even for a configured destination | Consent that can be overridden by configuration is not consent | `security/egress.py:authorize` |
+| Only content-bearing operations are consent-gated; the rest are logged | Requiring a decision for a model download trains the user to click through prompts without reading them | `security/consent.py:Operation`, `Transfer.requires_consent` |
+| Credentials are masked **entirely** in logs — no suffix fingerprint | A secret that appears in a log line is compromised whether or not its last four characters are readable | `security/egress.py:redact` |
+| Adapters declare `DEFAULT_ENDPOINT` | The OpenAI, Anthropic and Gemini endpoints appear nowhere in the repository as literals, so a URL scan cannot classify them | `providers/*_provider.py` |
+| `SpeechConsentDenied` is a distinct exception type | "Blocked by your settings" and "the service is down" need different remedies and different wording | `speech/base.py` |
+| Loopback is never offered as a choice in the UI | It cannot be denied; offering it would imply it can be | `api/privacy.py` |
+
+### Residual risk carried into later milestones
+
+| Residual | Status | Action |
+|---|---|---|
+| yt-dlp's **secondary requests** (manifest, CDN, page assets) are made inside yt-dlp and cannot be re-classified hop by hop | Documented, not verified | Lane B controlled test against a redirecting host before the surface can be called verified |
+| The **first-run MediaPipe model download** still happens inside the pipeline, with no pre-flight check at job start | Product limitation, not a security gap | M3 — pre-flight the check so an offline machine fails before the job starts |
+| Legacy global OAuth token still coexists with per-account tokens | Finding S6, untouched by M0.5 | M4a |
+| `ruff` still unpinned | Finding S7, untouched by M0.5 | M5 |
 
 ---
 
@@ -104,3 +133,5 @@ Not started. Sequence and ordering constraints are in `docs/upgrade-audit.md` §
 | 2026-11-19 | `24060ff` | CI on `feature/**`; ignore branch archives (D8) |
 | 2026-11-19 | `615f0e8` | SECURITY.md corrected (docs only) |
 | 2026-11-19 | `b2fae13` | M0 deliverable set: spec, audit, matrix, egress, security, baselines, ledger, 26 SSRF xfails |
+| 2026-11-19 | `4c869c6` | Ledger changelog row for the M0 deliverable commit |
+| 2026-11-20 | *(M0.5 commits)* | SSRF policy, egress gateway, consent store, migration v15, retrofit of every existing external call, privacy API, Settings → External processing, SECURITY.md enforcement detail, 49 security tests |

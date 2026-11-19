@@ -32,6 +32,15 @@ service.
 **Fix owner:** M0.5 (§4.1/§4.2). Retrofit the existing path; do not build a gateway for new
 features only.
 
+**Status after M0.5: CLOSED.** Every external transfer now passes
+`backend/autoclip/security/egress.py`. The transcription path calls
+`gateway.require()` before the upload and raises `SpeechConsentDenied` when the
+decision is missing; `pipeline/runner.py` catches that separately from a service
+failure and says "external transcription is blocked" rather than "ElevenLabs
+unavailable". Decisions are stored in `egress_consents` (DB migration v15) and
+managed from *Settings → External processing*. Evidence:
+`tests/test_egress.py` (23 tests), `backend/autoclip/speech/elevenlabs.py`.
+
 ---
 
 ## S2 — HIGH — Unvalidated URL fetch; no post-redirect or DNS re-validation
@@ -62,6 +71,24 @@ secondary-request surface. That residual is reported as a documented limitation,
 
 **Fix owner:** M0.5 (§4.3).
 
+**Status after M0.5: CLOSED at the boundary AutoClip controls; one residual
+documented.** `backend/autoclip/security/urlpolicy.py` classifies a URL's
+scheme and every resolved address (IPv4 and IPv6, including IPv4-mapped and
+CGNAT forms), refuses loopback/link-local/private targets per the policy,
+re-classifies every redirect hop, refuses scheme downgrades, bounds the
+redirect chain, and resolves twice — the answer must match immediately before
+the connection, which is the rebinding guard. `pipeline/ingest.py` classifies
+the source URL before handing it to yt-dlp and refuses a private destination
+outright.
+
+**Residual (documented, not verified):** yt-dlp's own secondary requests —
+the manifest, the CDN, the page assets — are made by yt-dlp, not by AutoClip,
+so AutoClip cannot re-classify each hop. The controls applied are yt-dlp's
+own: proxies are disabled (`--proxy ""`), retries are bounded, and the URL is
+classified up front. A Lane B controlled test against a redirecting host is
+still required before the secondary-request surface can be called verified.
+Evidence: `tests/test_url_policy.py` (26 cases, all passing).
+
 ---
 
 ## S3 — MEDIUM — FFmpeg runs without a protocol whitelist
@@ -81,6 +108,12 @@ local, but it becomes real the moment any URL is passed to FFmpeg.
 **Fix owner:** M0.5. Restrict to `file,pipe` for local work; permit network schemes only through a
 gateway decision.
 
+**Status after M0.5: CLOSED.** `pipeline/ffmpeg.py` gained
+`protocol_args()`, which returns `-protocol_whitelist file,pipe`, and all three
+command builders (probe, volume-detect, encode) include it. FFmpeg can now
+only read local files and pipes. Evidence: `tests/test_url_policy.py`
+(URL-22 asserts the built argv).
+
 ---
 
 ## S4 — MEDIUM — Provider base URL is never classified
@@ -97,6 +130,18 @@ scheme, resolves the host, or distinguishes loopback from private from public. A
 (b) A private/LAN URL is treated as if it were a public provider for consent purposes.
 
 **Fix owner:** M0.5 §4.2 — classify on every use and re-classify when the URL or DNS answer changes.
+
+**Status after M0.5: CLOSED.** Every adapter declares a `DEFAULT_ENDPOINT` so
+the real destination is known even when the SDK default is used (the OpenAI,
+Anthropic and Gemini endpoints appear nowhere in the repository as literals, so
+a URL scan would miss them). `LLMProvider._send` is the template method every
+adapter's request goes through; it calls `_authorize`, which classifies the
+endpoint through the gateway and raises `ProviderConsentRequired` when consent
+is missing. The consent decision is keyed by *operation and destination class*,
+so changing `base_url` from public to private stops matching the public
+decision immediately. `providers/resolver.py` refuses to try a second external
+provider after a refusal — only a local provider may answer. Evidence:
+`tests/test_egress.py` (provider seam, reclassification, no-silent-fallback).
 
 ---
 
@@ -116,6 +161,18 @@ error rather than a clear "this needs a model download" message.
 
 **Fix owner:** M0.5. Classify, notify, consent, and pre-flight the check before a job starts.
 
+**Status after M0.5: CLOSED as an egress finding, with one product limitation
+left open.** `models.py` now classifies the model host through the gateway and
+records the download in the transfer log, so the request is visible in
+*Settings → External processing*. No user content is involved — a model file —
+so it is logged rather than consent-gated.
+
+**Still open (product, not security):** the download still happens the first
+time a face-detection model is needed, with no pre-flight check at job start,
+so an offline machine fails inside the pipeline. The error message names the
+file and its path so the user can place it manually. Pre-flighting the check
+before a job begins is M3 work, not M0.5.
+
 ---
 
 ## S6 — LOW — Legacy global OAuth token remains valid alongside per-account tokens
@@ -132,6 +189,8 @@ is no test that asserts "the token used belongs to the account that owns the des
 **Fix owner:** M4a §8.1/§8.4. Account-scoped state, account-scoped tokens, and a wrong-account
 callback rejection test.
 
+**Status after M0.5: STILL OPEN.** Not touched by M0.5; it is M4a work.
+
 ---
 
 ## S7 — LOW — Toolchain pinned too loosely
@@ -144,6 +203,10 @@ commit is not a gate.
 
 **Fix owner:** M0 (this milestone records it) → pin in M5 with the rest of the reproducible-build
 work.
+
+**Status after M0.5: STILL OPEN.** The tree was reformatted in M0 so the gate
+passes today, but `ruff>=0.7` is still unpinned. Pinning belongs with the
+reproducible-build work in M5.
 
 ---
 
@@ -185,13 +248,15 @@ A URL may be fetched only if **all** of the following hold, evaluated at the mom
 8. **Proxies** from the environment are either disabled or treated as a destination that must itself
    pass this policy.
 
-### Pre-registered tests
+### Pre-registered tests — converted in M0.5
 
-`tests/test_url_policy.py` contains the target-policy tests. While enforcement is absent they are
-marked `xfail(strict=True)` with the reason "M0.5 enforcement not implemented", so the suite stays
-honest and green for the *current* state without hiding the gap. Each must be converted to a normal
-passing test in M0.5 — a permanently-skipped security test is a lie. The M0.5 gate fails if any
-`xfail` marker remains in that file.
+`tests/test_url_policy.py` contained the target-policy tests. While enforcement was absent they were
+marked `xfail(strict=True)` with the reason "M0.5 enforcement not implemented", so the suite stayed
+honest and green for the *current* state without hiding the gap.
+
+**M0.5 outcome:** enforcement is implemented and every `xfail` marker was removed. The file now
+contains 26 ordinary passing tests; the M0.5 gate required zero remaining markers in it. The test
+set did not shrink — the IDs below are the same cases.
 
 Test IDs (registered here so the set cannot quietly shrink):
 

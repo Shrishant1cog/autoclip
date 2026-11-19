@@ -32,9 +32,63 @@ Worth stating plainly, because "local-first" is easy to claim and easy to get wr
 - **No telemetry, no analytics, no phone-home.** There is no code that contacts a server AutoClip's authors control.
 - **Everything is under `~/.autoclip/`** — media, transcripts, exports, database, settings. Delete that directory and nothing remains.
 
-A central consent layer for these transfers is being built; until it lands, the settings above are
-the control you have. See `docs/EGRESS-INVENTORY.md` for the full, code-verified list of outbound
+A central consent layer now governs these transfers. See
+[External-processing consent](#external-processing-consent) below and
+`docs/EGRESS-INVENTORY.md` for the full, code-verified list of outbound
 destinations.
+
+## External-processing consent
+
+Every outbound request that carries your content passes through one gateway
+(`backend/autoclip/security/egress.py`). The gateway classifies the
+destination, checks your stored decision, and records what happened. Nothing
+is sent that has not been through it.
+
+**What you control.** *Settings → External processing* lists each operation —
+external transcription, AI highlight detection, external voiceover, source
+downloads, model downloads, publishing, the trending chart — with a plain
+description of what leaves the machine and why it is needed. Each operation has
+its own switch for public services and for private-network destinations. The
+same screen lists recent transfers: what was sent, where it went, and whether
+it worked. Credentials never appear there, and neither does the content itself.
+
+**How a decision is made.**
+
+| Destination | Behaviour |
+|---|---|
+| Loopback (`127.0.0.1`, `::1`, `localhost`) | Always allowed, and always logged. A tunnel or reverse proxy on localhost can forward traffic elsewhere, so treat local services with the same care as public ones. |
+| Private network | Never allowed implicitly. It needs an explicit decision from you. |
+| Public network | Allowed only with a decision — either one you made, or one recorded because you configured that destination yourself. A decision you withdraw always wins, even for a configured destination. |
+
+A decision is keyed by *operation and destination class*, not by hostname. If
+you change a provider's `base_url` from a public host to one on your own
+network, the public decision stops matching and the transfer is refused until
+you allow the private class. The same rule applies when DNS resolves
+differently later.
+
+**No silent substitution.** If a provider is refused, AutoClip does not try a
+different external provider with the same content. It may fall back to a
+local model, because nothing leaves the machine that way, and it tells you
+what it did.
+
+## URL and subprocess policy
+
+- **Redirects are checked on every hop.** A public URL that redirects to a
+  private address is refused at the redirect, not at the first request.
+- **DNS is resolved twice.** The address is checked before the request and
+  again immediately before the connection, so a name that changes its answer
+  between the two is caught.
+- **IPv4 and IPv6 are both classified**, including loopback, link-local and
+  cloud metadata addresses (`169.254.169.254`), which are refused outright.
+- **yt-dlp** runs with proxies disabled and its network surface constrained;
+  the URL you supply is classified before the download starts.
+- **FFmpeg** runs with `-protocol_whitelist file,pipe`, so it can read local
+  files and pipes and nothing else — no `http`, `https`, `tcp` or `rtmp`.
+- **Credentials are masked completely** in logs and error messages. A secret
+  that appears in a log line is compromised, so a partial mask is not enough.
+
+The policy lives in `backend/autoclip/security/urlpolicy.py` and is covered by
+`tests/test_url_policy.py` (26 cases) and `tests/test_egress.py` (18 cases).
 
 ## Running it safely
 
