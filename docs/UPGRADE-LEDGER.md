@@ -103,3 +103,4 @@ Not started. Sequence and ordering constraints are in `docs/upgrade-audit.md` §
 | 2026-11-19 | `3c290b2` | Format the remaining 36 files (D15) |
 | 2026-11-19 | `24060ff` | CI on `feature/**`; ignore branch archives (D8) |
 | 2026-11-19 | `615f0e8` | SECURITY.md corrected (docs only) |
+| 2026-11-19 | `b2fae13` | M0 deliverable set: spec, audit, matrix, egress, security, baselines, ledger, 26 SSRF xfails |
