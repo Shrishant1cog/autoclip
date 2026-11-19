@@ -1,19 +1,14 @@
 """Target-policy tests for URL fetching (SSRF).
 
-These were registered in M0 against a policy that is **not implemented yet**.
-Every test is marked ``xfail(strict=True)`` with a single shared reason, so:
-
-* while enforcement is missing the suite stays green, and the gap shows up in the
-  report as ``xfailed`` rather than being silently absent;
-* the moment M0.5 implements a case, that test *passes*, which turns the strict
-  xfail into an ``XPASS`` failure. Nothing can quietly "stay xfail" - the M0.5
-  gate requires every marker in this file to be removed.
+These were registered in M0 against a policy that did not exist yet, as strict
+xfails. M0.5 implemented :mod:`autoclip.security.urlpolicy` and every case here
+now runs as an ordinary passing test; the xfail marker is gone, which is what
+the M0.5 gate requires.
 
 Do not delete a case to make the file green. See ``docs/SECURITY-AUDIT.md`` for
 the policy each ID encodes.
 
-The module under test is ``autoclip.security.urlpolicy``. Its intended surface,
-fixed here so M0.5 has a contract to satisfy:
+The module under test is ``autoclip.security.urlpolicy``. Its surface:
 
     class UrlClass(str, Enum):
         LOOPBACK = "loopback"
@@ -44,15 +39,9 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.xfail(
-    strict=True,
-    reason="M0.5: URL policy / SSRF enforcement not implemented yet",
-)
-
-
 # --------------------------------------------------------------------------
-# Helpers - imported lazily so that "module does not exist yet" is a xfail at
-# call time rather than a collection error.
+# Helpers - imported lazily so a missing module is a clear failure here rather
+# than a collection error somewhere else.
 # --------------------------------------------------------------------------
 
 

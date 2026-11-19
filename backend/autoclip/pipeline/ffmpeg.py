@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import resources
+from ..security.urlpolicy import ffmpeg_protocol_whitelist
 
 log = logging.getLogger(__name__)
 
@@ -172,6 +173,17 @@ def run_captured(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
         )
 
 
+def protocol_args() -> list[str]:
+    """The FFmpeg options that restrict what it may open.
+
+    FFmpeg's default protocol set includes ``http``, ``https``, ``tcp``,
+    ``udp``, ``rtmp`` and friends. AutoClip only ever reads local files and
+    pipes, so those are removed: a playlist or manifest that reached FFmpeg
+    through any future path cannot make it fetch a remote resource.
+    """
+    return ["-protocol_whitelist", ffmpeg_protocol_whitelist()]
+
+
 def probe(path: Path) -> MediaInfo:
     """Inspect a media file with ffprobe.
 
@@ -181,6 +193,7 @@ def probe(path: Path) -> MediaInfo:
         ffprobe_path(),
         "-v",
         "error",
+        *protocol_args(),
         "-print_format",
         "json",
         "-show_format",
@@ -238,6 +251,7 @@ def volumedetect(path: Path) -> float | None:
         ffmpeg_path(),
         "-hide_banner",
         "-nostats",
+        *protocol_args(),
         "-i",
         str(path),
         "-map",
@@ -361,6 +375,7 @@ def run(
         "-y",
         "-loglevel",
         "error",
+        *protocol_args(),
     ]
     if threads and threads > 0:
         # Placed before -i, so these apply to the decoder and the filtergraph.
