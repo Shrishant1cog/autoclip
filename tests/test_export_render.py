@@ -11,6 +11,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import numpy as np
 import pytest
 from autoclip.config import ExportSettings
 from autoclip.pipeline import captions, export, ffmpeg
@@ -732,3 +733,246 @@ def _region_signature(video: Path, timestamp: float, x: int, y: int, w: int, h: 
         check=True,
     )
     return result.stdout.strip()
+
+
+# --------------------------------------------------------------------------
+# The music bed, rendered for real
+# --------------------------------------------------------------------------
+
+
+def _rms_in_window(
+    path: Path, start_s: float, end_s: float, *, band_hz: float | None = None
+) -> float:
+    """The RMS of the audio between two times, as a linear amplitude.
+
+    A level, not a quality score: it answers "how much signal is in this
+    window", which is what the ducking changes.
+
+    ``band_hz`` narrows the measurement to one frequency band. The bed sits
+    at 440 Hz and the source's own voice at 1000 Hz, so the bed's level can
+    be read on its own instead of being hidden under the speech.
+    """
+    filters = []
+    if band_hz is not None:
+        filters.append(f"bandpass=f={band_hz}:width_type=h:w=60")
+
+    raw = subprocess.run(
+        [
+            ffmpeg.ffmpeg_path(),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            f"{start_s:.3f}",
+            "-t",
+            f"{end_s - start_s:.3f}",
+            "-i",
+            str(path),
+            "-vn",
+            *(["-af", ",".join(filters)] if filters else []),
+            "-f",
+            "s16le",
+            "-ac",
+            "1",
+            "-ar",
+            "48000",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+    ).stdout
+    samples = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+    if samples.size == 0:
+        return 0.0
+    return float(np.sqrt(np.mean(np.square(samples))))
+
+
+class TestMusicBedRender:
+    """The mixed-audio graph has to survive a real ffmpeg run.
+
+    The graph used to put an output label in the middle of the bed's filter
+    chain. A label ends a chain, so the ducking filters that followed it were
+    left with no input and the bed's output was left unconnected — and
+    ffmpeg refused the whole graph. The filter-level tests could not see it,
+    because they only checked that certain strings were present.
+
+    So these tests render. They are slow, and they are the only ones that can
+    tell a well-formed graph from a well-intentioned one.
+    """
+
+    @pytest.fixture(scope="module")
+    def spoken_source(self, tmp_path_factory) -> Path:
+        """Ten seconds of video with a steady tone on the audio track."""
+        path = tmp_path_factory.mktemp("media") / "spoken.mp4"
+        subprocess.run(
+            [
+                ffmpeg.ffmpeg_path(),
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                f"testsrc2=size={SOURCE_W}x{SOURCE_H}:rate=30:duration=10",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=1000:duration=10:sample_rate=48000",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-shortest",
+                str(path),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        return path
+
+    @pytest.fixture(scope="module")
+    def bed(self, tmp_path_factory) -> Path:
+        """A two-second music bed: a loud tone at 440 Hz."""
+        path = tmp_path_factory.mktemp("media") / "bed.wav"
+        subprocess.run(
+            [
+                ffmpeg.ffmpeg_path(),
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=2:sample_rate=48000",
+                str(path),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        return path
+
+    def _export(
+        self,
+        source: Path,
+        destination: Path,
+        bed: Path,
+        tmp_path: Path,
+        *,
+        intervals,
+        ducking: bool = True,
+    ) -> Path:
+        from autoclip.music import store as music_store
+        from autoclip.music.licensing import LicenseRecord, LicenseState
+
+        track = music_store.upsert_track(bed)
+        music_store.set_license(
+            LicenseRecord(
+                track_id=track.id,
+                state=LicenseState.USER_CONFIRMED,
+                source="test",
+                evidence="A test fixture.",
+            )
+        )
+
+        request = export.ExportRequest(
+            source=source,
+            destination=destination,
+            start_s=0.0,
+            end_s=8.0,
+            crop_path=centre_crop(SOURCE_W, SOURCE_H, 8.0),
+            words=[],
+            style=captions.get_style("bold_pop"),
+            burn_captions=False,
+            speech_intervals=intervals,
+        )
+        export.export_clip(
+            request,
+            work_dir=tmp_path / "work",
+            settings=ExportSettings(
+                music_track=str(bed),
+                music_volume=0.5,
+                music_ducking=ducking,
+                ducking_amount_db=-12.0,
+            ),
+        )
+        return destination
+
+    def test_the_timeline_driven_ducking_renders(
+        self, spoken_source, bed, tmp_path, initialised_db: int
+    ) -> None:
+        """The graph ffmpeg is actually asked to run has to be one it accepts."""
+        from autoclip.pipeline.speech_timeline import SpeechInterval
+
+        destination = self._export(
+            spoken_source,
+            tmp_path / "ducked.mp4",
+            bed,
+            tmp_path,
+            intervals=[SpeechInterval(start_ms=2000, end_ms=4000)],
+        )
+
+        assert destination.exists()
+        info = ffmpeg.probe(destination)
+        assert info.has_audio
+        assert info.duration_s == pytest.approx(8.0, abs=0.35)
+
+    def test_the_bed_is_ducked_under_the_speech_and_returns_after_it(
+        self, spoken_source, bed, tmp_path, initialised_db: int
+    ) -> None:
+        """The bed drops while the timeline says someone is talking.
+
+        Two renders of the same clip: one with the ducking on and one with
+        it off. Inside the speech stretch the ducked render must be quieter;
+        outside it, the two must be the same, because that is where the bed
+        is at full level in both.
+        """
+        from autoclip.pipeline.speech_timeline import SpeechInterval
+
+        ducked = self._export(
+            spoken_source,
+            tmp_path / "ducked.mp4",
+            bed,
+            tmp_path,
+            intervals=[SpeechInterval(start_ms=2000, end_ms=4000)],
+        )
+        flat = self._export(
+            spoken_source,
+            tmp_path / "flat.mp4",
+            bed,
+            tmp_path,
+            intervals=[],
+            ducking=False,
+        )
+
+        # Inside the speech stretch: the bed has been pulled down. The
+        # measurement is taken in the bed's own frequency band, so the
+        # source's voice does not hide the change.
+        inside_ducked = _rms_in_window(ducked, 2.4, 3.6, band_hz=440)
+        inside_flat = _rms_in_window(flat, 2.4, 3.6, band_hz=440)
+        # Outside it: nothing is ducking, so the two agree.
+        outside_ducked = _rms_in_window(ducked, 5.0, 6.2, band_hz=440)
+        outside_flat = _rms_in_window(flat, 5.0, 6.2, band_hz=440)
+
+        assert inside_ducked < inside_flat * 0.6, (
+            f"the bed was not ducked: {inside_ducked:.5f} vs {inside_flat:.5f}"
+        )
+        assert outside_ducked == pytest.approx(outside_flat, rel=0.25)
+
+    def test_the_sidechain_fallback_still_renders(
+        self, spoken_source, bed, tmp_path, initialised_db: int
+    ) -> None:
+        """With no timeline the graph falls back to the compressor."""
+        destination = self._export(
+            spoken_source,
+            tmp_path / "sidechain.mp4",
+            bed,
+            tmp_path,
+            intervals=[],
+        )
+
+        assert destination.exists()
+        assert ffmpeg.probe(destination).has_audio

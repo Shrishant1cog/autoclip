@@ -572,16 +572,21 @@ def build_mixed_audio_filtergraph(
         f"[0:a]loudnorm=I={settings.loudness_lufs}:TP={LOUDNESS_TRUE_PEAK}:LRA={LOUDNESS_RANGE}[sp]"
     )
     # Bed: trim to the clip, level it, format to match the speech for the mix.
+    #
+    # The chain carries **no output label**. A label ends a filter chain, so
+    # a labelled bed followed by the ducking filters would leave the bed's
+    # output unconnected and ffmpeg would refuse the whole graph. The label
+    # is added where the bed is used instead.
     bed = (
         f"[1:a]atrim=0:{duration:.4f},asetpts=PTS-STARTPTS,"
-        f"volume={vol:.3f},aformat=sample_rates={AUDIO_SAMPLE_RATE}:channel_layouts=stereo[bed]"
+        f"volume={vol:.3f},aformat=sample_rates={AUDIO_SAMPLE_RATE}:channel_layouts=stereo"
     )
 
     music_args = ["-stream_loop", "-1", "-i", str(music_path)]
 
     if not settings.music_ducking:
         complex_filter = (
-            f"{speech};{bed};"
+            f"{speech};{bed}[bed];"
             f"[sp][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]"
         )
         return MixedAudio(
@@ -611,12 +616,30 @@ def build_mixed_audio_filtergraph(
             )
 
     # No timeline: fall back to keying the ducking on the audio itself.
+    #
+    # The speech is split into two copies — one for the mix and one to key
+    # the compressor — and both are put on the bed's channel layout first.
+    # Two things make the explicit split necessary rather than decorative:
+    #
+    # * a filter output may be consumed only **once** in an ffmpeg
+    #   filtergraph, so naming `[sp]` as both the sidechain key and the
+    #   mix input is refused outright by some builds ("Invalid stream
+    #   specifier: sp");
+    # * `sidechaincompress` needs both of its inputs on the same channel
+    #   layout, and the bed is stereo whether or not the source is.
+    #
+    # Newer ffmpeg builds accept the label being reused, which is exactly
+    # why this stayed hidden: it renders on the machine it was written on
+    # and fails on an older one.
     complex_filter = (
-        f"{speech};{bed};"
+        f"{speech};"
+        f"[sp]aformat=sample_rates={AUDIO_SAMPLE_RATE}:channel_layouts=stereo,"
+        f"asplit=2[sp_mix][sp_key];"
+        f"{bed}[bed];"
         # Bed ducks while speech plays; attack/release keep it musical.
-        f"[bed][sp]sidechaincompress=threshold={duck_linear:.4f}:ratio=8:"
+        f"[bed][sp_key]sidechaincompress=threshold={duck_linear:.4f}:ratio=8:"
         f"attack=120:release=600:makeup=1[ducked];"
-        f"[sp][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]"
+        f"[sp_mix][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]"
     )
     return MixedAudio(
         filter_complex=complex_filter,

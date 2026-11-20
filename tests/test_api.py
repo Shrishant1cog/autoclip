@@ -380,6 +380,217 @@ class TestClips:
         assert client.get(f"/api/clips/{clip_id}/words").status_code == 404
 
 
+class TestClipExportHonoursTheUsersMusic:
+    """A re-export must render what the user chose, not what was left over.
+
+    The pipeline's own export stage takes the music from the creative
+    stage's selection. A re-export from the review page has no creative
+    stage, so the user's own choice — the clip's, the source's or the
+    global one — is what the renderer has to be given. Before this was
+    fixed, the review page's "Export this clip" rendered the plain speech
+    audio: the chosen track and the ducking were both silently dropped.
+    """
+
+    @pytest.fixture
+    def track(self, tmp_path) -> str:
+        from autoclip.music import store as music_store
+        from autoclip.music.licensing import LicenseRecord, LicenseState
+
+        bed = tmp_path / "bed.wav"
+        bed.write_bytes(b"RIFF....WAVEfmt ")
+        indexed = music_store.upsert_track(bed)
+        music_store.set_license(
+            LicenseRecord(
+                track_id=indexed.id,
+                state=LicenseState.USER_CONFIRMED,
+                source="test",
+                evidence="A fixture.",
+            )
+        )
+        return indexed.id
+
+    @pytest.fixture
+    def job(self, source: Source) -> Job:
+        from autoclip.pipeline.runner import JobWorkspace
+        from autoclip.pipeline.transcript import Transcript, Word
+
+        created = store.create_job(Job(id=new_id(), source_id=source.id, status="done"))
+        store.replace_clips(
+            created.id,
+            [
+                Clip(
+                    id=new_id(),
+                    job_id=created.id,
+                    rank=1,
+                    start_s=60.0,
+                    end_s=100.0,
+                    start_word=0,
+                    end_word=4,
+                    title="Clip 1",
+                    score=90,
+                )
+            ],
+        )
+        # The review page reads the clip's words from the transcript.
+        Transcript(
+            words=[
+                Word(text=f"word{index}", start=60.0 + index, end=61.0 + index)
+                for index in range(5)
+            ]
+        ).save(JobWorkspace(created.id).transcript)
+        return created
+
+    @pytest.fixture
+    def rendered(self, monkeypatch):
+        """Capture what the renderer was asked for, without rendering anything."""
+        from autoclip.pipeline import export as export_module
+        from autoclip.pipeline import validate as validate_module
+
+        calls: list[dict] = []
+
+        def fake_export(request, *, work_dir, settings=None, **kwargs):
+            calls.append({"request": request, "settings": settings})
+            request.destination.parent.mkdir(parents=True, exist_ok=True)
+            request.destination.write_bytes(b"0" * 64)
+            return request.destination
+
+        monkeypatch.setattr(export_module, "export_clip", fake_export)
+        monkeypatch.setattr(
+            validate_module,
+            "validate_media",
+            lambda *args, **kwargs: validate_module.ValidationReport(
+                ok=True, checks=[], duration_s=40.0, width=1080, height=1920
+            ),
+        )
+        return calls
+
+    def _export(self, client: TestClient, job: Job) -> dict:
+        clip_id = client.get(f"/api/jobs/{job.id}/clips").json()[0]["id"]
+        response = client.post(
+            f"/api/clips/{clip_id}/export",
+            json={"ratio": "9:16", "style": "bold_pop"},
+        )
+        assert response.status_code == 201, response.text
+        return {"clip_id": clip_id, "response": response}
+
+    def test_the_clips_own_choice_is_used(
+        self, client: TestClient, job: Job, track: str, rendered: list
+    ) -> None:
+        from autoclip.music import preferences as music_preferences
+        from autoclip.music import store as music_store
+
+        clip_id = client.get(f"/api/jobs/{job.id}/clips").json()[0]["id"]
+        music_preferences.set_preference(music_preferences.SCOPE_CLIP, clip_id, track)
+
+        self._export(client, job)
+
+        expected = music_store.get_track(track).path
+        assert rendered[0]["settings"].music_track == expected
+
+    def test_the_sources_choice_is_used_when_the_clip_has_none(
+        self, client: TestClient, job: Job, source: Source, track: str, rendered: list
+    ) -> None:
+        from autoclip.music import preferences as music_preferences
+        from autoclip.music import store as music_store
+
+        music_preferences.set_preference(music_preferences.SCOPE_SOURCE, source.id, track)
+
+        self._export(client, job)
+
+        expected = music_store.get_track(track).path
+        assert rendered[0]["settings"].music_track == expected
+
+    def test_the_global_choice_is_used_when_nothing_more_specific_is_set(
+        self, client: TestClient, job: Job, track: str, rendered: list
+    ) -> None:
+        from autoclip.music import preferences as music_preferences
+        from autoclip.music import store as music_store
+
+        music_preferences.set_preference(music_preferences.SCOPE_GLOBAL, "", track)
+
+        self._export(client, job)
+
+        expected = music_store.get_track(track).path
+        assert rendered[0]["settings"].music_track == expected
+
+    def test_no_music_wins_over_the_global_export_setting(
+        self, client: TestClient, job: Job, rendered: list
+    ) -> None:
+        from autoclip.music import preferences as music_preferences
+
+        settings = config.load()
+        settings.export.music_track = "bed.wav"
+        config.save(settings)
+
+        clip_id = client.get(f"/api/jobs/{job.id}/clips").json()[0]["id"]
+        music_preferences.set_preference(
+            music_preferences.SCOPE_CLIP, clip_id, music_preferences.NO_MUSIC
+        )
+
+        self._export(client, job)
+
+        # "No music" is an answer, not a gap: the bed stays off even though
+        # the global export setting names a track.
+        assert rendered[0]["settings"].music_track == ""
+
+    def test_no_preference_anywhere_keeps_the_global_export_setting(
+        self, client: TestClient, job: Job, rendered: list
+    ) -> None:
+        settings = config.load()
+        settings.export.music_track = "bed.wav"
+        config.save(settings)
+
+        self._export(client, job)
+
+        # A gap falls back to the setting, so an install that configured a
+        # bed keeps it.
+        assert rendered[0]["settings"].music_track == "bed.wav"
+
+    def test_the_speech_timeline_is_passed_to_the_renderer(
+        self, client: TestClient, job: Job, rendered: list
+    ) -> None:
+        from autoclip.pipeline.runner import JobWorkspace
+        from autoclip.pipeline.speech_timeline import SpeechInterval, SpeechTimeline
+
+        SpeechTimeline(
+            intervals=[
+                SpeechInterval(start_ms=70_000, end_ms=75_000, source="vad"),
+                SpeechInterval(start_ms=10_000, end_ms=12_000, source="vad"),
+            ],
+            duration_s=180.0,
+        ).save(JobWorkspace(job.id).speech_timeline)
+
+        self._export(client, job)
+
+        intervals = rendered[0]["request"].speech_intervals
+        # The clip starts at 60s, so the timeline is re-based on the clip's
+        # own first frame — the renderer counts from there.
+        assert [(i.start_ms, i.end_ms) for i in intervals] == [(10_000, 15_000)]
+
+    def test_a_blocked_licence_is_a_clean_error(
+        self, client: TestClient, job: Job, track: str
+    ) -> None:
+        from autoclip.music import preferences as music_preferences
+        from autoclip.music import store as music_store
+        from autoclip.music.licensing import LicenseRecord, LicenseState
+
+        music_store.set_license(
+            LicenseRecord(track_id=track, state=LicenseState.UNKNOWN, source="test")
+        )
+        clip_id = client.get(f"/api/jobs/{job.id}/clips").json()[0]["id"]
+        music_preferences.set_preference(music_preferences.SCOPE_CLIP, clip_id, track)
+
+        response = client.post(
+            f"/api/clips/{clip_id}/export",
+            json={"ratio": "9:16", "style": "bold_pop"},
+        )
+
+        # The real renderer runs here, and its licence gate stops the export
+        # before any ffmpeg work. The user gets the reason, not a stack trace.
+        assert response.status_code == 409
+        assert "licence is unknown" in response.json()["detail"]
+
+
 class TestProviderStatus:
     def test_reports_every_provider(self, client: TestClient, fake_keyring) -> None:
         statuses = client.get("/api/providers/status").json()

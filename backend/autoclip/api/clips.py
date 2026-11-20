@@ -13,9 +13,11 @@ from .. import paths
 from ..config import load as load_settings
 from ..db import store
 from ..db.models import Export, new_id
+from ..music.licensing import LicenseBlocked
 from ..pipeline import captions as captions_module
 from ..pipeline import diagnostics
 from ..pipeline import export as export_module
+from ..pipeline import speech_timeline as speech_timeline_module
 from ..pipeline import validate as validate_module
 from ..pipeline.reframe.croppath import CropPath, centre_crop
 from ..pipeline.runner import JobWorkspace
@@ -282,6 +284,21 @@ async def export_clip(clip_id: str, payload: ExportRequestIn) -> ExportOut:
         / export_module.output_filename(clip.title or f"clip-{clip.rank}", payload.ratio)
     )
 
+    # The music and the ducking are the user's choices, not the pipeline's
+    # leftovers. A re-export from the review page has no creative stage to
+    # read them from, so they are resolved here — the same precedence the
+    # pipeline uses: the clip's own choice, then the source's, then the
+    # global one.
+    export_settings = await asyncio.to_thread(_export_settings_for, clip, source, settings.export)
+
+    # The shared speech timeline, sliced to this clip. It is what the music
+    # bed ducks against, so the bed and the webcam agree on when someone is
+    # speaking.
+    timeline = await asyncio.to_thread(_speech_timeline_for, workspace)
+    speech_intervals = (
+        timeline.relative_slice(clip.start_s, clip.end_s) if timeline is not None else []
+    )
+
     request = export_module.ExportRequest(
         source=Path(source.path),
         destination=destination,
@@ -291,6 +308,7 @@ async def export_clip(clip_id: str, payload: ExportRequestIn) -> ExportOut:
         words=words,
         style=style,
         ratio=payload.ratio,
+        speech_intervals=speech_intervals,
     )
 
     try:
@@ -298,8 +316,13 @@ async def export_clip(clip_id: str, payload: ExportRequestIn) -> ExportOut:
             export_module.export_clip,
             request,
             work_dir=workspace.captions_dir,
-            settings=settings.export,
+            settings=export_settings,
         )
+    except LicenseBlocked as exc:
+        # The track the user chose may not be used. The reason is the user's
+        # own words from the licensing rules, so it is passed on unchanged
+        # rather than replaced with something vaguer.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except export_module.ExportError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -532,6 +555,69 @@ def _load_transcript(job_id: str) -> Transcript:
     if not workspace.transcript.exists():
         raise HTTPException(status_code=404, detail="This job has no transcript yet.")
     return Transcript.load(workspace.transcript)
+
+
+def _speech_timeline_for(workspace: JobWorkspace) -> speech_timeline_module.SpeechTimeline | None:
+    """The job's shared speech timeline, or None if it has not been built.
+
+    The timeline is written once, after the transcript exists. A job that
+    has not got one — a restored workspace, or a job whose pipeline stopped
+    before the timeline stage — exports without it, and the ducking falls
+    back to keying on the audio itself.
+    """
+    path = workspace.speech_timeline
+    if not path.exists():
+        return None
+    try:
+        return speech_timeline_module.SpeechTimeline.load(path)
+    except (OSError, ValueError) as exc:
+        log.warning("The speech timeline for this job could not be read: %s", exc)
+        return None
+
+
+def _export_settings_for(clip, source, export_settings):
+    """The export settings for one clip, including the music it should use.
+
+    The pipeline's own export stage takes the music from the creative
+    stage's selection. A re-export from the review page has no creative
+    stage, so the user's own choice is resolved here instead, with the same
+    precedence the music-selection stage uses: the clip's choice, then the
+    source's, then the global one.
+
+    Two answers are distinguished from a gap:
+
+    * "no music at all" is a choice, and it is honoured — the bed is left
+      off even when the global export setting names a track;
+    * "no preference anywhere" is a gap, and the global export setting is
+      the fallback, so an install that configured a bed keeps it.
+    """
+    from ..music import preferences as music_preferences
+    from ..music import store as music_store
+
+    track_id, scope = music_preferences.resolve_preference(
+        clip_id=clip.id,
+        source_id=source.id,
+    )
+
+    if not track_id:
+        return export_settings
+
+    if track_id == music_preferences.NO_MUSIC:
+        return export_settings.model_copy(update={"music_track": ""})
+
+    track = music_store.get_track(track_id)
+    if track is None:
+        # The track was removed from the library between the choice and the
+        # export. The global setting is a better answer than a path that no
+        # longer exists.
+        log.warning(
+            "The track chosen for clip %s (%s scope) is no longer in the library.",
+            clip.id,
+            scope,
+        )
+        return export_settings
+
+    return export_settings.model_copy(update={"music_track": track.path})
 
 
 def _crop_path_for(workspace: JobWorkspace, clip, source, ratio: str) -> CropPath:
