@@ -222,7 +222,24 @@ class YouTubeSettings(BaseModel):
     redirect_uri: str = "http://localhost:8000/api/youtube/callback"
     #: Upload automatically whenever a clip finishes exporting.
     auto_upload: bool = False
-    privacy: Literal["private", "unlisted", "public"] = "public"
+    #: The privacy an upload asks for.
+    #:
+    #: The default is **private**. The original default was public, which
+    #: meant a fresh install published to the world the moment automatic
+    #: upload was switched on — a known issue that needed a safe product
+    #: decision rather than a warning nobody reads. A value the owner has
+    #: already chosen is never changed silently: what is stored stays.
+    privacy: Literal["private", "unlisted", "public"] = "private"
+    #: The audience declaration for this account's uploads.
+    #:
+    #: Three states, and the empty one is not the same as "no":
+    #:
+    #:   ""       — not decided yet. An upload is refused until the owner
+    #:              answers, because this is a legal declaration about who
+    #:              the video is made for and AutoClip will not guess it.
+    #:   "false"  — not made for kids.
+    #:   "true"   — made for kids.
+    made_for_kids: Literal["", "false", "true"] = ""
     #: YouTube category id. 24 = Entertainment, 20 = Gaming.
     category_id: str = "24"
     #: Filled by the OAuth callback so the header can name the channel

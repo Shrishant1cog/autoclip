@@ -336,6 +336,26 @@ function UploadBadge({
   onRetry: () => void
 }) {
   if (upload.status === 'done' && upload.watch_url) {
+    // YouTube can force a video private — an un-audited API project
+    // cannot publish a public one. Saying "on YouTube" then would be a
+    // lie: the video is there and nobody can see it.
+    if (upload.published_but_not_as_asked) {
+      return (
+        <a
+          href={upload.watch_url}
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs text-signal-warn underline underline-offset-4"
+          title={
+            upload.actual_privacy === 'private'
+              ? `Uploaded, but YouTube made it private. It was asked to be ${upload.requested_privacy}.`
+              : `Uploaded as ${upload.actual_privacy}. It was asked to be ${upload.requested_privacy}.`
+          }
+        >
+          uploaded, {upload.actual_privacy}
+        </a>
+      )
+    }
     return (
       <a
         href={upload.watch_url}
@@ -344,7 +364,7 @@ function UploadBadge({
         className="text-xs text-signal-good underline underline-offset-4"
         title={upload.title}
       >
-        on YouTube
+        on YouTube · {upload.actual_privacy || upload.privacy}
       </a>
     )
   }

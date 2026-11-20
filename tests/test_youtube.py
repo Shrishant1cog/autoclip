@@ -213,6 +213,7 @@ def test_upload_video_posts_metadata_then_the_file(
         path=file,
         metadata=metadata.ClipMetadata(title="Title", description="Desc", tags=["a"]),
         privacy="public",
+        made_for_kids=False,
         language="en",
     )
 
@@ -222,7 +223,13 @@ def test_upload_video_posts_metadata_then_the_file(
 
 
 async def test_process_upload_reuses_generated_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
-    row = YouTubeUpload(id=new_id(), export_id="export-1", clip_id="clip-1", privacy="public")
+    row = YouTubeUpload(
+        id=new_id(),
+        export_id="export-1",
+        clip_id="clip-1",
+        privacy="public",
+        made_for_kids="false",
+    )
     export = SimpleNamespace(id="export-1", clip_id="clip-1", path="clip.mp4")
     clip = SimpleNamespace(
         job_id="job-1",

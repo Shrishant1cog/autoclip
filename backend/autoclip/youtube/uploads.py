@@ -26,6 +26,7 @@ from ..providers import LLMProvider, build_provider
 from ..providers.base import looks_like_auth_failure
 from . import duplicates, oauth, uploader
 from . import metadata as metadata_module
+from . import policy as policy_module
 
 log = logging.getLogger(__name__)
 
@@ -123,8 +124,12 @@ def enqueue_export_all(
 def retry_upload(upload_id: str, settings: config.Settings | None = None) -> YouTubeUpload | None:
     """Put a failed upload back in the queue.
 
-    A channel fan-out row keeps its own channel's privacy; only the legacy
-    default-channel row re-reads the global setting.
+    The row keeps **its own** privacy. It used to re-read the current
+    setting or the channel's current privacy and write that over the
+    row, which meant a retry could publish a video under a different
+    privacy than the one the owner was shown when the upload was
+    queued. A privacy change is a decision, and a decision is made in
+    the UI rather than by a retry.
     """
     settings = settings or config.load()
     upload = store.get_upload(upload_id)
@@ -132,17 +137,9 @@ def retry_upload(upload_id: str, settings: config.Settings | None = None) -> You
         return None
     if upload.status == "done":
         return upload
-    privacy = settings.youtube.privacy
-    if upload.channel_row_id:
-        from . import accounts as accounts_store
-
-        channel = accounts_store.get_channel(upload.channel_row_id)
-        if channel is not None:
-            privacy = channel["privacy"]
     store.update_upload(
         upload.id,
         status="pending",
-        privacy=privacy,
         clear_error=True,
     )
     return store.get_upload(upload.id)
@@ -153,6 +150,12 @@ async def process_upload(upload: YouTubeUpload, settings: config.Settings | None
 
     Raises :class:`uploader.YouTubeError` (or ``oauth.OAuthError``) for the
     worker to record against the row.
+
+    The publishing policy is resolved before the network call and written
+    onto the row, so the record of what was intended exists even if the
+    transfer fails halfway. After the upload, YouTube is asked what it
+    actually did — a video that was asked to be public but came back
+    private is reported as private, not as published.
     """
     settings = settings or config.load()
     export = store.get_export(upload.export_id)
@@ -180,9 +183,6 @@ async def process_upload(upload: YouTubeUpload, settings: config.Settings | None
     # Phase 10: the row already names its channel (fan-out created it), so the
     # worker publishes to exactly that destination instead of re-routing.
     # Resolved first because metadata generation uses the channel's note.
-    privacy = upload.privacy or settings.youtube.privacy
-    category_id = settings.youtube.category_id
-    account_id: str | None = None
     channel: dict | None = None
     if upload.channel_row_id:
         from ..youtube import accounts as accounts_store
@@ -193,9 +193,6 @@ async def process_upload(upload: YouTubeUpload, settings: config.Settings | None
                 "The destination channel for this upload no longer exists. "
                 "Reconnect the channel or delete the upload."
             )
-        privacy = upload.privacy or channel["privacy"]
-        category_id = channel["category_id"]
-        account_id = channel["account_id"]
     else:
         # Legacy path: no channel profile, fall back to rule routing.
         try:
@@ -205,10 +202,19 @@ async def process_upload(upload: YouTubeUpload, settings: config.Settings | None
         except Exception:  # noqa: BLE001 - routing must never block publishing
             log.warning("Channel routing failed; using the default destination.", exc_info=True)
             channel = None
-        if channel is not None:
-            privacy = upload.privacy or channel["privacy"]
-            category_id = channel["category_id"]
-            account_id = channel["account_id"]
+
+    # The policy is the owner's decision, not AutoClip's: an unanswered
+    # audience declaration stops the upload here rather than being guessed.
+    policy = policy_module.resolve(
+        channel,
+        settings,
+        audience_override=upload.made_for_kids,
+    )
+    # The row's own privacy wins over the channel's current one: the owner
+    # was shown this privacy when the upload was queued.
+    privacy = upload.privacy or policy.privacy
+    category_id = policy.category_id
+    account_id: str | None = policy.account_id or None
 
     words, language = clip_words(clip)
     generated = await _metadata(
@@ -227,16 +233,43 @@ async def process_upload(upload: YouTubeUpload, settings: config.Settings | None
         if suffix and not generated.title.endswith(suffix):
             generated.title = f"{generated.title} {suffix}".strip()
 
+    # Record the decision before the network call, so a transfer that dies
+    # halfway still leaves the record of what was asked for.
+    store.update_upload(
+        upload.id,
+        privacy=privacy,
+        made_for_kids=policy.made_for_kids_state,
+        requested_privacy=privacy,
+        destination_channel_id=policy.destination_channel_id,
+    )
+
     video_id = await asyncio.to_thread(
         uploader.upload_video,
         settings,
         path=path,
         metadata=generated,
         privacy=privacy,
+        made_for_kids=policy.made_for_kids,
         category_id=category_id,
         language=language,
         account_id=account_id,
     )
+
+    # Ask YouTube what it actually did. The upload has already happened, so
+    # a failure to read it back is not a failure of the upload — it just
+    # means the actual privacy is unknown.
+    outcome = await asyncio.to_thread(
+        uploader.read_back,
+        settings,
+        video_id=video_id,
+        account_id=account_id,
+    )
+    if outcome.found:
+        store.update_upload(
+            upload.id,
+            actual_privacy=outcome.actual_privacy,
+            destination_channel_id=outcome.channel_id or policy.destination_channel_id,
+        )
 
     # The video is already published at this point, so a thumbnail problem is
     # logged and swallowed: a missing thumbnail must never undo a good upload.

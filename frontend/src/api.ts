@@ -53,6 +53,19 @@ export interface UploadRecord {
   watch_url: string
   created_at: string
   updated_at: string
+  /** The audience declaration that was sent: 'false' or 'true'. */
+  made_for_kids: string
+  /** The privacy that was asked for. */
+  requested_privacy: string
+  /** The privacy YouTube reports after the upload. */
+  actual_privacy: string
+  /** The YouTube channel id the video went to. */
+  destination_channel_id: string
+  /**
+   * True when the video is on YouTube but is not visible the way it was
+   * asked to be — YouTube forced it private, for instance.
+   */
+  published_but_not_as_asked: boolean
 }
 
 export interface ExportRecord {
@@ -275,6 +288,24 @@ export interface YouTubeStatus {
   channel_title: string
   channel_url: string
   connected_at: string
+  /** The audience declaration: '' (not decided), 'false' or 'true'. */
+  made_for_kids: string
+}
+
+/** What the publishing policy would do for a destination. */
+export interface YouTubePolicy {
+  privacy: string
+  made_for_kids: boolean
+  /** '' (not decided), 'false' or 'true'. */
+  made_for_kids_state: string
+  audience_decided: boolean
+  category_id: string
+  account_id: string
+  channel_row_id: string
+  destination_channel_id: string
+  destination_title: string
+  audience_options: { value: string; label: string }[]
+  privacy_options: string[]
 }
 
 export interface SystemStatus {
@@ -979,6 +1010,12 @@ export interface YouTubeChannel {
   category_id: string
   auto_upload: boolean
   title_suffix: string
+  /**
+   * The audience declaration: '' (not decided), 'false' or 'true'.
+   * An upload is refused while it is '' — it is a legal declaration,
+   * not a setting AutoClip can choose for the owner.
+   */
+  made_for_kids: string
   created_at: string
   updated_at: string
 }
@@ -1130,6 +1167,32 @@ export const api = {
     }),
   retryUpload: (uploadId: string) =>
     request<UploadRecord>(`/api/youtube/uploads/${uploadId}/retry`, { method: 'POST' }),
+  /** One upload, with the policy it was — and is — publishing under. */
+  getUpload: (uploadId: string) => request<UploadRecord>(`/api/youtube/uploads/${uploadId}`),
+  /** Change what a queued upload will say and how it will be seen. */
+  editUpload: (
+    uploadId: string,
+    patch: {
+      title?: string
+      description?: string
+      tags?: string[]
+      privacy?: 'private' | 'unlisted' | 'public'
+      made_for_kids?: '' | 'false' | 'true'
+    },
+  ) =>
+    request<UploadRecord>(`/api/youtube/uploads/${uploadId}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+  /** What the publishing policy would do for a destination. */
+  youtubePolicy: (channelRowId = '') =>
+    request<YouTubePolicy>(`/api/youtube/policy?channel_row_id=${encodeURIComponent(channelRowId)}`),
+  /** Record the audience declaration for the global setting. */
+  setYouTubeAudience: (madeForKids: '' | 'false' | 'true') =>
+    request<YouTubeStatus>('/api/youtube/audience', {
+      method: 'POST',
+      body: JSON.stringify({ made_for_kids: madeForKids }),
+    }),
 
   getSettings: () => request<Settings>('/api/settings'),
   putSettings: (patch: Partial<Settings>) =>

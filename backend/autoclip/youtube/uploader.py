@@ -8,7 +8,9 @@ single PUT of the rendered file to that URL. httpx streams the file, so an
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -47,15 +49,22 @@ def upload_video(
     path: Path,
     metadata: ClipMetadata,
     privacy: str,
+    made_for_kids: bool,
     category_id: str = "24",
     language: str = "",
     account_id: str | None = None,
 ) -> str:
-    """Upload one file and return its YouTube video id."""
+    """Upload one file and return its YouTube video id.
+
+    ``made_for_kids`` is required, and it is the owner's answer rather
+    than a default. It used to be hard-coded to ``False``, which meant
+    AutoClip made a legal declaration on the owner's behalf. The
+    declaration is resolved by :mod:`autoclip.youtube.policy`, which
+    refuses to resolve one that has not been answered.
+    """
     if not path.is_file():
         raise YouTubeError(f"The exported file is missing: {path}")
 
-    settings.youtube.privacy = privacy  # type: ignore[assignment]
     token = oauth.access_token(settings, account_id=account_id)
 
     snippet: dict[str, object] = {
@@ -69,9 +78,10 @@ def upload_video(
 
     body = {
         "snippet": snippet,
-        # Naming a game or other third-party content does not make the video
-        # "for kids"; the uploader is for the user's own channel content.
-        "status": {"privacyStatus": privacy, "selfDeclaredMadeForKids": False},
+        "status": {
+            "privacyStatus": privacy,
+            "selfDeclaredMadeForKids": made_for_kids,
+        },
     }
 
     headers = {
@@ -144,6 +154,104 @@ def upload_video(
     gateway.record(transfer, "ok")
     log.info("Uploaded %s to YouTube as %s.", path.name, video_id)
     return video_id
+
+
+@dataclass(frozen=True)
+class UploadOutcome:
+    """What YouTube says about a video after it has been uploaded.
+
+    This is the difference between *asked for* and *got*. YouTube can
+    force a video private — an un-audited API project cannot publish a
+    public video — and a row that claims to be public when YouTube made
+    it private is a lie that the UI would repeat.
+    """
+
+    #: The privacy YouTube reports.
+    actual_privacy: str = ""
+    #: The channel YouTube says the video is on.
+    channel_id: str = ""
+    #: The video's title, as YouTube has it.
+    title: str = ""
+    #: True when the privacy came back as something other than "private".
+    found: bool = False
+
+    def is_public(self) -> bool:
+        return self.actual_privacy == "public"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "actual_privacy": self.actual_privacy,
+            "channel_id": self.channel_id,
+            "title": self.title,
+            "found": self.found,
+        }
+
+
+#: The read-back asks for the parts that answer "where did it go and how
+#: can people see it".
+_VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
+
+
+def read_back(
+    settings: config.Settings,
+    *,
+    video_id: str,
+    account_id: str | None = None,
+) -> UploadOutcome:
+    """Ask YouTube what it actually did with the upload.
+
+    Two things are checked: the privacy the video ended up with, and the
+    channel it is on. A video that was asked to be public but came back
+    private is reported as private, and a video that landed on a
+    different channel is reported as such. Nothing here fails the upload
+    — the upload did happen — so a network error returns an outcome that
+    says "not found" rather than raising.
+    """
+    if not video_id:
+        return UploadOutcome()
+
+    try:
+        token = oauth.access_token(settings, account_id=account_id)
+    except oauth.OAuthError:
+        log.warning("Could not read back video %s: no access token.", video_id)
+        return UploadOutcome()
+
+    try:
+        response = httpx.get(
+            _VIDEOS_URL,
+            params={"part": "status,snippet", "id": video_id},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30.0,
+        )
+    except httpx.HTTPError as exc:
+        log.warning("Could not read back video %s: %s", video_id, exc)
+        return UploadOutcome()
+
+    if response.status_code >= 400:
+        log.warning("Could not read back video %s: HTTP %s", video_id, response.status_code)
+        return UploadOutcome()
+
+    try:
+        payload = response.json()
+    except ValueError:
+        return UploadOutcome()
+    if not isinstance(payload, dict):
+        return UploadOutcome()
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        return UploadOutcome()
+
+    item = items[0] if isinstance(items[0], dict) else {}
+    raw_status = item.get("status")
+    status: dict[str, Any] = raw_status if isinstance(raw_status, dict) else {}
+    raw_snippet = item.get("snippet")
+    snippet: dict[str, Any] = raw_snippet if isinstance(raw_snippet, dict) else {}
+    return UploadOutcome(
+        actual_privacy=str(status.get("privacyStatus", "")),
+        channel_id=str(snippet.get("channelId", "")),
+        title=str(snippet.get("title", "")),
+        found=True,
+    )
 
 
 def set_thumbnail(

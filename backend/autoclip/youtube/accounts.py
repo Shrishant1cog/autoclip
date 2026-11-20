@@ -189,7 +189,8 @@ def default_account() -> dict[str, Any] | None:
 def list_channels(account_id: str | None = None) -> list[dict[str, Any]]:
     query = (
         "SELECT id, account_id, channel_id, title, url, is_default, privacy,"
-        " category_id, auto_upload, title_suffix, created_at, updated_at FROM youtube_channels"
+        " category_id, auto_upload, title_suffix, created_at, updated_at, made_for_kids"
+        " FROM youtube_channels"
     )
     params: tuple[Any, ...] = ()
     if account_id:
@@ -205,7 +206,7 @@ def get_channel(channel_row_id: str) -> dict[str, Any] | None:
     with connection() as conn:
         row = conn.execute(
             "SELECT id, account_id, channel_id, title, url, is_default, privacy,"
-            " category_id, auto_upload, title_suffix, created_at, updated_at"
+            " category_id, auto_upload, title_suffix, created_at, updated_at, made_for_kids"
             " FROM youtube_channels WHERE id = ?",
             (channel_row_id,),
         ).fetchone()
@@ -226,6 +227,9 @@ def _channel_row(r: tuple[Any, ...]) -> dict[str, Any]:
         "title_suffix": r[9],
         "created_at": r[10],
         "updated_at": r[11],
+        #: The audience declaration for this channel: '' (not decided),
+        #: 'false' or 'true'.
+        "made_for_kids": r[12] if len(r) > 12 else "",
     }
 
 
@@ -234,12 +238,20 @@ def add_channel(
     channel: dict[str, str],
     *,
     is_default: bool | None = None,
-    privacy: str = "public",
+    privacy: str = "private",
     category_id: str = "24",
     auto_upload: bool = False,
     title_suffix: str = "",
+    made_for_kids: str = "",
 ) -> dict[str, Any]:
-    """Register a channel under an account. First channel becomes default."""
+    """Register a channel under an account. First channel becomes default.
+
+    A new channel starts **private**. The original default was public,
+    which meant a freshly connected channel could publish to the world
+    the moment automatic upload was switched on. The audience declaration
+    starts unanswered: it is a legal declaration, and AutoClip does not
+    make it on the owner's behalf.
+    """
     row_id = new_id()
     if is_default is None:
         is_default = not list_channels(account_id)
@@ -251,8 +263,9 @@ def add_channel(
             )
         conn.execute(
             "INSERT INTO youtube_channels (id, account_id, channel_id, title, url,"
-            " is_default, privacy, category_id, auto_upload, title_suffix, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " is_default, privacy, category_id, auto_upload, title_suffix, created_at,"
+            " updated_at, made_for_kids)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 row_id,
                 account_id,
@@ -266,6 +279,7 @@ def add_channel(
                 title_suffix,
                 now,
                 now,
+                made_for_kids,
             ),
         )
     result = get_channel(row_id)
@@ -280,6 +294,7 @@ def upsert_channel(
     privacy: str = "private",
     category_id: str = "24",
     auto_upload: bool = False,
+    made_for_kids: str = "",
 ) -> dict[str, Any]:
     """Register the channel Google just signed in to, or refresh its record.
 
@@ -321,11 +336,20 @@ def upsert_channel(
         privacy=privacy,
         category_id=category_id,
         auto_upload=auto_upload,
+        made_for_kids=made_for_kids,
     )
 
 
 def update_channel(channel_row_id: str, **fields: Any) -> dict[str, Any] | None:
-    allowed = {"privacy", "category_id", "auto_upload", "is_default", "title", "title_suffix"}
+    allowed = {
+        "privacy",
+        "category_id",
+        "auto_upload",
+        "is_default",
+        "title",
+        "title_suffix",
+        "made_for_kids",
+    }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return get_channel(channel_row_id)
@@ -410,6 +434,7 @@ def ensure_legacy_migrated(settings: config.Settings | None = None) -> None:
         privacy=settings.youtube.privacy,
         category_id=settings.youtube.category_id,
         auto_upload=settings.youtube.auto_upload,
+        made_for_kids=settings.youtube.made_for_kids,
     )
     log.info("Migrated the legacy YouTube connection to multi-account storage.")
 

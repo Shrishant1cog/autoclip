@@ -257,6 +257,7 @@ def complete_auth(code: str, state: str, settings: config.Settings | None = None
         privacy=settings.youtube.privacy,
         category_id=settings.youtube.category_id,
         auto_upload=settings.youtube.auto_upload,
+        made_for_kids=settings.youtube.made_for_kids,
     )
     accounts_store.update_account(account_id, connected_at=utcnow())
 

@@ -119,13 +119,26 @@ def clip_exported(
 
 
 def upload_done(
-    upload_id: str, title: str, video_id: str, channel_title: str = ""
+    upload_id: str,
+    title: str,
+    video_id: str,
+    channel_title: str = "",
+    privacy_note: str = "",
 ) -> Notification | None:
-    """A clip was published to YouTube."""
+    """A clip was published to YouTube.
+
+    ``privacy_note`` says when YouTube did something other than what was
+    asked for — most often forcing a public video private because the
+    API project has not been audited. The notification then says the
+    video was uploaded but is not visible, rather than claiming it was
+    published.
+    """
     where = f" to {channel_title}" if channel_title else ""
     body = f"Published{where}."
     if video_id:
         body += f" https://youtu.be/{video_id}"
+    if privacy_note:
+        body += f" {privacy_note}"
     return notify(
         "upload_done",
         severity="success",

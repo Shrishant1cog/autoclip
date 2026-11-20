@@ -11,10 +11,12 @@ from fastapi.responses import HTMLResponse
 
 from .. import config
 from ..db import store
-from ..youtube import oauth, uploads
+from ..youtube import oauth, policy, uploads
 from ..youtube.queue import upload_queue
 from .schemas import (
+    UploadEditIn,
     UploadOut,
+    YouTubeAudienceIn,
     YouTubeAutoIn,
     YouTubeConnectIn,
     YouTubeConnectOut,
@@ -36,6 +38,7 @@ def _status(settings: config.Settings) -> YouTubeStatusOut:
         client_id=settings.youtube.client_id,
         redirect_uri=settings.youtube.redirect_uri,
         privacy=settings.youtube.privacy,
+        made_for_kids=settings.youtube.made_for_kids,
         channel_id=settings.youtube.channel_id,
         channel_title=settings.youtube.channel_title,
         channel_url=settings.youtube.channel_url,
@@ -125,9 +128,79 @@ async def set_privacy(payload: YouTubePrivacyIn) -> YouTubeStatusOut:
     return _status(settings)
 
 
+@router.post("/audience", response_model=YouTubeStatusOut)
+async def set_audience(payload: YouTubeAudienceIn) -> YouTubeStatusOut:
+    """Record the audience declaration for the global setting.
+
+    Three states, and the empty one is not the same as "no": it means
+    the owner has not decided, and an upload is refused until they do.
+    """
+    settings = config.load()
+    settings.youtube.made_for_kids = payload.made_for_kids
+    config.save(settings)
+    return _status(settings)
+
+
 @router.get("/uploads", response_model=list[UploadOut])
 def list_uploads(clip_id: str = Query(min_length=1)) -> list[UploadOut]:
     return [UploadOut.of(u) for u in store.list_uploads_for_clip(clip_id)]
+
+
+@router.get("/uploads/{upload_id}", response_model=UploadOut)
+def get_upload(upload_id: str) -> UploadOut:
+    """One upload, with the policy it was — and is — publishing under."""
+    upload = store.get_upload(upload_id)
+    if upload is None:
+        raise HTTPException(status_code=404, detail="Upload not found.")
+    return UploadOut.of(upload)
+
+
+@router.put("/uploads/{upload_id}", response_model=UploadOut)
+async def edit_upload(upload_id: str, payload: UploadEditIn) -> UploadOut:
+    """Change what a queued upload will say and how it will be seen.
+
+    This is the owner's chance to correct the metadata and the policy
+    *before* the file leaves the machine. An upload that has already run
+    cannot be edited here — changing what YouTube published is a
+    different thing, and pretending otherwise would be a lie.
+    """
+    upload = store.get_upload(upload_id)
+    if upload is None:
+        raise HTTPException(status_code=404, detail="Upload not found.")
+    if upload.status == "done":
+        raise HTTPException(
+            status_code=409,
+            detail="This upload has already run. Change it on YouTube instead.",
+        )
+
+    fields: dict[str, object] = {}
+    if payload.title is not None:
+        fields["title"] = payload.title
+    if payload.description is not None:
+        fields["description"] = payload.description
+    if payload.tags is not None:
+        fields["tags"] = payload.tags
+    if payload.privacy is not None:
+        fields["privacy"] = payload.privacy
+    if payload.made_for_kids is not None:
+        fields["made_for_kids"] = payload.made_for_kids
+
+    if fields:
+        await asyncio.to_thread(store.update_upload, upload_id, **fields)  # type: ignore[arg-type]
+    updated = store.get_upload(upload_id)
+    assert updated is not None
+    return UploadOut.of(updated)
+
+
+@router.get("/policy")
+def get_policy(channel_row_id: str = Query(default="")) -> dict:
+    """Describe the publishing policy for a destination.
+
+    Unlike the other endpoints this one never refuses: it reports what
+    *would* happen, including the audience declaration being unanswered,
+    so the page can say what is still missing.
+    """
+    return policy.describe(channel_row_id)
 
 
 @router.post("/uploads/{upload_id}/retry", response_model=UploadOut)

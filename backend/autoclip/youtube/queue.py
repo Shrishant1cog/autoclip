@@ -131,13 +131,34 @@ def _notify(upload, outcome: str, detail: str = "") -> None:
 
         title = _upload_title(upload)
         if outcome == "done":
-            events.upload_done(upload.id, title, detail, _channel_title(upload))
+            events.upload_done(
+                upload.id, title, detail, _channel_title(upload), _privacy_note(upload)
+            )
         elif outcome == "skipped":
             events.upload_skipped(upload.id, title, detail)
         else:
             events.upload_failed(upload.id, title, detail)
     except Exception:  # noqa: BLE001
         log.debug("Could not record the upload notification.", exc_info=True)
+
+
+def _privacy_note(upload) -> str:
+    """What YouTube actually did, when it is not what was asked for.
+
+    An un-audited Google Cloud project cannot publish a public video, so
+    YouTube quietly forces it private. Saying "Published" in that case
+    would be a lie: nobody can see the video.
+    """
+    fresh = store.get_upload(upload.id)
+    if fresh is None:
+        return ""
+    actual = fresh.actual_privacy
+    asked = fresh.requested_privacy or fresh.privacy
+    if not actual or not asked or actual == asked:
+        return ""
+    if actual == "private":
+        return "It was uploaded, but YouTube made it private."
+    return f"It was uploaded, but YouTube made it {actual}."
 
 
 def _upload_title(upload) -> str:

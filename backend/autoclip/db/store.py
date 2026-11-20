@@ -486,8 +486,9 @@ def create_upload(upload: YouTubeUpload) -> YouTubeUpload:
             """
             INSERT INTO youtube_uploads (
                 id, export_id, clip_id, channel_row_id, status, video_id, title,
-                description, tags_json, privacy, error, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                description, tags_json, privacy, error, created_at, updated_at,
+                made_for_kids, requested_privacy, actual_privacy, destination_channel_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 upload.id,
@@ -503,6 +504,10 @@ def create_upload(upload: YouTubeUpload) -> YouTubeUpload:
                 upload.error,
                 upload.created_at,
                 upload.updated_at,
+                upload.made_for_kids,
+                upload.requested_privacy,
+                upload.actual_privacy,
+                upload.destination_channel_id,
             ),
         )
     return upload
@@ -571,6 +576,10 @@ def update_upload(
     privacy: str | None = None,
     error: str | None = None,
     clear_error: bool = False,
+    made_for_kids: str | None = None,
+    requested_privacy: str | None = None,
+    actual_privacy: str | None = None,
+    destination_channel_id: str | None = None,
 ) -> None:
     fields: dict[str, Any] = {"updated_at": utcnow()}
     for name, value in (
@@ -580,6 +589,10 @@ def update_upload(
         ("description", description),
         ("privacy", privacy),
         ("error", error),
+        ("made_for_kids", made_for_kids),
+        ("requested_privacy", requested_privacy),
+        ("actual_privacy", actual_privacy),
+        ("destination_channel_id", destination_channel_id),
     ):
         if value is not None:
             fields[name] = value

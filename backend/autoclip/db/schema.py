@@ -889,6 +889,63 @@ def _migration_v22(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE google_accounts ADD COLUMN {column} {definition}")
 
 
+# --- v23: the publishing policy ----------------------------------------------
+
+_V23 = """
+-- The publishing policy: who the video is for, where it goes, and what
+-- YouTube actually did.
+--
+-- 'made_for_kids' is a legal declaration with three states, and the
+-- empty one is not the same as "no":
+--
+--   ''       -- not decided. An upload is refused until the owner
+--               answers. AutoClip does not guess a legal declaration.
+--   'false'  -- not made for kids.
+--   'true'   -- made for kids.
+--
+-- The channel's own declaration rides on the channel row, so every
+-- upload to that channel inherits the owner's answer.
+--
+-- On the upload row:
+--
+--   requested_privacy      -- what AutoClip asked YouTube for.
+--   actual_privacy         -- what YouTube says it is, read back after
+--                              the upload. YouTube can force a video
+--                              private (an un-audited API project cannot
+--                              publish publicly), and a row that claims
+--                              to be public when YouTube made it private
+--                              is a lie.
+--   destination_channel_id -- the YouTube channel the upload went to,
+--                              read back from YouTube. It is compared
+--                              against the channel that was chosen.
+--   made_for_kids          -- the declaration that was sent.
+--
+-- The columns are added by the migration function, because SQLite has no
+-- 'ADD COLUMN IF NOT EXISTS' and a half-applied migration must not stop
+-- the database from opening.
+"""
+
+
+def _migration_v23(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V23)
+    channel_columns = {row["name"] for row in conn.execute("PRAGMA table_info(youtube_channels)")}
+    if "made_for_kids" not in channel_columns:
+        conn.execute(
+            "ALTER TABLE youtube_channels ADD COLUMN made_for_kids TEXT NOT NULL DEFAULT ''"
+        )
+    upload_columns = {row["name"] for row in conn.execute("PRAGMA table_info(youtube_uploads)")}
+    for column in (
+        "made_for_kids",
+        "requested_privacy",
+        "actual_privacy",
+        "destination_channel_id",
+    ):
+        if column not in upload_columns:
+            conn.execute(
+                f"ALTER TABLE youtube_uploads ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
+            )
+
+
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v1,
     _migration_v2,
@@ -912,6 +969,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v20,
     _migration_v21,
     _migration_v22,
+    _migration_v23,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)

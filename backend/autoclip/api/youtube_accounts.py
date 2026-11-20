@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -27,11 +28,15 @@ class AccountIn(BaseModel):
 
 
 class ChannelIn(BaseModel):
-    privacy: str = "public"
+    privacy: str = "private"
     category_id: str = "24"
     auto_upload: bool = False
     is_default: bool | None = None
     title_suffix: str = ""
+    #: The audience declaration for this channel: '', 'false' or 'true'.
+    #: Empty means it has not been answered, and an upload is refused
+    #: until it is.
+    made_for_kids: Literal["", "false", "true"] = ""
 
 
 class ChannelUpdateIn(BaseModel):
@@ -41,6 +46,9 @@ class ChannelUpdateIn(BaseModel):
     is_default: bool | None = None
     title: str | None = None
     title_suffix: str | None = None
+    #: The audience declaration. Three states, and the empty one is not
+    #: the same as "no" — it means "not decided".
+    made_for_kids: Literal["", "false", "true"] | None = None
 
 
 @router.get("")
@@ -140,6 +148,7 @@ async def add_channel(account_id: str, payload: ChannelIn) -> dict:
         category_id=payload.category_id,
         auto_upload=payload.auto_upload,
         title_suffix=payload.title_suffix,
+        made_for_kids=payload.made_for_kids,
     )
 
 

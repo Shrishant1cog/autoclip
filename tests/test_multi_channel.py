@@ -55,11 +55,13 @@ def _account_with_channels(*, suffix: str = "") -> tuple[dict, dict, dict]:
         {"id": "UC_primary", "title": "Primary", "url": ""},
         auto_upload=True,
         title_suffix=suffix,
+        made_for_kids="false",
     )
     extra = accounts_store.add_channel(
         account["id"],
         {"id": "UC_extra", "title": "Extra", "url": ""},
         auto_upload=True,
+        made_for_kids="false",
     )
     return account, primary, extra
 
@@ -264,7 +266,15 @@ def test_legacy_row_and_its_channel_profile_are_one_destination(
 # --------------------------------------------------------------------------
 
 
-def test_retry_keeps_channel_privacy(initialised_db: int) -> None:
+def test_retry_keeps_the_rows_own_privacy(initialised_db: int) -> None:
+    """A retry must not re-read the channel's current privacy.
+
+    The row records the privacy the owner was shown when the upload was
+    queued. A retry used to overwrite it with the channel's *current*
+    privacy, which meant a clip could go out under a privacy nobody
+    chose for it — a silent change, which is exactly what the publishing
+    policy forbids.
+    """
     _, _, clip = _seed_clip()
     account, channel, _ = _account_with_channels()
     export = Export(id=new_id(), clip_id=clip.id, path="C:/out.mp4")
@@ -277,15 +287,17 @@ def test_retry_keeps_channel_privacy(initialised_db: int) -> None:
             channel_row_id=channel["id"],
             status="failed",
             error="boom",
+            privacy="unlisted",
         )
     )
-    accounts_store.update_channel(channel["id"], privacy="unlisted")
+    accounts_store.update_channel(channel["id"], privacy="public")
 
     settings = _settings()
     settings.youtube.privacy = "public"
     retried = uploads.retry_upload(row.id, settings)
 
     assert retried is not None and retried.status == "pending"
+    # The row's own privacy survives the retry.
     assert retried.privacy == "unlisted"
 
 

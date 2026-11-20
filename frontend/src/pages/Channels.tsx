@@ -21,6 +21,17 @@ const PRIVACY_OPTIONS = [
   { value: 'private', label: 'Private' },
 ]
 
+/**
+ * The audience declaration. Three states, and "not decided" is not the
+ * same as "no" — it means nobody has answered yet, and an upload is
+ * refused until they do.
+ */
+const AUDIENCE_OPTIONS = [
+  { value: '', label: 'Not decided' },
+  { value: 'false', label: 'No — not made for kids' },
+  { value: 'true', label: 'Yes — made for kids' },
+]
+
 export function Channels() {
   const [accounts, setAccounts] = useState<YouTubeAccount[]>([])
   const [loading, setLoading] = useState(true)
@@ -370,6 +381,22 @@ function ChannelRow({
         </label>
 
         <label className="block">
+          <span className="eyebrow">Audience</span>
+          <select
+            className="field mt-1 text-sm"
+            value={channel.made_for_kids}
+            onChange={(e) => void patch({ made_for_kids: e.target.value })}
+            disabled={working}
+          >
+            {AUDIENCE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value} className="bg-ink-900">
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="block">
           <span className="eyebrow">Title suffix</span>
           <input
             className="field mt-1 w-40 text-sm"
@@ -400,6 +427,14 @@ function ChannelRow({
           </button>
         )}
       </div>
+
+      {channel.made_for_kids === '' && (
+        <p className="mt-3 max-w-prose text-xs leading-relaxed text-signal-warn">
+          The audience declaration has not been answered. YouTube asks whether a video is
+          made for kids, and that is a legal declaration rather than a setting AutoClip can
+          choose for you — so nothing is published to this channel until you answer it.
+        </p>
+      )}
     </article>
   )
 }

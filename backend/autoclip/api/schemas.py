@@ -131,9 +131,24 @@ class UploadOut(BaseModel):
     watch_url: str = ""
     created_at: str
     updated_at: str
+    #: The audience declaration that was sent: 'false' or 'true'. Empty
+    #: before the upload has run.
+    made_for_kids: str = ""
+    #: The privacy that was asked for.
+    requested_privacy: str = ""
+    #: The privacy YouTube reports after the upload. Empty when it has
+    #: not been read back.
+    actual_privacy: str = ""
+    #: The YouTube channel id the video went to.
+    destination_channel_id: str = ""
+    #: True when the upload is on YouTube but is not visible the way it
+    #: was asked to be — YouTube forced it private, for instance.
+    published_but_not_as_asked: bool = False
 
     @classmethod
     def of(cls, upload: models.YouTubeUpload) -> UploadOut:
+        actual = upload.actual_privacy
+        asked = upload.requested_privacy or upload.privacy
         return cls(
             id=upload.id,
             export_id=upload.export_id,
@@ -149,6 +164,11 @@ class UploadOut(BaseModel):
             watch_url=(f"https://youtu.be/{upload.video_id}" if upload.video_id else ""),
             created_at=upload.created_at,
             updated_at=upload.updated_at,
+            made_for_kids=upload.made_for_kids,
+            requested_privacy=upload.requested_privacy,
+            actual_privacy=actual,
+            destination_channel_id=upload.destination_channel_id,
+            published_but_not_as_asked=bool(actual and asked and actual != asked),
         )
 
 
@@ -158,11 +178,39 @@ class YouTubeStatusOut(BaseModel):
     auto_upload: bool
     client_id: str = ""
     redirect_uri: str = ""
-    privacy: str = "public"
+    privacy: str = "private"
     channel_id: str = ""
     channel_title: str = ""
     channel_url: str = ""
     connected_at: str = ""
+    #: The audience declaration for the global setting: '', 'false' or
+    #: 'true'. Empty means it has not been answered.
+    made_for_kids: str = ""
+
+
+class UploadEditIn(BaseModel):
+    """What the owner wants to say about one queued upload.
+
+    Every field is optional, and an omitted field is left exactly as it
+    was. The audience declaration is a tri-state: '' means "not decided
+    for this upload", which is not the same as 'false'.
+    """
+
+    title: str | None = None
+    description: str | None = None
+    tags: list[str] | None = None
+    privacy: Literal["private", "unlisted", "public"] | None = None
+    made_for_kids: Literal["", "false", "true"] | None = None
+
+
+class YouTubeAudienceIn(BaseModel):
+    """The audience declaration for a channel or for the global setting.
+
+    Three states, and the empty one is not the same as "no": it means
+    the owner has not decided, and an upload is refused until they do.
+    """
+
+    made_for_kids: Literal["", "false", "true"] = ""
 
 
 class YouTubeConnectOut(BaseModel):

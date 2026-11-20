@@ -288,13 +288,26 @@ class YouTubeUpload:
     title: str = ""
     description: str = ""
     tags: list[str] = field(default_factory=list)
-    privacy: str = "public"
+    #: The privacy this upload asks for. The default is **private**: the
+    #: original default was public, which meant a queued upload could
+    #: publish to the world without the owner choosing that.
+    privacy: str = "private"
     error: str | None = None
     created_at: str = field(default_factory=utcnow)
     updated_at: str = field(default_factory=utcnow)
     #: When a restart last interrupted this upload and the queue resumed it
     #: (Phase 17).
     last_resumed_at: str | None = None
+    #: The audience declaration that was sent: 'false' or 'true'. Empty
+    #: before the upload has run.
+    made_for_kids: str = ""
+    #: The privacy that was asked for. Empty before the upload has run.
+    requested_privacy: str = ""
+    #: The privacy YouTube reports after the upload. Empty when it has
+    #: not been read back.
+    actual_privacy: str = ""
+    #: The YouTube channel id the video went to, read back from YouTube.
+    destination_channel_id: str = ""
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> YouTubeUpload:
@@ -317,6 +330,10 @@ class YouTubeUpload:
                 if "last_resumed_at" in row.keys()  # noqa: SIM118
                 else None
             ),
+            made_for_kids=_column(row, "made_for_kids"),
+            requested_privacy=_column(row, "requested_privacy"),
+            actual_privacy=_column(row, "actual_privacy"),
+            destination_channel_id=_column(row, "destination_channel_id"),
         )
 
 
