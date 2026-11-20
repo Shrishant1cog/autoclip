@@ -151,8 +151,10 @@ rather than failed.
 | 18 | `5fc04cc` | M4b: the ledger, the matrix and the audit updated | **cancelled** — superseded by run 19 |
 | 19 | `4cf309b` | M5: the formatter is pinned | **failure** — the Ubuntu legs failed in Unit tests: a test wrote to the owner's real OS keyring, and Linux has no keyring backend to write to. Fixed by `94c6d9c` |
 | 20 | `94c6d9c` | M5: no test may touch the owner's real OS keyring | **failure** — the Ubuntu py3.12 leg failed at *"Verify ffmpeg can burn subtitles"*. The check piped the filter list into `grep -q`; `grep -q` exits at the match, the producer gets **SIGPIPE**, and `set -o pipefail` turns that into a failed step. Fixed in `.github/workflows/ci.yml` — the check was **corrected, not removed** |
+| 21 | `64d253d` | M5: the release package | **cancelled** — superseded by run 22 |
+| 22 | `cbcbe1c` | docs: record the M5 release commit in the ledger and the commit trail | **success** — all six jobs green: the four backend legs, the frontend build, and the Docker image with its health smoke test |
 
-**Twelve of the seventeen runs are green; three were cancelled by a newer push, and two failed.**
+**Thirteen of the nineteen runs are green; four were cancelled by a newer push, and two failed.**
 **Both failures were real defects**, not flakes, and neither was explained away:
 
 * **Run 19** was a **product** defect — a test that wrote to the owner's real OS credential store.
@@ -167,6 +169,9 @@ Both were **reproduced locally before they were fixed**: run 19 on a Linux envir
 keyring backend, run 20 with a 320 KB filter list — the old body fails it, the new body passes
 it, and a build genuinely without the `ass` filter still fails the new body. A failure that is only
 fixed in CI is a failure that comes back.
+
+**The release run is green on all six jobs**, including the Ubuntu py3.12 leg that had failed
+twice.
 
 ### The Linux leg is reproduced locally, on ffmpeg 7
 

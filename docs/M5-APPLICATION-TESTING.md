@@ -448,16 +448,113 @@ completion · test retry and ambiguous outcomes · verify duplicate prevention.
 publishing when account eligibility and required permissions are verified."* No authorised account
 was supplied, no permission was verified, and no publish was attempted.
 
-| Test ID | Step | Result | Why |
-|---|---|---|---|
-| **AT-D-01** | Connect an authorised test account | **UNVERIFIED** | No authorised Google credential was supplied. |
-| **AT-D-02** | Select the intended channel | **UNVERIFIED** | Depends on AT-D-01. |
-| **AT-D-03** | Configure privacy and audience | **UNVERIFIED** | Depends on AT-D-01. The `madeForKids` declaration is a tri-state whose **undecided** state refuses the upload — that refusal is covered by automated tests (`tests/test_youtube_policy.py`, 27 tests), not by a live run. |
-| **AT-D-04** | Prepare metadata | **UNVERIFIED** | The title, description, tags and thumbnail are assembled by code, but the metadata that would be sent was never sent. |
-| **AT-D-05** | Upload to an authorised test destination | **UNVERIFIED** | No authorised destination existed. |
-| **AT-D-06** | Verify upload completion | **UNVERIFIED** | Depends on AT-D-05. |
-| **AT-D-07** | Test retry and ambiguous outcomes | **UNVERIFIED** | The retry, the quota ledger and the reconciliation are covered by automated tests against a double. A live run would be needed to settle the live path. |
-| **AT-D-08** | Verify duplicate prevention | **UNVERIFIED** | The duplicate guard is a unique index on `(export_id, account_row_id)` plus a pre-network duplicate check, asserted by automated tests. |
+Each record below carries the same nine fields as journeys A–C. The fields are filled with what
+was actually observed; where the step could not be run, the field says so rather than describing
+what the code is expected to do.
+
+### AT-D-01 — Connect an authorised test account
+
+| | |
+|---|---|
+| **User input** | *Settings → YouTube*, the connect button. |
+| **Expected** | An authorised Google account is connected, and its token is filed under that account rather than a global slot. |
+| **Actual** | **Not run.** No authorised Google credential was supplied, so nothing was connected. The surface was **opened** and the unconnected state was shown. |
+| **Result** | **UNVERIFIED** |
+| **Screenshot** | *Settings → YouTube*, in its unconnected state — the connection control, the audience declaration's tri-state, the privacy setting and the auto-upload switch. |
+| **Logs** | The screen's read of the connection state; no OAuth round-trip was started. |
+| **Backend evidence** | `youtube_accounts` holds no row for this installation. The automated coverage is `tests/test_youtube_identity.py` (16 tests) against a double. |
+| **Export inspection** | Not applicable. |
+
+### AT-D-02 — Select the intended channel
+
+| | |
+|---|---|
+| **User input** | The channel picker on *Settings → YouTube*. |
+| **Expected** | The channel is chosen explicitly, and a fan-out to a channel whose auto-upload is off never publishes to it. |
+| **Actual** | **Not run.** Depends on AT-D-01 — there was no connected account to choose a channel from. The routing screen was **opened** and its explanation of the destination was read. |
+| **Result** | **UNVERIFIED** |
+| **Screenshot** | *Settings → Routing*, showing the recorded routing decision and the rule that produced it. |
+| **Logs** | The routing screen's read; no channel was selected. |
+| **Backend evidence** | `routing_decisions` holds the recorded decision — the six fields, stored whole at enqueue time so the record survives a later rule edit. Automated coverage: `tests/test_routing.py` and `tests/test_routing_decision.py`. |
+| **Export inspection** | Not applicable. |
+
+### AT-D-03 — Configure privacy and audience
+
+| | |
+|---|---|
+| **User input** | The `madeForKids` declaration and the privacy setting. |
+| **Expected** | The audience is a **tri-state** whose *undecided* value **refuses the upload**. The declaration is never guessed. |
+| **Actual** | **Not run.** The screen was **opened** and the tri-state was shown in its undecided position, with the auto-upload switch off. The refusal behaviour is asserted by automated tests, not by a live run. |
+| **Result** | **UNVERIFIED** |
+| **Screenshot** | *Settings → YouTube*, the audience control showing *undecided*. |
+| **Logs** | The screen's read; no declaration was submitted. |
+| **Backend evidence** | `youtube_channels.made_for_kids` holds the tri-state, and `youtube_uploads` holds the per-upload override that wins over it. Automated coverage: `tests/test_youtube_policy.py` (27 tests), which asserts the undecided refusal. |
+| **Export inspection** | Not applicable. |
+
+### AT-D-04 — Prepare metadata
+
+| | |
+|---|---|
+| **User input** | The title, description, tags and thumbnail on the publish form. |
+| **Expected** | The metadata is assembled by code from the clip and the channel's policy, and what is recorded is what would be sent. |
+| **Actual** | **Not run.** The publish form was **opened** on a clip and its fields were read, but no destination existed to send them to. |
+| **Result** | **UNVERIFIED** |
+| **Screenshot** | The publish form on the clip, with its fields. |
+| **Logs** | The form's read; no metadata was submitted anywhere. |
+| **Backend evidence** | The title, description, tags and thumbnail are assembled by the publisher before the network call. Automated coverage: `tests/test_youtube.py`, `tests/test_instagram.py`. |
+| **Export inspection** | The exported MP4 this metadata describes is the one inspected in AT-C-06. |
+
+### AT-D-05 — Upload to an authorised test destination
+
+| | |
+|---|---|
+| **User input** | The publish action on a clip. |
+| **Expected** | The upload goes only to the channel or account the user chose, and the audience and privacy that were asked for are recorded before the network call. |
+| **Actual** | **Not run.** The publish action is present on a clip and is **disabled or refused** without a connected account — which is what was observed. No upload was attempted. |
+| **Result** | **UNVERIFIED** |
+| **Screenshot** | The clip's publish action, refused for want of a connected account. |
+| **Logs** | The refusal, returned before any network call. |
+| **Backend evidence** | `youtube_uploads` and `instagram_uploads` hold no rows for this installation. Instagram runs on **its own** tables and **its own** worker, so an Instagram failure cannot cancel a YouTube upload and the reverse is also true. |
+| **Export inspection** | Not applicable — nothing was uploaded. |
+
+### AT-D-06 — Verify upload completion
+
+| | |
+|---|---|
+| **User input** | The upload's status, read back after the fact. |
+| **Expected** | The privacy that was actually applied is **read back** from the service, so the screen can say *"uploaded, private"* rather than *"on YouTube"*. |
+| **Actual** | **Not run.** Depends on AT-D-05. |
+| **Result** | **UNVERIFIED** |
+| **Screenshot** | Not available — no upload existed. |
+| **Logs** | None — no read-back was attempted. |
+| **Backend evidence** | `youtube_uploads` records the confirmed channel and the actual privacy, and flags `published_but_not_as_asked` when the service changed it. Automated coverage: `tests/test_youtube_policy.py`, `tests/test_youtube_reconcile.py` (23 tests). |
+| **Export inspection** | Not applicable. |
+
+### AT-D-07 — Test retry and ambiguous outcomes
+
+| | |
+|---|---|
+| **User input** | An upload that fails part-way, and one whose answer is lost. |
+| **Expected** | The retry is bounded, a quota exhaustion waits for the reset rather than burning the attempt, and an ambiguous result is **never** turned into a second upload. |
+| **Actual** | **Not run.** These are live-network behaviours and there was no live network to lose. The mechanisms are covered by automated tests against a double that fails in the same places. |
+| **Result** | **UNVERIFIED** |
+| **Screenshot** | Not available. |
+| **Logs** | None — no upload was attempted. |
+| **Backend evidence** | The retry budget, the quota ledger and the reconciliation's evidence grading are all implemented. A lost answer is graded — confirmed / evidence / not_uploaded / unknown — and an unsettled row waits for the owner. Automated coverage: `tests/test_youtube_resumable.py`, `tests/test_youtube_reconcile.py`, `tests/test_instagram.py`. |
+| **Export inspection** | Not applicable. |
+
+### AT-D-08 — Verify duplicate prevention
+
+| | |
+|---|---|
+| **User input** | The same clip published twice. |
+| **Expected** | The second attempt is refused **before** it reaches the network. |
+| **Actual** | **Not run.** The duplicate guard is a unique index on `(export_id, account_row_id)` plus a pre-network duplicate check, asserted by automated tests. |
+| **Result** | **UNVERIFIED** |
+| **Screenshot** | Not available. |
+| **Logs** | None — no publish was attempted. |
+| **Backend evidence** | `db/schema.py` (migration v27) carries the unique index; `instagram/uploads.py` carries the pre-network check. Automated coverage: `tests/test_youtube_duplicates.py`, `tests/test_instagram.py`. |
+| **Export inspection** | Not applicable. |
 
 **What was observed in the application, and is not the live path.** The publishing surfaces were
 **opened and read** in the real UI:

@@ -31,7 +31,7 @@ double stands in for the same code path the real service would take — but "the
 | **New runtime dependencies** | **Zero.** The whole upgrade was built on the dependency set the project already had. |
 | **Schema** | v14 → **v27**, 19 → **32 live tables**, thirteen migrations, no user data destroyed |
 | **API surface** | 18 routers / 108 routes → **21 routers / 162 routes** |
-| **CI** | 17 runs on this branch: **12 success**, **3 cancelled** (each superseded by a newer push), **2 failure** — and **both failures were real defects**, diagnosed and fixed rather than explained away. See §4.1. |
+| **CI** | 19 runs on this branch: **13 success**, **4 cancelled** (each superseded by a newer push), **2 failure** — and **both failures were real defects**, diagnosed and fixed rather than explained away. The release run is green on all six jobs, on all four platforms. See §4.1. |
 | **Defects found by running the application** | **3 product defects** and **1 defect in the CI workflow itself**, all fixed, all guarded by tests that fail without the fix. See §4.2. |
 | **Open security findings** | **0** high, **0** medium, **0** low. 4 residual risks documented, 5 things not checked — all in §6. |
 
@@ -146,7 +146,12 @@ Every acceptance item, by the status the evidence supports.
 | **PARTIAL** | Part of the criterion is met and the rest is not. **The gap is named in §5.** | 10 matrix rows |
 | **FAILED** | The criterion is not met and it was supposed to be. | **0** |
 | **UNVERIFIED** | The code is present and the automated evidence passes, but the criterion can only be settled against a live external system that was not available. | 2 gate items + 4 live paths |
+| **BLOCKED** | The criterion cannot be settled because a required source is missing, not because the work was skipped. Named in §5. | 1 matrix row |
 | **NOT APPLICABLE** | Out of scope by the specification. | 9 matrix rows |
+
+**Every one of the 129 matrix rows is accounted for**: 109 VERIFIED + 10 PARTIAL + 1 BLOCKED + 9
+NOT APPLICABLE = 129. **0 Missing.** The recount is mechanical —
+`scripts/verify_matrix_counts.py` reads the table and fails if the summary and the rows disagree.
 
 ### The two UNVERIFIED gate items, and the four UNVERIFIED live paths
 
@@ -184,16 +189,20 @@ missing or wrong.
 
 ### 4.1 The CI runs on this branch
 
-The run history is release evidence, not noise. Two of the seventeen runs failed, and **both
+The run history is release evidence, not noise. Two of the nineteen runs failed, and **both
 failures were real defects** — one in the product, one in the CI itself. Neither was a flake, and
 neither was explained away.
 
 | Runs | Result | What happened |
 |---|---|---|
-| 4, 5, 7–13, 15–17 (12 runs) | **success** | green |
-| 6, 14, 18 (3 runs) | **cancelled** | each superseded by a newer push — the concurrency group cancelled the older run |
+| 4, 5, 7–13, 15–17, **22** (13 runs) | **success** | green |
+| 6, 14, 18, **21** (4 runs) | **cancelled** | each superseded by a newer push — the concurrency group cancelled the older run |
 | **19** (`4cf309b`) | **failure** | the Ubuntu legs failed in **Unit tests**; Windows and macOS passed the same tests. A test wrote to the owner's real OS keyring. On Linux there is no keyring backend, so the token was never stored and the assertion could not hold — the test passed on Windows and macOS *because those machines had a real keyring to write to*. Fixed by `94c6d9c`, an **autouse** isolation fixture so no test can reach the owner's credential store |
 | **20** (`94c6d9c`) | **failure** | the Ubuntu py3.12 leg failed at *"Verify ffmpeg can burn subtitles"*. The check piped the ffmpeg filter list into `grep -q`; `grep -q` exits at the match, the producer gets **SIGPIPE**, and GitHub's `set -o pipefail` turns that into a failed step. The runner's ffmpeg 8 has a filter list large enough to fill the pipe, so CI reported that an ffmpeg **with** the `ass` filter did not have one — the job log shows `printf: Broken pipe` and then the `ass` filter listed on the very next line. **Corrected, not removed**: the check now matches with bash's own pattern matching and never pipes, and a build genuinely without the filter still fails it |
+
+**The release run is green on all six jobs** — the four backend legs (Ubuntu 3.11, Ubuntu 3.12,
+macOS 3.12, Windows 3.12), the frontend build and the Docker image with its health smoke test.
+The Ubuntu py3.12 leg, which had failed twice, now passes.
 
 **Both failures were reproduced before they were fixed.** Run 19 was reproduced on a Linux
 environment with no keyring backend. Run 20 was reproduced with a 320 KB filter list: the old body

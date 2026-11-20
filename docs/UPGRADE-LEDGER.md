@@ -20,7 +20,7 @@ milestone `In progress` and is reported as such.
 | M3 — Creative intelligence | **Complete** | 11/11 gate items done; 126 tests across the M3 area passing; two named residuals recorded (not claimed as verified) |
 | M4a — YouTube hardening | **Complete** | 14/15 gate items done; 1149 tests passing; the live YouTube path is **Unverified (external)** — no authorised Google credentials were supplied |
 | M4b — Instagram | **Complete** | 14/15 gate items done; 126 tests across the M4b area passing; the live Instagram path is **Unverified (external)** — no authorised Meta credentials were supplied |
-| M5 — Audit and release | **Complete** | 10/10 gate items done; **1,300 tests** passing; the application exercised through its real UI on real media; **3 product defects and 1 CI defect found and fixed**; the live external paths remain **Unverified (external)** |
+| M5 — Audit and release | **Complete** | 10/10 gate items done; **1,300 tests** passing; the application exercised through its real UI on real media; **3 product defects and 1 CI defect found and fixed**; the release run green on all six CI jobs; the live external paths remain **Unverified (external)** |
 
 ---
 
@@ -405,6 +405,10 @@ also **found and fixed three defects** that no unit test had caught, and a fourt
 workflow itself — all four were found by running the application or its gates, and each is now
 guarded by a test that fails without the fix.
 
+The release run is **green on all six CI jobs** — the four backend legs (Ubuntu 3.11, Ubuntu 3.12,
+macOS 3.12, Windows 3.12), the frontend build, and the Docker image with its health smoke test.
+The Ubuntu py3.12 leg, which had failed twice, now passes.
+
 The live external integrations remain **Unverified (external)**: no authorised ElevenLabs,
 hosted-LLM, Google or Meta credential was supplied for any part of this upgrade. That is recorded
 as a condition of the release, not quietly upgraded.
@@ -433,7 +437,7 @@ as a condition of the release, not quietly upgraded.
 | The **ducking was measured by differencing two renders** | The bed and the speech share a file, so a level measurement alone cannot tell the bed from the voice. Subtracting a render with the bed from a render without it leaves the bed, and its RMS in the timeline's own speech windows and speech gaps is the ducking, as a number | `docs/M5-APPLICATION-TESTING.md` AT-A-08 |
 | The **re-export's missing webcam composition** is recorded as a limitation, not fixed | Rebuilding the per-clip `LayoutPath` is new scope. The framing is right — the cached crop path is reused — so the honest entry is a named limitation, not a pass and not a silent omission | `docs/M5-APPLICATION-TESTING.md` AT-B-05, `docs/FINAL_UPGRADE_REPORT.md` §6.1 |
 | The **local model stand-in** is used and labelled everywhere | With no authorised hosted-model credential, the application was pointed at a local service speaking Ollama's API. It exercises the real adapter, gateway, consent checks, budget and prompt assembly; it does not reason. Every plan and answer it produced says so in its own text | `docs/M5-APPLICATION-TESTING.md` §0 |
-| The **Linux leg was reproduced locally** before the release commits were pushed | The sidechain defect rendered on the Windows ffmpeg and failed on the Linux one. It was found by running the Linux leg on ffmpeg 7.0.2 rather than by assuming the two platforms agreed | `docs/M5-APPLICATION-TESTING.md` §"The three defects" |
+| The **Linux leg was reproduced locally** before the release commits were pushed | The sidechain defect rendered on the Windows ffmpeg and failed on the Linux one. It was found by running the Linux leg on ffmpeg 7.0.2 rather than by assuming the two platforms agreed | `docs/M5-APPLICATION-TESTING.md` §"The three defects this testing found" |
 
 ### Residuals carried out of M5
 
@@ -505,3 +509,5 @@ as a condition of the release, not quietly upgraded.
 | 2026-11-21 | `69498e3` | M5 — the CI's ffmpeg subtitle check no longer pipes into `grep -q`: the broken pipe was making CI report that an ffmpeg *with* the `ass` filter did not have one |
 | 2026-11-21 | `bcdfc47` | M5 — the export honours the user's music choice and the speech timeline, and the two malformed ducking filtergraphs are fixed; guarded by 7 API tests, 3 real-render tests and a version-independent structural graph check |
 | 2026-11-21 | `64d253d` | M5 — the release package: the application-testing evidence, the regression report, the security review, the performance report, the installation guide, the final report, the audit through M5, the matrix, the ledger and the README |
+| 2026-11-21 | `cbcbe1c` | docs — the M5 release commit recorded in the ledger and the commit trail |
+| 2026-11-21 | *this commit* | M5 — the release run recorded as **green on all six jobs** (the four backend legs, the frontend build, and the Docker image with its health smoke test), the Journey D records brought onto the same nine fields as journeys A–C, and the BLOCKED row added to the acceptance table |
