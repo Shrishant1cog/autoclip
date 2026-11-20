@@ -20,37 +20,37 @@ Rows marked ⚠ are gaps this upgrade must close.
 
 | ID | Feature | Existing evidence | Source path | Status | Target | Deps | Acceptance criteria | Evidence |
 |---|---|---|---|---|---|---|---|---|
-| MUS-01 | Select a local music folder | None — tracks can only be uploaded through the API into a fixed directory | `pipeline/music.py:music_dir`, `api/music.py` | ⚠ Missing | M1 | — | A user picks any folder; app persists it; files are indexed without copying | Not yet started |
-| MUS-02 | Scan music files | None | — | ⚠ Missing | M1 | MUS-01 | Scan reports found/added/skipped/error counts; re-scan is idempotent | Not yet started |
-| MUS-03 | View available tracks | `GET /api/music/tracks` lists files | `api/music.py:tracks` | Partial | M1 | MUS-02 | List shows title, duration, format, size, analysis state | Automated test verified (existing list test) |
-| MUS-04 | Preview tracks | None — no audio streaming route | — | ⚠ Missing | M1 | MUS-03 | Browser plays an arbitrary track without downloading it | Not yet started |
-| MUS-05 | Search and filter | None | — | ⚠ Missing | M1 | MUS-03 | Filter by mood/energy/BPM/format/licence; result is server-side | Not yet started |
+| MUS-01 | Select a local music folder | None — tracks can only be uploaded through the API into a fixed directory | `pipeline/music.py:music_dir`, `api/music.py` | Implemented | M1 | — | A user picks any folder; app persists it; files are indexed without copying | Automated test verified (`tests/test_music_library.py::test_the_api_adds_a_folder_without_copying_anything`); Browser verified |
+| MUS-02 | Scan music files | None | `music/library.py:scan` | Implemented | M1 | MUS-01 | Scan reports found/added/skipped/error counts; re-scan is idempotent | Automated test verified (scan counts; stable ids across scans) |
+| MUS-03 | View available tracks | `GET /api/music/tracks` lists files | `api/music.py:library_listing` | Implemented | M1 | MUS-02 | List shows title, duration, format, size, analysis state | Automated test verified (`tests/test_music_library.py::test_the_library_api_filters_by_licence`); Browser verified |
+| MUS-04 | Preview tracks | None — no audio streaming route | `api/music.py:preview` | Implemented | M1 | MUS-03 | Browser plays an arbitrary track without downloading it | Automated test verified (full body, `bytes=0-99`, suffix range, 416 past the end, 404 for a missing file); Browser verified |
+| MUS-05 | Search and filter | None | `music/library.py:search`, `api/music.py:library_listing` | Partial | M1 | MUS-03 | Filter by mood/energy/BPM/format/licence; result is server-side | Automated test verified for query, mood, BPM range, licence, favourite and tag — **energy and format filters are not implemented** |
 | MUS-06 | Add/remove tracks | Upload + delete | `api/music.py` | Implemented | — | — | Upload rejects non-audio; delete is path-safe | Automated test verified |
-| MUS-07 | Organise library | None | — | ⚠ Missing | M1 | MUS-02 | User can tag/favourite/group without moving files | Not yet started |
-| MUS-08 | Preferred music | One global `music_track` setting | `config.py:ExportSettings.music_track` | Partial | M1 | MUS-07 | Preference is per project/clip and consulted by selection | Not yet started |
-| MUS-09 | BPM analysis | None | — | ⚠ Missing | M1 | MUS-02 | Deterministic BPM within a stated tolerance of a known reference track | Not yet started |
-| MUS-10 | Energy / rhythm analysis | None | — | ⚠ Missing | M1 | MUS-02 | Energy is a documented 0–1 measure; identical input ⇒ identical output | Not yet started |
-| MUS-11 | Mood classification | None | — | ⚠ Missing | M1 | MUS-10 | Mood is a declared label set, stored, and deterministic | Not yet started |
-| MUS-12 | Loudness / quality | None for tracks (loudnorm exists for export) | `pipeline/export.py:build_audio_filtergraph` | ⚠ Missing | M1 | MUS-02 | Integrated LUFS + true peak stored per track; malformed file flagged | Not yet started |
-| MUS-13 | Reusable metadata cache | None | — | ⚠ Missing | M1 | MUS-09..12 | Re-analysing an unchanged file (same hash) reuses metadata | Not yet started |
-| MUS-14 | AI selects music from metadata | None | — | ⚠ Missing | M1 | MUS-09..13 | Selection cites the structured fields it used; no raw audio sent | Not yet started |
-| MUS-15 | Deterministic validation of AI choice | None | — | ⚠ Missing | M1 | MUS-14 | An invalid/unknown track id from AI is rejected, not executed | Not yet started |
-| MUS-16 | Manual override | Single global track setting | `config.py` | Partial | M1 | MUS-14 | A manual choice always beats an AI choice and is shown as such | Not yet started |
-| MUS-17 | Licence states (Unknown/User-confirmed/Verified/Incompatible/Expired) | None | — | ⚠ Missing | M1 | MUS-02 | Every track has exactly one state; default is Unknown | Not yet started |
-| MUS-18 | Licence evidence + restrictions | None | — | ⚠ Missing | M1 | MUS-17 | Source, attribution, commercial/derivative/share-alike, expiry stored | Not yet started |
-| MUS-19 | Block export on unknown/incompatible | None — export mixes any track | `pipeline/export.py:349-364` | ⚠ Missing | M1 | MUS-17 | Export of an Unknown/Incompatible track is refused with a reason | Not yet started |
-| MUS-20 | AI cannot certify rights | No AI involvement yet (so no violation) | — | Implemented (vacuously) | M1 | MUS-14 | A model response claiming a licence is ignored for the stored state | Not yet started |
-| MUS-21 | Shared speech timeline | None — ducking keys off the audio signal | `pipeline/export.py:228-233` | ⚠ Missing | M1 | — | One timeline object is produced and consumed by ducking + layout | Not yet started |
-| MUS-22 | VAD ≥0.75 + ≥1 overlapping word | None | — | ⚠ Missing | M1 | MUS-21 | Both conditions required; either alone does not mark speech | Not yet started |
-| MUS-23 | 270 ms rule (9×30 ms @ ≥0.90) | None | — | ⚠ Missing | M1 | MUS-22 | 8 frames insufficient; 9 frames at ≥0.90 sufficient | Not yet started |
-| MUS-24 | Merge at 349 ms, not at 350 ms | None | — | ⚠ Missing | M1 | MUS-21 | Exact boundary asserted on ms timestamps, not on quantised frames | Not yet started |
-| MUS-25 | Continuous speech does not fragment | None | — | ⚠ Missing | M1 | MUS-24 | A 30 s speech run yields one interval | Not yet started |
-| MUS-26 | Duck only the added music | Sidechain compression on the bed | `export.py:229-233` | Partial | M1 | MUS-21 | Original voice/game audio is bit-identical to the no-music render | Not yet started |
-| MUS-27 | Smooth attack/recovery | `attack=120:release=600` fixed | `export.py:231-232` | Partial | M1 | MUS-26 | No step discontinuity at interval edges; values configurable | Not yet started |
-| MUS-28 | No repeated recovery between words | None — compressor follows the envelope | `export.py:228-233` | ⚠ Missing | M1 | MUS-24 | Inside a merged interval the bed stays down | Not yet started |
+| MUS-07 | Organise library | None | `api/music.py:set_flags`, `music/store.py:set_track_flags` | Implemented | M1 | MUS-02 | User can tag/favourite/group without moving files | Automated test verified (flags stored; the file is never moved); Browser verified |
+| MUS-08 | Preferred music | One global `music_track` setting | `config.py:ExportSettings.music_track`, `music/selection.py:select_track` | Partial | M1 | MUS-07 | Preference is per project/clip and consulted by selection | Automated test verified that a manual choice wins and no model is consulted — **the preference is still one global setting, not per project or per clip** |
+| MUS-09 | BPM analysis | None | `music/analysis.py:detect_bpm` | Implemented | M1 | MUS-02 | Deterministic BPM within a stated tolerance of a known reference track | Automated test verified (same input ⇒ same BPM; a 220 Hz tone is measured at 220 BPM) |
+| MUS-10 | Energy / rhythm analysis | None | `music/analysis.py` | Implemented | M1 | MUS-02 | Energy is a documented 0–1 measure; identical input ⇒ identical output | Automated test verified (energy in [0,1]; two measurements of one file agree) |
+| MUS-11 | Mood classification | None | `music/analysis.py:classify_mood` | Implemented | M1 | MUS-10 | Mood is a declared label set, stored, and deterministic | Automated test verified (a slow quiet track is `calm`, a fast loud one is `energetic`, the scores are returned) |
+| MUS-12 | Loudness / quality | None for tracks (loudnorm exists for export) | `music/analysis.py` | Implemented | M1 | MUS-02 | Integrated LUFS + true peak stored per track; malformed file flagged | Automated test verified (LUFS stored; an undecodable file raises `AnalysisError` naming the file) |
+| MUS-13 | Reusable metadata cache | None | `music/library.py:analyse` | Implemented | M1 | MUS-09..12 | Re-analysing an unchanged file (same hash) reuses metadata | Automated test verified — cached against **size + mtime**, not a content hash; a changed file is measured again |
+| MUS-14 | AI selects music from metadata | None | `music/selection.py:select_track` | Partial | M1 | MUS-09..13 | Selection cites the structured fields it used; no raw audio sent | Automated test verified (the proposal context carries measurements and no paths) — **the module is not yet called from the pipeline** |
+| MUS-15 | Deterministic validation of AI choice | None | `music/selection.py:select_track` | Partial | M1 | MUS-14 | An invalid/unknown track id from AI is rejected, not executed | Automated test verified (an unknown id and an unusable track both fall back to the scorer) — **not yet wired into the pipeline** |
+| MUS-16 | Manual override | Single global track setting | `music/selection.py:select_track` | Partial | M1 | MUS-14 | A manual choice always beats an AI choice and is shown as such | Automated test verified (the manual choice wins and no model is consulted); the source is recorded as `user` |
+| MUS-17 | Licence states (Unknown/User-confirmed/Verified/Incompatible/Expired) | None | `music/licensing.py` | Partial | M1 | MUS-02 | Every track has exactly one state; default is Unknown | Automated test verified — all five states exist, but **`verified` is deliberately not settable from the API**: independent verification is not something a user can assert. The API returns 400 and writes nothing |
+| MUS-18 | Licence evidence + restrictions | None | `music/licensing.py:LicenseRecord` | Implemented | M1 | MUS-17 | Source, attribution, commercial/derivative/share-alike, expiry stored | Automated test verified (`tests/test_music_library.py::test_the_api_records_a_licence`) |
+| MUS-19 | Block export on unknown/incompatible | None — export mixes any track | `pipeline/export.py:export_clip` | Implemented | M1 | MUS-17 | Export of an Unknown/Incompatible track is refused with a reason | Automated test verified (unknown, incompatible, expired and a lapsed expiry each refuse the export; a user confirmation allows it) |
+| MUS-20 | AI cannot certify rights | No AI involvement yet (so no violation) | `music/licensing.py:USER_SETTABLE_STATES` | Implemented | M1 | MUS-14 | A model response claiming a licence is ignored for the stored state | Automated test verified (the licence states are not writable from the selection path, and the API refuses `verified`) |
+| MUS-21 | Shared speech timeline | None — ducking keys off the audio signal | `pipeline/speech_timeline.py`, `pipeline/runner.py` | Implemented | M1 | — | One timeline object is produced and consumed by ducking + layout | Automated test verified (`tests/test_speech_timeline.py` — 27 tests); the timeline is written once per job and sliced per clip |
+| MUS-22 | VAD ≥0.75 + ≥1 overlapping word | None | `pipeline/speech_timeline.py:speech_frames` | Implemented | M1 | MUS-21 | Both conditions required; either alone does not mark speech | Automated test verified (a word without enough confidence is not speech) |
+| MUS-23 | 270 ms rule (9×30 ms @ ≥0.90) | None | `pipeline/speech_timeline.py` | Implemented | M1 | MUS-22 | 8 frames insufficient; 9 frames at ≥0.90 sufficient | Automated test verified (nine confident frames make an interval without a word) |
+| MUS-24 | Merge at 349 ms, not at 350 ms | None | `pipeline/speech_timeline.py:merge_intervals` | Implemented | M1 | MUS-21 | Exact boundary asserted on ms timestamps, not on quantised frames | Automated test verified (349 ms merges, 350 ms does not; the boundary is asserted in milliseconds) |
+| MUS-25 | Continuous speech does not fragment | None | `pipeline/speech_timeline.py:merge_intervals` | Implemented | M1 | MUS-24 | A 30 s speech run yields one interval | Automated test verified |
+| MUS-26 | Duck only the added music | Sidechain compression on the bed | `pipeline/export.py:build_mixed_audio_filtergraph` | Partial | M1 | MUS-21 | Original voice/game audio is bit-identical to the no-music render | Automated test verified that the speech chain is untouched and only the bed is shaped — **the bit-identical render is not asserted** |
+| MUS-27 | Smooth attack/recovery | `attack=120:release=600` fixed | `pipeline/export.py:build_ducking_filters` | Implemented | M1 | MUS-26 | No step discontinuity at interval edges; values configurable | Automated test verified (the filter starts and ends at full level; `ducking_attack_ms` / `ducking_release_ms` are settings) |
+| MUS-28 | No repeated recovery between words | None — compressor follows the envelope | `pipeline/export.py:build_ducking_filters` | Implemented | M1 | MUS-24 | Inside a merged interval the bed stays down | Automated test verified (the envelope stays down inside an interval and recovers at its end) |
 | MUS-29 | Manual ducking controls | `music_volume`, `ducking_amount_db`, `music_ducking` | `config.py:ExportSettings` | Implemented | M1 | — | Controls change the render measurably | Automated test verified (`tests/test_music.py`) |
-| MUS-30 | Volume-envelope preview | None | — | ⚠ Missing | M1 | MUS-21 | The preview's envelope equals the applied gain curve within tolerance | Not yet started |
-| MUS-31 | Ducking regression matrix (continuous/short/long pauses, multi-speaker, SFX, music-heavy, low-volume, no-speech) | Partial — some cases in `tests/test_music.py` | `tests/test_music.py` | Partial | M1 | MUS-26 | All eight scenarios asserted | Not yet started |
+| MUS-30 | Volume-envelope preview | None | `api/music.py:envelope`, `frontend/src/components/MusicLibrary.tsx` | Implemented | M1 | MUS-21 | The preview's envelope equals the applied gain curve within tolerance | Automated test verified (the route returns the points and the intervals); the route and the export both call `envelope_points` |
+| MUS-31 | Ducking regression matrix (continuous/short/long pauses, multi-speaker, SFX, music-heavy, low-volume, no-speech) | Partial — some cases in `tests/test_music.py` | `tests/test_music.py` | Partial | M1 | MUS-26 | All eight scenarios asserted | Automated test verified for the filter shape and the timeline rules — **the eight end-to-end render scenarios are not asserted** |
 
 ---
 
@@ -172,7 +172,7 @@ Rows marked ⚠ are gaps this upgrade must close.
 | GOV-16 | SSRF enforcement | `security/urlpolicy.py` — redirect re-classification, double-resolution rebinding guard, IPv4/IPv6 classification, scheme downgrade refusal, bounded chain | Implemented | M0.5 |
 | GOV-17 | yt-dlp network restriction | `pipeline/ingest.py` classifies the URL before the fetch and refuses private destinations; `yt_dlp_hardening_args()` disables proxies; FFmpeg runs with `-protocol_whitelist file,pipe` | Partial — the secondary-request surface inside yt-dlp remains a documented residual, needing a Lane B controlled test | M0.5 |
 | GOV-18 | Updated SECURITY.md with enforcement detail | `SECURITY.md` — consent model table, URL and subprocess policy | Implemented | M0.5 |
-| GOV-19 | Security test evidence (SSRF suite flipped from xfail) | `tests/test_url_policy.py` (26 ordinary passing tests, zero `xfail` markers) + `tests/test_egress.py` (23 tests) | Automated test verified | M0.5 |
+| GOV-19 | Security test evidence (SSRF suite flipped from xfail) | `tests/test_url_policy.py` (26 ordinary passing tests, zero `xfail` markers) + `tests/test_egress.py` (23 tests) | Implemented | M0.5 |
 | GOV-20 | Final upgrade report | — | Missing | M5 |
 | GOV-21 | Independent audit + release package | — | Missing | M5 |
 
@@ -198,9 +198,9 @@ Rows marked ⚠ are gaps this upgrade must close.
 
 | Status | Count |
 |---|---|
-| Implemented | 27 |
-| Partial | 27 |
-| Missing | 65 |
+| Implemented | 53 |
+| Partial | 29 |
+| Missing | 37 |
 | Blocked — source missing | 1 |
 | NOT APPLICABLE | 9 |
 | **Total rows** | **129** |

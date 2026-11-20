@@ -103,6 +103,12 @@ def main() -> int:
     actual = parse_summary(text)
 
     expected = {label: counts[label] for label, _ in ORDER if counts.get(label, 0)}
+    # A status outside the canonical set is still a real status. The renderer
+    # writes it into the summary, so the checker has to accept it — otherwise
+    # `--write` produces a summary that `--check` then calls stale.
+    expected.update(
+        {label[6:]: count for label, count in counts.items() if label.startswith("OTHER:")}
+    )
     expected["**Total rows**"] = rows
 
     mismatched = [
