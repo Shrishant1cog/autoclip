@@ -59,12 +59,31 @@ class FakeKeyring:
         self.store.pop((service, key), None)
 
 
-@pytest.fixture
-def fake_keyring(monkeypatch: pytest.MonkeyPatch) -> FakeKeyring:
-    """Replace the keyring backend with a working in-memory one."""
+@pytest.fixture(autouse=True)
+def isolated_keyring(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeKeyring]:
+    """Point the keyring at an in-memory backend for **every** test.
+
+    Autouse, and not opt-in, on purpose. A test that stores a secret without
+    asking for the fake writes it into the *owner's* OS credential store —
+    which is how a suite of 1,286 tests left hundreds of `instagram_token#…`
+    entries in a Windows Credential Manager, and why one Instagram test passed
+    on Windows and macOS but failed on Linux, where there is no keyring
+    backend to write to and the token simply was not there.
+
+    The fixture is installed before any test body runs, so the only way to
+    reach the real keyring is to ask for it explicitly. `no_keyring` and
+    `failing_keyring` override it; `fake_keyring` is the same object under a
+    friendlier name.
+    """
     kr = FakeKeyring()
     monkeypatch.setattr(config, "_keyring", lambda: kr)
-    return kr
+    yield kr
+
+
+@pytest.fixture
+def fake_keyring(isolated_keyring: FakeKeyring) -> FakeKeyring:
+    """Replace the keyring backend with a working in-memory one."""
+    return isolated_keyring
 
 
 @pytest.fixture
