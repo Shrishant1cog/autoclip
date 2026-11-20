@@ -274,16 +274,18 @@ interrupted-migration test, and no table for rights confirmation, consent decisi
 music licensing, upload attempts/idempotency, quota reservations, provider usage, or learning
 versions.
 
-**Since this audit (M0):** seven migrations have closed part of that list — v15 added
+**Since this audit (M0):** twelve migrations have closed part of that list — v15 added
 `egress_consents` and `egress_log`, v16 added `music_folders`, `music_tracks` and
 `music_licenses`, v17 added `source_layouts`, v18 added `job_ai_budget`, v19 added
 `creative_plans`, and v20 added `music_preferences` (plus the three clip columns that record
 which music each clip ended up with). v21 added the `clips.diagnostics_json` column — no new
-table, because there is exactly one report per clip and it is read with the clip. The schema is
-now at **v21 with 28 live tables** (measured against a migrated database, not counted by hand).
-The gaps that remain — backup before migration, an interrupted-migration test, upload
-attempts/idempotency, quota reservations, provider usage and learning versions — are still
-open and are carried in the ledger.
+table, because there is exactly one report per clip and it is read with the clip. v22 added the
+two per-account OAuth columns, v23 the publishing-policy columns on the channel and the upload,
+v24 the `youtube_quota` ledger plus the six resumable-upload columns, v25 the three
+reconciliation columns, and v26 the `routing_decisions` table. The schema is now at **v26 with
+30 live tables** (measured against a migrated database, not counted by hand). The gaps that
+remain — backup before migration, an interrupted-migration test, provider usage and learning
+versions — are still open and are carried in the ledger.
 
 ---
 
@@ -364,9 +366,9 @@ would have failed the format step before reaching the tests — which is consist
   independently, and "multiple accounts" currently means "one token displayed twice".
 - **D15 — the formatter gate is broken on a clean checkout** (above).
 
-**Since the baseline (through M3).** The table above is the *M0 baseline* and is deliberately left
+**Since the baseline (through M4a).** The table above is the *M0 baseline* and is deliberately left
 as it was measured. The current state is recorded per milestone in `docs/UPGRADE-LEDGER.md`; at
-the end of M3 it is: **1,022 passed** in the local unit suite (excluding the e2e collection),
+the end of M4a it is: **1,149 passed** in the local unit suite (excluding the e2e collection),
 **0 xfailed** — the 26 SSRF xfails registered at M0 became ordinary passing tests and the marker
 was deleted at M0.5 — `ruff check` clean, `ruff format --check` clean, the frontend build green,
 and mypy at **10 errors in 8 files** (down from the 14-error baseline; the four that were fixed

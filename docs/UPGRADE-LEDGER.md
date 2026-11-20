@@ -18,7 +18,7 @@ milestone `In progress` and is reported as such.
 | M1 — Music intelligence | **Complete** | 12/12 gate items done; 101 tests across the M1 area passing; four named residuals recorded (not claimed as verified) |
 | M2 — Webcam intelligence | **Complete** | 13/13 gate items done; 76 tests across the M2 area passing, including 6 real-ffmpeg render tests; three named residuals recorded (not claimed as verified) |
 | M3 — Creative intelligence | **Complete** | 11/11 gate items done; 126 tests across the M3 area passing; two named residuals recorded (not claimed as verified) |
-| M4a — YouTube hardening | Not started | — |
+| M4a — YouTube hardening | **Complete** | 14/15 gate items done; 1149 tests passing; the live YouTube path is **Unverified (external)** — no authorised Google credentials were supplied |
 | M4b — Instagram | Not started | — |
 | M5 — Audit and release | Not started | — |
 
@@ -278,7 +278,68 @@ measured proxy (the cut rate) rather than a visual-action model.
 
 ---
 
-## M4–M5
+## M4a — YouTube publishing hardening
+
+**Status: Complete**, with one item blocked on the owner (the live YouTube path needs authorised
+Google credentials, which were not supplied). The milestone ships five parts: per-account OAuth
+identity, an explicit publishing policy, a resumable upload with a quota ledger and a bounded
+backoff, reconciliation of ambiguous results, and a routing decision that explains itself. Every
+part is covered by automated tests. The **live** YouTube path stays **Unverified (external)** —
+no authorised Google credentials were supplied — and that is recorded rather than glossed over.
+
+| # | Gate item | State | Evidence |
+|---|---|---|---|
+| 1 | **Per-account OAuth** — a second account connects independently and keeps its own token | Done | `youtube/oauth.py` — the pending authorisation carries the account it was started for (`_Pending.account_id`), the token is filed under `youtube_refresh#<account_id>`, and the channel Google reports becomes that account's own row. `api/youtube_accounts.py` — `POST /{account_id}/connect`; `frontend/src/pages/Channels.tsx` — a per-account connect button. `tests/test_youtube_identity.py` — 16 tests |
+| 2 | A **callback for the wrong account** is refused | Done | `youtube/oauth.py:complete_auth` — the state is bound to the account it was issued for; a state that belongs to another account (or to none) is refused rather than connected |
+| 3 | **`invalid_grant` is isolated** to the account that caused it | Done | `youtube/oauth.py:InvalidGrantError` → `youtube/accounts.py:mark_needs_reconnect`; only that account gets `needs_reconnect=1` (migration v22) and the other accounts keep publishing. The Channels page shows the warning on that account alone |
+| 4 | The **audience declaration is the owner's** and is never guessed | Done | `youtube/policy.py` — `madeForKids` is a **tri-state** (`""` / `"false"` / `"true"`); an unanswered declaration raises `policy.AudienceUndecided` before the network call. The value that was sent is recorded on the upload row. `api/youtube.py` — `GET /api/youtube/policy`, `POST /api/youtube/audience`. `tests/test_youtube_policy.py` — 27 tests |
+| 5 | **Privacy is never silently changed** | Done | The requested privacy is written onto the row before the transfer; YouTube's own `privacyStatus` is read back afterwards (`youtube/uploader.py:read_back`); a mismatch is reported as "uploaded, private", not "published". A retry keeps the row's own privacy, and the upload no longer mutates the global setting |
+| 6 | The **destination is never guessed** | Done | The upload row names the channel it publishes to, the policy is resolved from that row before the call, and the read-back compares YouTube's own `channelId` with the destination that was asked for |
+| 7 | The **public default is treated as a known issue** with a safe decision | Done | The global default is now `private`, new channels default to `private`, and a new upload defaults to `private` — **stored values are never silently changed**, so an owner who chose public keeps public |
+| 8 | **Resumable upload** that survives a dropped connection | Done | `youtube/resumable.py` — 8 MiB chunks, a persistent session, HTTP 308 (Resume Incomplete) accepted as the normal answer for a non-final chunk, and a resume from the byte actually reached. Migration v24 stores the session URL, the bytes sent, the total size and the expiry |
+| 9 | The **day's quota is accounted for** per project | Done | `youtube/quota.py` — 1600 units per upload against a 10 000 default; the units are reserved **before** the transfer, so a transfer that dies halfway still shows up in the usage. `youtube_quota` (migration v24); `GET /api/youtube/quota` |
+| 10 | **Exhaustion queues to the reset; a rate limit backs off** | Done | `youtube/quota.py:reset_at` — local midnight, where the ledger's own day rolls over. An exhausted quota leaves the row **pending** with `next_attempt_at` set to the reset and does not count the attempt, because the file never left the machine. A 429 or a 5xx backs off with the exponential delay instead. `youtube/backoff.py` — 30 s → 1 h, capped at 10 attempts, with jitter |
+| 11 | **An ambiguous result is reconciled**, never retried blindly | Done | `youtube/reconcile.py` — the evidence is graded: **confirmed** (YouTube's own session record names the video), **evidence** (a title match on the channel — a hint, never a success), **not_uploaded** (the live session says the transfer did not finish) and **unknown** (the lookup failed, so it says nothing). An ambiguous row becomes `needs_reconciliation` (migration v25) and is neither retried nor failed. `tests/test_youtube_reconcile.py` — 23 tests |
+| 12 | The **owner has a way out** of an unsettled upload | Done | `PUT /api/youtube/uploads/{id}/confirm` verifies the video with YouTube **first** and refuses (409) when YouTube cannot confirm it; a retry of a `needs_reconciliation` row is recorded as `owner_retried`, and that decision skips reconciliation entirely |
+| 13 | **Upload progress** reflects the bytes actually sent | Done | The byte count is written to the row after every chunk, and `UploadOut.progress_percent` is computed from it; the clip list shows "uploading to YouTube · N%" |
+| 14 | The **routing decision explains itself** in six fields | Done | `routing/decision.py` — category, channel, reason, rule, confidence and fallback are stored whole when an upload is queued (`routing_decisions`, migration v26), so the record of what was decided does not depend on the rules still looking the same way afterwards. The explanation and the destination come from one resolution, so they cannot drift apart. `tests/test_routing_decision.py` — 24 tests; browser verified on the Routing page and the clip list |
+| 15 | The **live YouTube path** is verified against the real API | **Unverified (external)** | No authorised Google OAuth client or test channel was supplied, so nothing here is claimed as live-verified. The whole of M4a's evidence is automated, against doubles for the API |
+
+### Decisions taken in M4a
+
+| Decision | Why | Where recorded |
+|---|---|---|
+| The **Google account owns the credential and the channel** | One token can see several channels, but only one account's credential should own one channel row. A channel that changes hands under a shared token is how a clip ends up somewhere unexpected | `youtube/accounts.py`, `youtube/oauth.py` |
+| The **legacy refresh token falls back to the oldest account only** | It used to belong to whichever account asked, which made a second, never-connected account look as though it held a token — and could publish to the first account's channel | `youtube/accounts.py:refresh_token_for` |
+| Connecting a **second account leaves the legacy settings pointing at the first** | The legacy settings are the single-account path. Rewriting them to the newest account would silently move the destination of every upload already queued | `youtube/accounts.py:is_first_account` |
+| `invalid_grant` marks **one** account, not the credential | A revoked token for one Google account says nothing about the others, and taking the whole publisher down for one bad account would be a worse failure than the one it fixes | `youtube/oauth.py:_mark_needs_reconnect` |
+| `madeForKids` is a **tri-state**, and the empty state **refuses the upload** | It is a legal declaration. Two states cannot say "not yet decided", and guessing "false" is a declaration the owner never made | `youtube/policy.py` |
+| The **global privacy default becomes private**, and stored values are left alone | The public default was the known issue. Changing it fixes the next install without silently rewriting what an owner already chose | `config.py:YouTubeSettings.privacy`, migration v23 |
+| The **policy is resolved and written onto the row before the network call** | If the transfer dies halfway, the record of what was intended must already exist. Otherwise the row says nothing about what it was trying to do | `youtube/uploads.py:process_upload` |
+| A **read-back failure never fails the upload** | The video is already on YouTube. A lookup that fails says nothing about that, and marking the row failed would invite a duplicate | `youtube/uploader.py:read_back` |
+| The upload is sent in **chunks with a persistent session**, not one PUT | One PUT of an 80 MB file loses everything when the connection drops. The session handle is the only way back into an upload that stopped partway through | `youtube/resumable.py`, migration v24 |
+| The **quota is reserved before the transfer** | An estimate that only counted the calls that succeeded would under-report exactly the case the owner most needs to see: a transfer that died halfway and cost the units anyway | `youtube/quota.py:reserve` |
+| **Exhaustion queues to the reset; a rate limit backs off** | They are different problems with different clocks. Failing a row over a limit that resets on its own loses the clip's place in the queue for nothing | `youtube/quota.py:reset_at`, `youtube/queue.py:_run` |
+| A **quota wait does not count as an attempt** | The file never left the machine. Spending the row's retry allowance on a limit that has nothing to do with it would use up the allowance on the wrong thing | `youtube/queue.py:_run` |
+| Reconciliation **grades its evidence** instead of lumping it together | YouTube's own session record confirms; a title match on the channel is a hint. Treating the second as the first would publish a duplicate under the name of caution | `youtube/reconcile.py` |
+| An **unsettled upload waits for the owner** — it is neither failed nor retried | Retrying it could publish the clip twice, and failing it would say "this did not happen" when nobody knows. There is a third state, and it is the honest one | `youtube/uploads.py`, migration v25 |
+| The **six-field decision is stored whole** | A rule edited tomorrow leaves yesterday's decision readable. A record recomputed on demand would change with the rules | `routing/decision.py`, migration v26 |
+| The **confidence is the classifier's own figure**, labelled as such | There is no quality score anywhere. A bare number next to a clip reads as a measurement, and this one is the model's opinion of a category | `routing/decision.py`, `frontend/src/pages/Routing.tsx` |
+| A **fallback is labelled as a fallback** | "No rule matched" and "no classification" are different answers, and a default route presented as though a rule chose it is a small lie | `routing/decision.py:_explain` |
+
+### Residuals carried into later milestones
+
+| Residual | Status | Action |
+|---|---|---|
+| The **live YouTube path** — OAuth, the Data API, the resumable session, the read-back | Unverified — no authorised Google OAuth client or test channel was supplied; the whole of M4a's evidence is against API doubles | Lane B — run the Lane B script with real credentials |
+| YouTube's **own quota reset** is at midnight Pacific Time, while our ledger's day rolls over at local midnight | Partial — our accounting is exact for our own ledger; a retry that lands before YouTube's reset is refused again and waits again, which costs nothing and loses nothing | M5 — reconcile the two clocks if it becomes a nuisance |
+| The **Google Cloud compliance audit** for public uploads | Unverified — an un-audited API project can only upload private videos | Owner — request the audit in Google Cloud Console |
+| The **channel search in reconciliation** matches on the title that was actually sent, which is a heuristic | Partial — a title match is graded as evidence and never marks an upload published; it is a hint, not a proof | M5 — tighten it if the field evidence shows it misleads |
+| The **duplicate check in the worker** is same-clip only; byte-identical detection lives in the report script | Partial — a double enqueue is refused, but two different clips with the same bytes are only found by the script | M5 — move the hash check into the worker |
+
+---
+
+## M4b–M5
 
 Not started. Sequence and ordering constraints are in `docs/upgrade-audit.md` §19.
 
@@ -315,3 +376,11 @@ Not started. Sequence and ordering constraints are in `docs/upgrade-audit.md` §
 | 2026-11-20 | `b3d1c25` | M3 — the creative stage wired into the runner, and the budget, plan, preference, format and diagnostics endpoints |
 | 2026-11-20 | `fd64fd2` | M3 — the Review screen shows the plan, the budget and the measurements; the score is labelled as the model's suggestion |
 | 2026-11-20 | `7cdcf7a` | M3 — the ledger, the matrix and the audit updated with the M3 evidence |
+| 2026-11-20 | `7b9751b` | M3 — the ledger changelog row for the milestone commit |
+| 2026-11-20 | `cd3ebd1` | M4a — the Google account owns the credential and the channel: per-account tokens, a callback bound to its account, and `invalid_grant` isolated to one account (migration v22) |
+| 2026-11-20 | `20f6578` | M4a — the publishing policy: the audience declaration, the privacy that is read back, and the destination that is never guessed (migration v23) |
+| 2026-11-20 | `aa1f27f` | M4a — the upload survives a dropped connection: chunked resumable upload, the day's quota ledger, and a bounded backoff (migration v24) |
+| 2026-11-20 | `7ed2a8d` | M4a — an upload that may have succeeded is never sent twice: the reconciliation grades its evidence, and an unsettled row waits for the owner (migration v25) |
+| 2026-11-20 | `53bc065` | M4a — the routing decision explains itself: the six fields, stored whole and shown (migration v26) |
+| 2026-11-20 | `5d46feb` | M4a — the clip list shows the whole routing explanation |
+| 2026-11-20 | `8038890` | M4a — running out of quota waits for the reset; a rate limit still backs off |
