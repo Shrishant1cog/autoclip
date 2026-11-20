@@ -714,7 +714,9 @@ class PipelineRunner:
                 style=style,
                 ratio=ratio,
                 speech_intervals=(
-                    timeline.slice(clip.start_s, clip.end_s) if timeline is not None else []
+                    timeline.relative_slice(clip.start_s, clip.end_s)
+                    if timeline is not None
+                    else []
                 ),
             )
 

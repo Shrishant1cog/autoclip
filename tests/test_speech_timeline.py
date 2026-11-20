@@ -256,6 +256,38 @@ def test_slicing_clips_the_intervals_to_the_range():
     assert clipped[1].end_ms == 2500
 
 
+def test_a_relative_slice_is_measured_from_the_clip():
+    """A render's clock starts at the clip, not at the source.
+
+    The timeline is measured against the whole video. Handing its raw times
+    to a filtergraph whose clock starts at the clip puts the ducking in the
+    wrong place — and, for any clip that is not at the start of the video,
+    in a place that does not exist at all.
+    """
+    timeline = SpeechTimeline(
+        intervals=[_interval(62_000, 63_000)],
+        duration_s=120.0,
+    )
+
+    relative = timeline.relative_slice(60.0, 70.0)
+
+    assert len(relative) == 1
+    assert relative[0].start_ms == 2000
+    assert relative[0].end_ms == 3000
+
+
+def test_a_relative_slice_stays_inside_the_clip():
+    timeline = SpeechTimeline(
+        intervals=[_interval(59_000, 61_000)],
+        duration_s=120.0,
+    )
+
+    relative = timeline.relative_slice(60.0, 65.0)
+
+    assert relative[0].start_ms == 0
+    assert relative[0].end_ms == 1000
+
+
 def test_density_is_the_share_of_speech():
     timeline = SpeechTimeline(intervals=[_interval(0, 1000)], duration_s=4.0)
     assert timeline.density() == pytest.approx(0.25)

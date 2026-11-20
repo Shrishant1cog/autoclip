@@ -213,7 +213,11 @@ class SpeechTimeline:
         ]
 
     def slice(self, start_s: float, end_s: float) -> list[SpeechInterval]:
-        """The intervals inside a time range, clipped to it."""
+        """The intervals inside a time range, clipped to it.
+
+        The times are the source's own — the timeline is measured against
+        the whole video, not against any one clip.
+        """
         start_ms = int(round(start_s * 1000))
         end_ms = int(round(end_s * 1000))
         out: list[SpeechInterval] = []
@@ -228,6 +232,26 @@ class SpeechTimeline:
                 )
             )
         return out
+
+    def relative_slice(self, start_s: float, end_s: float) -> list[SpeechInterval]:
+        """The intervals inside a time range, measured from the range's start.
+
+        A render's clock starts at the clip, so anything handed to ffmpeg has
+        to be counted from the clip's own first frame. The timeline is
+        measured against the whole source, so the shift happens here rather
+        than in every caller that forgets it.
+        """
+        offset_ms = int(round(start_s * 1000))
+        return [
+            SpeechInterval(
+                start_ms=interval.start_ms - offset_ms,
+                end_ms=interval.end_ms - offset_ms,
+                confidence=interval.confidence,
+                source=interval.source,
+                speaker=interval.speaker,
+            )
+            for interval in self.slice(start_s, end_s)
+        ]
 
 
 # --------------------------------------------------------------------------
