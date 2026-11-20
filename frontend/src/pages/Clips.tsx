@@ -336,37 +336,45 @@ function ClipLibraryRow({
  * confidence and whether it was a fallback. The confidence is the
  * classifier's own figure for the category — not a quality score, and
  * it is labelled as such so it cannot be mistaken for one.
+ *
+ * It is two lines rather than one, because a single line has to cut
+ * something off: the rule's name is the part that says *why*, and it
+ * is the last thing that should be the one that disappears.
  */
 function RoutingNote({ routing }: { routing: RoutingDecision }) {
   const destination = routing.channel_title || routing.channel_id || 'no channel set up'
   return (
-    <p className="mt-1 truncate text-xs text-ink-500" title={routing.reason}>
-      <span className="text-ink-500">routes to</span>{' '}
-      <span className="text-ink-300">{destination}</span>
-      {routing.category && (
-        <>
-          {' · '}
-          <span className="lowercase">{routing.category}</span>
-        </>
-      )}
-      {routing.rule ? (
-        <>
-          {' · '}
-          <span>rule “{routing.rule}”</span>
-        </>
-      ) : (
-        <>
-          {' · '}
-          <span className="text-sodium-500">{routing.fallback_reason || 'default channel'}</span>
-        </>
-      )}
-      {routing.category && (
-        <>
-          {' · '}
-          <span className="numeric">classifier confidence {routing.confidence.toFixed(2)}</span>
-        </>
-      )}
-    </p>
+    <div className="mt-1 space-y-0.5 text-xs text-ink-500">
+      <p className="truncate" title={routing.reason}>
+        <span className="text-ink-500">routes to</span>{' '}
+        <span className="text-ink-300">{destination}</span>
+        {routing.category && (
+          <>
+            {' · '}
+            <span className="lowercase">{routing.category}</span>
+          </>
+        )}
+      </p>
+      <p className="truncate">
+        {routing.rule ? (
+          <>
+            <span className="text-ink-500">rule</span>{' '}
+            <span className="text-ink-400">“{routing.rule}”</span>
+          </>
+        ) : (
+          <>
+            <span className="text-ink-500">fallback</span>{' '}
+            <span className="text-sodium-500">{routing.fallback_reason || 'default channel'}</span>
+          </>
+        )}
+        {routing.category && (
+          <>
+            {' · '}
+            <span className="numeric">classifier confidence {routing.confidence.toFixed(2)}</span>
+          </>
+        )}
+      </p>
+    </div>
   )
 }
 
