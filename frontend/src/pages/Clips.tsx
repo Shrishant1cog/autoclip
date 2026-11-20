@@ -368,6 +368,23 @@ function UploadBadge({
       </a>
     )
   }
+  if (upload.status === 'needs_reconciliation') {
+    // The upload may or may not have reached YouTube. It was not sent
+    // again and it was not called published — saying either would be a
+    // guess dressed up as a fact.
+    return (
+      <button
+        onClick={onRetry}
+        className="text-xs text-signal-warn underline underline-offset-4"
+        title={
+          upload.reconcile_detail ||
+          'It is not clear whether this upload reached YouTube. Check YouTube, then retry.'
+        }
+      >
+        needs checking - retry
+      </button>
+    )
+  }
   if (upload.status === 'failed') {
     return (
       <button

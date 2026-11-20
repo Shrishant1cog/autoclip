@@ -156,6 +156,17 @@ class UploadOut(BaseModel):
     next_attempt_at: str = ""
     #: The progress as a percentage, or 0 when it is not known.
     progress_percent: int = 0
+    #: What we found when we went looking for the upload: 'confirmed',
+    #: 'evidence', 'not_uploaded' or 'unknown'.
+    reconcile_status: str = ""
+    #: The sentence shown to the owner about the lookup.
+    reconcile_detail: str = ""
+    #: When the lookup happened.
+    reconciled_at: str = ""
+    #: True when the upload may or may not have reached YouTube and the
+    #: owner has to look. It was not sent again and it was not called
+    #: published.
+    needs_reconciliation: bool = False
 
     @classmethod
     def of(cls, upload: models.YouTubeUpload) -> UploadOut:
@@ -189,6 +200,10 @@ class UploadOut(BaseModel):
             attempts=upload.attempts,
             next_attempt_at=upload.next_attempt_at,
             progress_percent=percent,
+            reconcile_status=upload.reconcile_status,
+            reconcile_detail=upload.reconcile_detail,
+            reconciled_at=upload.reconciled_at,
+            needs_reconciliation=(upload.status == "needs_reconciliation"),
         )
 
 
@@ -221,6 +236,16 @@ class UploadEditIn(BaseModel):
     tags: list[str] | None = None
     privacy: Literal["private", "unlisted", "public"] | None = None
     made_for_kids: Literal["", "false", "true"] | None = None
+
+
+class UploadConfirmIn(BaseModel):
+    """The owner's word that an upload is on YouTube.
+
+    The server does not take it on trust: it asks YouTube about the
+    video, and only a video YouTube confirms is recorded as published.
+    """
+
+    video_id: str = ""
 
 
 class YouTubeAudienceIn(BaseModel):

@@ -11,9 +11,10 @@ from fastapi.responses import HTMLResponse
 
 from .. import config
 from ..db import store
-from ..youtube import oauth, policy, quota, uploads
+from ..youtube import oauth, policy, quota, uploader, uploads
 from ..youtube.queue import upload_queue
 from .schemas import (
+    UploadConfirmIn,
     UploadEditIn,
     UploadOut,
     YouTubeAudienceIn,
@@ -222,6 +223,27 @@ async def retry_upload(upload_id: str) -> UploadOut:
     if upload.status == "done":
         raise HTTPException(status_code=409, detail="This clip is already on YouTube.")
     upload_queue.notify()
+    return UploadOut.of(upload)
+
+
+@router.put("/uploads/{upload_id}/confirm", response_model=UploadOut)
+async def confirm_upload(upload_id: str, payload: UploadConfirmIn) -> UploadOut:
+    """Record an upload the owner says is on YouTube.
+
+    The owner's word is checked against YouTube before it is recorded.
+    A video YouTube cannot confirm is refused, because a row that says
+    "published" for a video that is not there is a lie the owner would
+    have to discover later.
+    """
+    video_id = payload.video_id.strip()
+    if not video_id:
+        raise HTTPException(status_code=400, detail="The video id is required.")
+    try:
+        upload = await asyncio.to_thread(uploads.confirm_upload, upload_id, video_id)
+    except uploader.YouTubeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if upload is None:
+        raise HTTPException(status_code=404, detail="Upload not found.")
     return UploadOut.of(upload)
 
 

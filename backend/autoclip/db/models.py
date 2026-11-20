@@ -267,7 +267,19 @@ class Export:
         )
 
 
-UploadStatus = Literal["pending", "uploading", "done", "failed", "skipped"]
+#: The states an upload row can be in.
+#:
+#: ``needs_reconciliation`` is the one that matters: the upload may or
+#: may not have succeeded, and AutoClip will not decide on its own. It
+#: waits for the owner rather than retrying into a duplicate.
+UploadStatus = Literal[
+    "pending",
+    "uploading",
+    "done",
+    "failed",
+    "skipped",
+    "needs_reconciliation",
+]
 
 
 @dataclass
@@ -324,6 +336,13 @@ class YouTubeUpload:
     #: When the next attempt is due. The worker skips the row until
     #: then.
     next_attempt_at: str = ""
+    #: What we found when we went looking for the upload: 'confirmed',
+    #: 'evidence', 'not_uploaded' or 'unknown'.
+    reconcile_status: str = ""
+    #: The sentence shown to the owner about the lookup.
+    reconcile_detail: str = ""
+    #: When the lookup happened.
+    reconciled_at: str = ""
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> YouTubeUpload:
@@ -356,6 +375,9 @@ class YouTubeUpload:
             session_expires_at=_column(row, "session_expires_at"),
             attempts=int(_column(row, "attempts", "0") or 0),
             next_attempt_at=_column(row, "next_attempt_at"),
+            reconcile_status=_column(row, "reconcile_status"),
+            reconcile_detail=_column(row, "reconcile_detail"),
+            reconciled_at=_column(row, "reconciled_at"),
         )
 
 

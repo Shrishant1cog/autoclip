@@ -14,6 +14,7 @@ import logging
 
 from .. import config
 from ..db import store
+from ..db.models import UploadStatus
 from . import backoff, oauth, uploads
 
 log = logging.getLogger(__name__)
@@ -120,9 +121,14 @@ class UploadQueue:
                     due,
                 )
             else:
-                log.warning("YouTube upload %s failed: %s", upload_id, exc)
-                store.update_upload(upload_id, status="failed", error=message)
-                _notify(upload, "failed", message)
+                # An upload that cannot be settled is not a failure and
+                # not a retry: it waits for the owner, because sending it
+                # again could publish the clip twice.
+                unsettled = bool(getattr(exc, "needs_reconciliation", False))
+                status: UploadStatus = "needs_reconciliation" if unsettled else "failed"
+                log.warning("YouTube upload %s %s: %s", upload_id, status, exc)
+                store.update_upload(upload_id, status=status, error=message)
+                _notify(upload, "failed" if not unsettled else "unsettled", message)
         else:
             store.update_upload(
                 upload_id,
@@ -164,6 +170,8 @@ def _notify(upload, outcome: str, detail: str = "") -> None:
             )
         elif outcome == "skipped":
             events.upload_skipped(upload.id, title, detail)
+        elif outcome == "unsettled":
+            events.upload_unsettled(upload.id, title, detail)
         else:
             events.upload_failed(upload.id, title, detail)
     except Exception:  # noqa: BLE001

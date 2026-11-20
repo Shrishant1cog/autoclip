@@ -35,12 +35,25 @@ class YouTubeError(RuntimeError):
     ``transient`` says whether trying again later could work. A dropped
     connection is transient; a malformed request is not. The worker
     uses it to decide between backing off and giving up.
+
+    ``needs_reconciliation`` says the upload may or may not have
+    succeeded and AutoClip will not decide. The row waits for the
+    owner rather than being sent again, because sending it again could
+    publish the clip twice.
     """
 
-    def __init__(self, message: str, *, hint: str = "", transient: bool = False) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        hint: str = "",
+        transient: bool = False,
+        needs_reconciliation: bool = False,
+    ) -> None:
         super().__init__(message)
         self.hint = hint
         self.transient = transient
+        self.needs_reconciliation = needs_reconciliation
 
     def __str__(self) -> str:
         base = super().__str__()

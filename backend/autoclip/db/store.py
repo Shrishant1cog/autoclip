@@ -489,8 +489,8 @@ def create_upload(upload: YouTubeUpload) -> YouTubeUpload:
                 description, tags_json, privacy, error, created_at, updated_at,
                 made_for_kids, requested_privacy, actual_privacy, destination_channel_id,
                 session_url, bytes_sent, total_bytes, session_expires_at, attempts,
-                next_attempt_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                next_attempt_at, reconcile_status, reconcile_detail, reconciled_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 upload.id,
@@ -516,6 +516,9 @@ def create_upload(upload: YouTubeUpload) -> YouTubeUpload:
                 upload.session_expires_at,
                 upload.attempts,
                 upload.next_attempt_at,
+                upload.reconcile_status,
+                upload.reconcile_detail,
+                upload.reconciled_at,
             ),
         )
     return upload
@@ -603,6 +606,9 @@ def update_upload(
     session_expires_at: str | None = None,
     attempts: int | None = None,
     next_attempt_at: str | None = None,
+    reconcile_status: str | None = None,
+    reconcile_detail: str | None = None,
+    reconciled_at: str | None = None,
 ) -> None:
     fields: dict[str, Any] = {"updated_at": utcnow()}
     for name, value in (
@@ -622,6 +628,9 @@ def update_upload(
         ("session_expires_at", session_expires_at),
         ("attempts", attempts),
         ("next_attempt_at", next_attempt_at),
+        ("reconcile_status", reconcile_status),
+        ("reconcile_detail", reconcile_detail),
+        ("reconciled_at", reconciled_at),
     ):
         if value is not None:
             fields[name] = value

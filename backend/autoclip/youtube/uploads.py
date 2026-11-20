@@ -16,10 +16,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from typing import Any
 
 from .. import config
 from ..db import store
-from ..db.models import YouTubeUpload, new_id
+from ..db.models import YouTubeUpload, new_id, utcnow
 from ..pipeline import thumbnails
 from ..pipeline.transcript import Transcript, Word
 from ..providers import LLMProvider, build_provider
@@ -27,6 +28,7 @@ from ..providers.base import looks_like_auth_failure
 from . import duplicates, oauth, quota, uploader
 from . import metadata as metadata_module
 from . import policy as policy_module
+from . import reconcile as reconcile_module
 
 log = logging.getLogger(__name__)
 
@@ -121,7 +123,144 @@ def enqueue_export_all(
         return []
 
 
-def retry_upload(upload_id: str, settings: config.Settings | None = None) -> YouTubeUpload | None:
+def _reconcile(
+    upload: YouTubeUpload,
+    settings: config.Settings,
+    account_id: str | None,
+    channel: dict | None,
+    path: Path,
+) -> str | None:
+    """Settle an upload that may have succeeded, before sending it again.
+
+    Returns the video id when the upload is confirmed — in which case
+    nothing is sent again — and ``None`` when it is safe to carry on
+    with the upload.
+
+    Anything that cannot be settled raises
+    :class:`uploader.YouTubeError`, and the row is left as
+    ``needs_reconciliation``: the owner decides, not AutoClip.
+    """
+    channel_id = (channel or {}).get("channel_id", "")
+    suffix = (channel or {}).get("title_suffix", "")
+    total_bytes = 0
+    try:
+        total_bytes = path.stat().st_size
+    except OSError:
+        total_bytes = upload.total_bytes
+
+    outcome = reconcile_module.reconcile(
+        upload,
+        settings,
+        account_id=account_id,
+        channel_id=channel_id,
+        title_suffix=suffix,
+        total_bytes=total_bytes,
+    )
+
+    store.update_upload(
+        upload.id,
+        reconcile_status=outcome.status,
+        reconcile_detail=outcome.detail,
+        reconciled_at=utcnow(),
+    )
+
+    if outcome.confirmed:
+        # YouTube confirmed it. The upload is recorded, not repeated.
+        log.info("Upload %s was already on YouTube as %s.", upload.id, outcome.video_id)
+        store.update_upload(
+            upload.id,
+            video_id=outcome.video_id,
+            actual_privacy=outcome.actual_privacy,
+            session_url="",
+            bytes_sent=0,
+            next_attempt_at="",
+        )
+        return outcome.video_id
+
+    if outcome.needs_owner:
+        # There is a candidate, or the lookup itself failed. Either way
+        # AutoClip does not know whether the upload succeeded, and a
+        # blind retry could publish the clip twice.
+        raise uploader.YouTubeError(
+            outcome.detail
+            or "It is not clear whether this upload reached YouTube, so it has not "
+            "been sent again.",
+            hint=(
+                "Open YouTube and check whether the clip is there. If it is, mark the "
+                "upload as done; if it is not, retry it."
+            ),
+            needs_reconciliation=True,
+        )
+
+    # Not uploaded: the session says the transfer did not finish. The
+    # stale session is dropped and the file is sent again.
+    if outcome.status == reconcile_module.NOT_UPLOADED and upload.session_url:
+        store.update_upload(upload.id, session_url="", bytes_sent=0)
+    return None
+
+
+def confirm_upload(
+    upload_id: str,
+    video_id: str,
+    settings: config.Settings | None = None,
+) -> YouTubeUpload | None:
+    """The owner says the upload is on YouTube. Verify it, then record it.
+
+    The owner's word is not enough on its own — a row that claims to be
+    published when the video is not there is a lie. So the video is
+    asked about, and only a video YouTube confirms is recorded.
+
+    Returns the updated row, or ``None`` when the row does not exist.
+    Raises :class:`uploader.YouTubeError` when YouTube cannot confirm
+    the video.
+    """
+    settings = settings or config.load()
+    upload = store.get_upload(upload_id)
+    if upload is None:
+        return None
+
+    account_id: str | None = None
+    if upload.channel_row_id:
+        from ..youtube import accounts as accounts_store
+
+        channel = accounts_store.get_channel(upload.channel_row_id)
+        if channel is None:
+            raise uploader.YouTubeError("The destination channel for this upload no longer exists.")
+        account_id = channel["account_id"]
+
+    outcome = uploader.read_back(settings, video_id=video_id, account_id=account_id)
+    if not outcome.found:
+        raise uploader.YouTubeError(
+            f"YouTube could not confirm that video {video_id} exists.",
+            hint=(
+                "Check the video id in the YouTube URL. If the video really is there, "
+                "paste the id from the end of the address bar."
+            ),
+        )
+
+    store.update_upload(
+        upload.id,
+        status="done",
+        video_id=video_id,
+        actual_privacy=outcome.actual_privacy,
+        destination_channel_id=outcome.channel_id or upload.destination_channel_id,
+        reconcile_status="confirmed_by_owner",
+        reconcile_detail=f"The owner confirmed video {video_id}.",
+        reconciled_at=utcnow(),
+        session_url="",
+        bytes_sent=0,
+        next_attempt_at="",
+        clear_error=True,
+    )
+    return store.get_upload(upload.id)
+
+
+def retry_upload(
+    upload_id: str,
+    settings: config.Settings | None = None,
+    *,
+    force: bool = False,
+) -> YouTubeUpload | None:
     """Put a failed upload back in the queue.
 
     The row keeps **its own** privacy. It used to re-read the current
@@ -137,12 +276,24 @@ def retry_upload(upload_id: str, settings: config.Settings | None = None) -> You
         return None
     if upload.status == "done":
         return upload
-    store.update_upload(
-        upload.id,
-        status="pending",
-        clear_error=True,
-        next_attempt_at="",
-    )
+    fields: dict[str, Any] = {
+        "status": "pending",
+        "clear_error": True,
+        "next_attempt_at": "",
+    }
+    if upload.status == "needs_reconciliation":
+        # The owner has looked at YouTube and asked for it to be sent.
+        # Their decision replaces AutoClip's caution — and the record
+        # says that is how it was decided, so it is not mistaken for an
+        # automatic retry.
+        fields["reconcile_status"] = "owner_retried"
+        fields["reconcile_detail"] = (
+            "The owner checked YouTube and asked for this upload to be sent again."
+        )
+        fields["reconciled_at"] = utcnow()
+        fields["session_url"] = ""
+        fields["bytes_sent"] = 0
+    store.update_upload(upload.id, **fields)
     return store.get_upload(upload.id)
 
 
@@ -217,6 +368,15 @@ async def process_upload(upload: YouTubeUpload, settings: config.Settings | None
     category_id = policy.category_id
     account_id: str | None = policy.account_id or None
 
+    # A previous attempt may have succeeded with the answer lost. Before
+    # sending anything again, find out whether it did — a blind retry
+    # would publish the clip twice. An owner who has already checked
+    # YouTube and asked for it to be sent has settled that themselves.
+    if upload.reconcile_status != "owner_retried" and (upload.attempts > 0 or upload.session_url):
+        settled = _reconcile(upload, settings, account_id, channel, path)
+        if settled is not None:
+            return settled
+
     words, language = clip_words(clip)
     generated = await _metadata(
         upload,
@@ -233,6 +393,9 @@ async def process_upload(upload: YouTubeUpload, settings: config.Settings | None
         suffix = channel.get("title_suffix") or ""
         if suffix and not generated.title.endswith(suffix):
             generated.title = f"{generated.title} {suffix}".strip()
+        # The row records the title that is actually sent, so a later
+        # lookup for this upload can match it.
+        store.update_upload(upload.id, title=generated.title)
 
     # Record the decision before the network call, so a transfer that dies
     # halfway still leaves the record of what was asked for.

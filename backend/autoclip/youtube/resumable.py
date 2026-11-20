@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -41,12 +41,14 @@ log = logging.getLogger(__name__)
 
 __all__ = [
     "CHUNK_SIZE",
+    "ProbeResult",
     "ResumableError",
     "SessionGone",
     "UploadSession",
     "chunk_ranges",
     "create_session",
     "probe",
+    "probe_session",
     "upload_file",
 ]
 
@@ -193,19 +195,36 @@ def create_session(
     return UploadSession(url=session_url, expires_at=expiry, total_bytes=total_bytes)
 
 
-def probe(
+@dataclass(frozen=True)
+class ProbeResult:
+    """What YouTube says about a session.
+
+    ``complete`` is YouTube's own statement that the transfer finished,
+    and ``resource`` is the video it created. That is a confirmation —
+    unlike a title match on the channel, which is only evidence.
+    """
+
+    #: How many bytes YouTube has. Zero means it has nothing.
+    bytes_received: int = 0
+    #: True when YouTube says the upload is finished.
+    complete: bool = False
+    #: The created video, when the upload is finished.
+    resource: dict[str, Any] = field(default_factory=dict)
+
+
+def probe_session(
     *,
     session_url: str,
     token: str,
     total_bytes: int,
     timeout: float = 30.0,
-) -> int:
-    """Ask YouTube how many bytes it already has.
+) -> ProbeResult:
+    """Ask YouTube about a session: how far it got, and whether it is done.
 
     The request carries no body and says ``bytes */total``, which is
-    YouTube's way of asking for the current offset. The answer is the
-    ``Range`` header. Zero means YouTube has nothing, so the upload
-    starts from the beginning.
+    YouTube's way of asking about the current state. The answer is
+    either the ``Range`` header — how many bytes it has — or, when the
+    upload is already finished, the created video.
     """
     try:
         response = httpx.put(
@@ -232,17 +251,52 @@ def probe(
             f"YouTube could not report the upload progress: HTTP {response.status_code}"
         )
 
+    if response.status_code in (200, 201):
+        # The upload is finished. The body is the created video.
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {}
+        resource = payload if isinstance(payload, dict) else {}
+        return ProbeResult(
+            bytes_received=total_bytes,
+            complete=True,
+            resource=resource,
+        )
+
     raw = response.headers.get("range") or response.headers.get("Range") or ""
     # The header looks like "bytes=0-1048575" — the count is the end
     # plus one, because the range is inclusive.
     if "=" not in raw:
-        return 0
+        return ProbeResult()
     _, _, span = raw.partition("=")
     end = span.split("-")[-1]
     try:
-        return int(end) + 1
+        return ProbeResult(bytes_received=int(end) + 1)
     except ValueError:
-        return 0
+        return ProbeResult()
+
+
+def probe(
+    *,
+    session_url: str,
+    token: str,
+    total_bytes: int,
+    timeout: float = 30.0,
+) -> int:
+    """Ask YouTube how many bytes it already has.
+
+    The request carries no body and says ``bytes */total``, which is
+    YouTube's way of asking for the current offset. The answer is the
+    ``Range`` header. Zero means YouTube has nothing, so the upload
+    starts from the beginning.
+    """
+    return probe_session(
+        session_url=session_url,
+        token=token,
+        total_bytes=total_bytes,
+        timeout=timeout,
+    ).bytes_received
 
 
 def upload_file(

@@ -43,7 +43,7 @@ export interface UploadRecord {
   export_id: string
   clip_id: string
   channel_row_id: string
-  status: 'pending' | 'uploading' | 'done' | 'failed' | 'skipped'
+  status: 'pending' | 'uploading' | 'done' | 'failed' | 'skipped' | 'needs_reconciliation'
   video_id: string | null
   title: string
   description: string
@@ -76,6 +76,18 @@ export interface UploadRecord {
   next_attempt_at: string
   /** The progress as a percentage, or 0 when it is not known. */
   progress_percent: number
+  /** What we found when we went looking for the upload. */
+  reconcile_status: '' | 'confirmed' | 'evidence' | 'not_uploaded' | 'unknown'
+  /** The sentence shown to the owner about the lookup. */
+  reconcile_detail: string
+  /** When the lookup happened. */
+  reconciled_at: string
+  /**
+   * True when the upload may or may not have reached YouTube and the
+   * owner has to look. It was not sent again and it was not called
+   * published.
+   */
+  needs_reconciliation: boolean
 }
 
 /** How much of YouTube's daily API quota is left. */
@@ -1189,6 +1201,15 @@ export const api = {
     request<UploadRecord>(`/api/youtube/uploads/${uploadId}/retry`, { method: 'POST' }),
   /** One upload, with the policy it was — and is — publishing under. */
   getUpload: (uploadId: string) => request<UploadRecord>(`/api/youtube/uploads/${uploadId}`),
+  /**
+   * Record an upload the owner says is on YouTube. The server checks
+   * with YouTube before it records it.
+   */
+  confirmUpload: (uploadId: string, videoId: string) =>
+    request<UploadRecord>(`/api/youtube/uploads/${uploadId}/confirm`, {
+      method: 'PUT',
+      body: JSON.stringify({ video_id: videoId }),
+    }),
   /** Change what a queued upload will say and how it will be seen. */
   editUpload: (
     uploadId: string,

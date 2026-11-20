@@ -149,6 +149,22 @@ def upload_done(
     )
 
 
+def upload_unsettled(upload_id: str, title: str, error: str) -> Notification | None:
+    """An upload could not be settled either way.
+
+    It may or may not have reached YouTube, so AutoClip did not send it
+    again and did not call it published. The owner has to look.
+    """
+    return notify(
+        "upload_unsettled",
+        severity="warning",
+        title=f"Could not confirm “{title}”",
+        body=error.strip()[:500] or "It is not clear whether this upload reached YouTube.",
+        link="/clips",
+        entity_id=upload_id,
+    )
+
+
 def upload_failed(upload_id: str, title: str, error: str) -> Notification | None:
     """An upload could not be published."""
     return notify(

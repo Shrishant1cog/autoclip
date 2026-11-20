@@ -1006,6 +1006,137 @@ def _migration_v24(conn: sqlite3.Connection) -> None:
     )
 
 
+# --- v25: the reconciliation record ----------------------------------------
+
+_V25 = """
+-- What we found when we went looking for an upload that may have
+-- succeeded anyway.
+--
+--   reconcile_status -- 'confirmed'   YouTube confirmed the upload and
+--                                   named the video.
+--                     'evidence'    Something on the channel looks like
+--                                   this upload. Evidence, not proof.
+--                     'not_uploaded' The upload did not happen.
+--                     'unknown'     The lookup failed.
+--   reconcile_detail -- the sentence shown to the owner.
+--   reconciled_at    -- when the lookup happened.
+--
+-- The columns are added by the migration function, because SQLite has no
+-- 'ADD COLUMN IF NOT EXISTS' and a half-applied migration must not stop
+-- the database from opening.
+"""
+
+
+def _migration_v25(conn: sqlite3.Connection) -> None:
+    upload_columns = {row["name"] for row in conn.execute("PRAGMA table_info(youtube_uploads)")}
+    for column, definition in (
+        ("reconcile_status", "TEXT NOT NULL DEFAULT ''"),
+        ("reconcile_detail", "TEXT NOT NULL DEFAULT ''"),
+        ("reconciled_at", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if column not in upload_columns:
+            conn.execute(f"ALTER TABLE youtube_uploads ADD COLUMN {column} {definition}")
+
+    # SQLite cannot widen a CHECK constraint in place, so the table is
+    # rebuilt — the same way v3 and v9 widened it before. The new state
+    # 'needs_reconciliation' is deliberate: an upload that may or may
+    # not have reached YouTube is neither a failure nor a retry, and it
+    # waits for the owner rather than being sent again into a duplicate.
+    columns = [row["name"] for row in conn.execute("PRAGMA table_info(youtube_uploads)")]
+    conn.execute(
+        """
+        CREATE TABLE youtube_uploads_v25 (
+            id          TEXT PRIMARY KEY,
+            export_id   TEXT NOT NULL REFERENCES exports(id) ON DELETE CASCADE,
+            clip_id     TEXT NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+            channel_row_id TEXT NOT NULL DEFAULT '',
+            status      TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending','uploading','done','failed','skipped',
+                                          'needs_reconciliation')),
+            video_id    TEXT,
+            title       TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            tags_json   TEXT NOT NULL DEFAULT '[]',
+            privacy     TEXT NOT NULL DEFAULT 'private',
+            error       TEXT,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        )
+        """
+    )
+    # The columns the later migrations added, in the order they were
+    # added, with the definitions they use.
+    optional = (
+        ("last_resumed_at", "TEXT"),
+        ("made_for_kids", "TEXT NOT NULL DEFAULT ''"),
+        ("requested_privacy", "TEXT NOT NULL DEFAULT ''"),
+        ("actual_privacy", "TEXT NOT NULL DEFAULT ''"),
+        ("destination_channel_id", "TEXT NOT NULL DEFAULT ''"),
+        ("session_url", "TEXT NOT NULL DEFAULT ''"),
+        ("bytes_sent", "INTEGER NOT NULL DEFAULT 0"),
+        ("total_bytes", "INTEGER NOT NULL DEFAULT 0"),
+        ("session_expires_at", "TEXT NOT NULL DEFAULT ''"),
+        ("attempts", "INTEGER NOT NULL DEFAULT 0"),
+        ("next_attempt_at", "TEXT NOT NULL DEFAULT ''"),
+        ("reconcile_status", "TEXT NOT NULL DEFAULT ''"),
+        ("reconcile_detail", "TEXT NOT NULL DEFAULT ''"),
+        ("reconciled_at", "TEXT NOT NULL DEFAULT ''"),
+    )
+    carried = [name for name, _ in optional if name in columns]
+    for name, definition in optional:
+        if name in carried:
+            conn.execute(f"ALTER TABLE youtube_uploads_v25 ADD COLUMN {name} {definition}")
+
+    select_parts = [
+        name
+        if name in columns
+        else {
+            "last_resumed_at": "NULL",
+            "made_for_kids": "''",
+            "requested_privacy": "''",
+            "actual_privacy": "''",
+            "destination_channel_id": "''",
+            "session_url": "''",
+            "bytes_sent": "0",
+            "total_bytes": "0",
+            "session_expires_at": "''",
+            "attempts": "0",
+            "next_attempt_at": "''",
+            "reconcile_status": "''",
+            "reconcile_detail": "''",
+            "reconciled_at": "''",
+        }.get(name, "''")
+        for name in carried
+    ]
+    base = [
+        "id",
+        "export_id",
+        "clip_id",
+        "channel_row_id",
+        "status",
+        "video_id",
+        "title",
+        "description",
+        "tags_json",
+        "privacy",
+        "error",
+        "created_at",
+        "updated_at",
+    ]
+    all_columns = base + carried
+    conn.execute(
+        f"INSERT INTO youtube_uploads_v25 ({', '.join(all_columns)}) "  # noqa: S608
+        f"SELECT {', '.join(base + select_parts)} FROM youtube_uploads"
+    )
+    conn.execute("DROP TABLE youtube_uploads")
+    conn.execute("ALTER TABLE youtube_uploads_v25 RENAME TO youtube_uploads")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_youtube_uploads_export_channel"
+        " ON youtube_uploads(export_id, channel_row_id)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_youtube_uploads_status ON youtube_uploads(status)")
+
+
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v1,
     _migration_v2,
@@ -1031,6 +1162,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v22,
     _migration_v23,
     _migration_v24,
+    _migration_v25,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)
