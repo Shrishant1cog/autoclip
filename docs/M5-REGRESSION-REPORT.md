@@ -129,8 +129,11 @@ lint/type/unit/render steps, `frontend` (`npm ci` + `npm run build`), and `docke
 image, run it, poll `GET /api/health`).
 
 `concurrency: cancel-in-progress: true` means a newer push cancels the run for an older commit.
-Three runs were cancelled for exactly that reason, and that is why they are marked cancelled
+Four runs were cancelled for exactly that reason, and that is why they are marked cancelled
 rather than failed.
+
+**The table below is the run history as it stood at the release commit.** It is a record, and it
+grows; the claim that matters is the one under it, which does not go stale.
 
 | Run | Commit | Title | Result |
 |---|---|---|---|
