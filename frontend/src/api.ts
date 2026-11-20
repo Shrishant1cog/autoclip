@@ -186,6 +186,11 @@ export interface Settings {
     music_volume: number
     music_ducking: boolean
     ducking_amount_db: number
+    /** Absent on a server older than M2. */
+    layout?: 'auto' | 'above' | 'corner' | 'gameplay_only'
+    webcam_height_frac?: number
+    webcam_position?: LayoutPosition
+    webcam_corner_frac?: number
   }
   /** Absent on a server older than Phase 16. */
   resources?: {
@@ -598,6 +603,74 @@ export interface MusicFilters {
   licence?: string
   favourite?: boolean
   tag?: string
+}
+
+// -- Webcam layouts (M2) ------------------------------------------------------
+
+/**
+ * How the webcam and the gameplay sit together.
+ *
+ * `gameplay_only` never shows a webcam. `above` puts it in a strip over
+ * the gameplay. `corner` draws it over the gameplay in one corner.
+ */
+export type LayoutVariant = 'gameplay_only' | 'above' | 'corner'
+
+/** The corners the webcam can sit in. */
+export type LayoutPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+
+/**
+ * What is known about one source's layout.
+ *
+ * The detected rectangle is where the detector found a face that held
+ * still across cuts. The confidence is how sure it is. Nothing here
+ * identifies anybody.
+ */
+export interface SourceLayout {
+  source_id: string
+  detected: boolean
+  detected_x: number
+  detected_y: number
+  detected_width: number
+  detected_height: number
+  detected_confidence: number
+  detected_face_width: number
+  detected_reason: string
+  detected_at: string
+  /** The user's own choice. Empty means the automatic planner decides. */
+  variant: string
+  rect_x: number
+  rect_y: number
+  rect_width: number
+  rect_height: number
+  position: string
+  scale: number
+  updated_at: string
+}
+
+/** What one detection run found. */
+export interface LayoutDetection {
+  source_id: string
+  found: boolean
+  confidence: number
+  rect: Record<string, number>
+  reason: string
+  sample_fps: number
+  sampling_reason: string
+  shots: number
+  cuts_per_minute: number
+  observations: number
+}
+
+/** One layout option, with the words that explain it. */
+export interface LayoutVariantInfo {
+  value: LayoutVariant
+  title: string
+  description: string
+}
+
+export interface LayoutOptions {
+  variants: LayoutVariantInfo[]
+  positions: LayoutPosition[]
 }
 
 // -- External processing (M0.5) -----------------------------------------------
@@ -1027,6 +1100,37 @@ export const api = {
     }),
   listTransfers: (limit = 50) =>
     request<TransferRecord[]>(`/api/privacy/transfers?limit=${limit}`),
+
+  // -- Webcam layouts (M2) ----------------------------------------------------
+  listLayouts: () => request<SourceLayout[]>('/api/layout/sources'),
+  getLayout: (sourceId: string) =>
+    request<SourceLayout>(`/api/layout/sources/${encodeURIComponent(sourceId)}`),
+  putLayout: (
+    sourceId: string,
+    layout: {
+      variant: string
+      rect_x?: number
+      rect_y?: number
+      rect_width?: number
+      rect_height?: number
+      position?: string
+      scale?: number
+    },
+  ) =>
+    request<SourceLayout>(`/api/layout/sources/${encodeURIComponent(sourceId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ source_id: sourceId, ...layout }),
+    }),
+  clearLayout: (sourceId: string) =>
+    request<SourceLayout>(`/api/layout/sources/${encodeURIComponent(sourceId)}`, {
+      method: 'DELETE',
+    }),
+  detectLayout: (sourceId: string) =>
+    request<LayoutDetection>(
+      `/api/layout/sources/${encodeURIComponent(sourceId)}/detect`,
+      { method: 'POST' },
+    ),
+  layoutOptions: () => request<LayoutOptions>('/api/layout/variants'),
 
   // -- Learning (Phase 11) ---------------------------------------------------
   learningSummary: () =>

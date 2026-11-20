@@ -12,6 +12,7 @@ import {
 } from '../api'
 import { ErrorNote } from '../components/ErrorNote'
 import { MusicLibrary } from '../components/MusicLibrary'
+import { LayoutSettings } from '../components/LayoutSettings'
 
 const SECRET_LABELS: Record<string, string> = {
   anthropic: 'Anthropic API key',
@@ -402,6 +403,56 @@ export function Settings() {
         </label>
 
         <div className="mt-8 border-t border-ink-800 pt-6">
+          <h3 className="text-sm text-ink-100">Webcam</h3>
+          <p className="mt-1 text-xs leading-snug text-ink-500">
+            Automatic decides from what it detects. A webcam that is too small to show without
+            turning into a blur gets a corner instead of a strip.
+          </p>
+
+          <div className="mt-4 grid gap-5 sm:grid-cols-2">
+            <Select
+              label="Layout"
+              value={settings.export.layout ?? 'auto'}
+              onChange={(value) =>
+                patch({
+                  export: {
+                    ...settings.export,
+                    layout: value as 'auto' | 'above' | 'corner' | 'gameplay_only',
+                  },
+                })
+              }
+              options={['auto', 'above', 'corner', 'gameplay_only']}
+              labels={{ auto: 'Automatic' }}
+            />
+            <Select
+              label="Corner"
+              value={settings.export.webcam_position ?? 'top-right'}
+              onChange={(value) =>
+                patch({
+                  export: {
+                    ...settings.export,
+                    webcam_position: value as 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right',
+                  },
+                })
+              }
+              options={['top-left', 'top-right', 'bottom-left', 'bottom-right']}
+            />
+          </div>
+
+          {(settings.export.layout ?? 'auto') === 'above' && (
+            <div className="mt-4 grid gap-5 sm:grid-cols-2">
+              <NumberField
+                label="Webcam height (fraction of the frame)"
+                value={settings.export.webcam_height_frac ?? 0.4}
+                onCommit={(value) =>
+                  patch({ export: { ...settings.export, webcam_height_frac: value } })
+                }
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="mt-8 border-t border-ink-800 pt-6">
           <h3 className="text-sm text-ink-100">Background music</h3>
           <p className="mt-1 text-xs leading-snug text-ink-500">
             Tracks live in <code className="text-ink-400">~/.autoclip/music</code>. Music is looped
@@ -508,6 +559,13 @@ export function Settings() {
         note="Your music, indexed where it already is — never copied, moved or deleted."
       >
         <MusicLibrary onError={setError} />
+      </Section>
+
+      <Section
+        title="Webcam layout"
+        note="Where the webcam sits in the vertical clip. Your choice wins over the automatic one."
+      >
+        <LayoutSettings onError={setError} />
       </Section>
 
       <Section
