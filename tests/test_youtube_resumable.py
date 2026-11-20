@@ -461,6 +461,165 @@ def test_the_read_back_costs_a_unit(initialised_db: int) -> None:
 
 
 # --------------------------------------------------------------------------
+# Running out of quota is not a failure
+# --------------------------------------------------------------------------
+
+
+def _quota_row() -> YouTubeUpload:
+    """A clip, an export and an upload row ready for the worker."""
+    from autoclip.youtube import accounts as accounts_store
+
+    account = accounts_store.create_account(label="acc")
+    channel = accounts_store.add_channel(
+        account["id"],
+        {"id": "UC_primary", "title": "Primary", "url": ""},
+        made_for_kids="false",
+    )
+    source = Source(id=new_id(), type="upload", path="C:/s.mp4", title="s", duration_s=1.0)
+    store.create_source(source)
+    job = Job(id=new_id(), source_id=source.id, status="done")
+    store.create_job(job)
+    clip = Clip(id=new_id(), job_id=job.id, start_s=0.0, end_s=1.0, rank=1)
+    store.replace_clips(job.id, [clip])
+    export = Export(id=new_id(), clip_id=clip.id, path="C:/out.mp4")
+    store.create_export(export)
+    return store.create_upload(
+        YouTubeUpload(
+            id=new_id(),
+            export_id=export.id,
+            clip_id=clip.id,
+            channel_row_id=channel["id"],
+            title="Title",
+            description="Description",
+            tags=[],
+        )
+    )
+
+
+def test_the_quota_comes_back_at_local_midnight() -> None:
+    """The ledger keys on the local date, so the day rolls over locally."""
+    from datetime import date, datetime, timedelta
+
+    reset = datetime.fromisoformat(quota.reset_at())
+
+    assert (reset.hour, reset.minute, reset.second) == (0, 0, 0)
+    assert reset.date() == date.today() + timedelta(days=1)
+
+
+def test_running_out_of_quota_waits_for_the_reset(
+    initialised_db: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The upload is queued for the reset, not written off."""
+    import asyncio
+
+    from autoclip.youtube import uploads as uploads_module
+
+    row = _quota_row()
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+
+    # The day's quota is gone.
+    quota.reserve(quota.UPLOAD_UNITS * 6)
+
+    with pytest.raises(uploader.YouTubeError) as caught:
+        asyncio.run(uploads_module.process_upload(row, config.load()))
+
+    error = caught.value
+    assert error.transient is True
+    assert error.retry_at == quota.reset_at()
+    # The file never left the machine.
+    assert "quota" in str(error).lower()
+
+
+def test_the_worker_queues_the_upload_for_the_reset(
+    initialised_db: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The row stays pending, due at the reset, and the attempt is not counted."""
+    import asyncio
+
+    from autoclip.youtube import queue as queue_module
+
+    row = _quota_row()
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    quota.reserve(quota.UPLOAD_UNITS * 6)
+
+    asyncio.run(queue_module.UploadQueue()._run(row.id))
+
+    fresh = store.get_upload(row.id)
+    assert fresh is not None
+    assert fresh.status == "pending"
+    assert fresh.next_attempt_at == quota.reset_at()
+    # The file never left the machine, so this was not an attempt at
+    # publishing and must not use up the row's retry allowance.
+    assert fresh.attempts == 0
+    assert "quota" in (fresh.error or "").lower()
+
+
+def test_a_rate_limit_backs_off_instead_of_waiting_for_the_reset(
+    initialised_db: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A busy API is not an exhausted quota: it waits a little and tries again."""
+    import asyncio
+
+    from autoclip.youtube import queue as queue_module
+
+    row = _quota_row()
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+
+    async def busy(upload, settings=None):  # noqa: ANN001
+        raise uploader.YouTubeError("YouTube was busy", transient=True)
+
+    monkeypatch.setattr(queue_module.uploads, "process_upload", busy)
+
+    asyncio.run(queue_module.UploadQueue()._run(row.id))
+
+    fresh = store.get_upload(row.id)
+    assert fresh is not None
+    assert fresh.status == "pending"
+    assert fresh.attempts == 1
+    # The backoff's own delay, not tomorrow.
+    assert fresh.next_attempt_at != quota.reset_at()
+    assert fresh.next_attempt_at != ""
+
+
+def test_youtubes_own_quota_refusal_waits_for_the_reset() -> None:
+    """YouTube saying "quota exceeded" is exhaustion, so it waits rather than fails."""
+    import httpx
+
+    response = httpx.Response(
+        403,
+        json={
+            "error": {
+                "message": "The request cannot be completed because you have exceeded your quota.",
+                "errors": [{"reason": "quotaExceeded"}],
+            }
+        },
+    )
+
+    error = uploader._translate(response)
+
+    assert error.transient is True
+    assert error.retry_at == quota.reset_at()
+
+
+def test_a_rate_limit_from_youtube_is_transient_but_waits_for_the_backoff() -> None:
+    """A 429 is a busy API, not an exhausted quota."""
+    import httpx
+
+    response = httpx.Response(
+        429,
+        json={
+            "error": {"message": "Too many requests.", "errors": [{"reason": "rateLimitExceeded"}]}
+        },
+    )
+
+    error = uploader._translate(response)
+
+    assert error.transient is True
+    # No reset: the backoff decides when to try again.
+    assert error.retry_at == ""
+
+
+# --------------------------------------------------------------------------
 # The backoff
 # --------------------------------------------------------------------------
 

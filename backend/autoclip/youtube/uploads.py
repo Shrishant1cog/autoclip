@@ -428,7 +428,19 @@ async def process_upload(upload: YouTubeUpload, settings: config.Settings | None
     # The upload costs 1600 quota units, and the default daily quota is
     # 10 000 — six uploads. The units are reserved before the call, so
     # a retry loop cannot quietly eat the day's quota.
-    quota.reserve(quota.UPLOAD_UNITS)
+    #
+    # Running out of quota is not a failure: the upload waits for the
+    # reset and goes out then. Failing the row would lose the clip's
+    # place in the queue over a limit that resets on its own.
+    try:
+        quota.reserve(quota.UPLOAD_UNITS)
+    except quota.QuotaExceeded as exc:
+        raise uploader.YouTubeError(
+            str(exc),
+            hint="The upload is waiting for the day's quota to come back.",
+            transient=True,
+            retry_at=exc.resets_at,
+        ) from exc
 
     def progress(sent: int, total: int) -> None:
         """Write the byte count after every chunk.

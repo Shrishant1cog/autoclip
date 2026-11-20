@@ -20,7 +20,7 @@ from .. import config
 from ..security import consent
 from ..security.egress import Transfer, gateway
 from ..security.urlpolicy import UrlRejected
-from . import oauth, resumable
+from . import oauth, quota, resumable
 from .metadata import ClipMetadata
 
 log = logging.getLogger(__name__)
@@ -40,6 +40,10 @@ class YouTubeError(RuntimeError):
     succeeded and AutoClip will not decide. The row waits for the
     owner rather than being sent again, because sending it again could
     publish the clip twice.
+
+    ``retry_at`` says when the upload should be tried again, when that
+    is known better than the backoff can guess — the day's quota coming
+    back, for instance.
     """
 
     def __init__(
@@ -49,11 +53,13 @@ class YouTubeError(RuntimeError):
         hint: str = "",
         transient: bool = False,
         needs_reconciliation: bool = False,
+        retry_at: str = "",
     ) -> None:
         super().__init__(message)
         self.hint = hint
         self.transient = transient
         self.needs_reconciliation = needs_reconciliation
+        self.retry_at = retry_at
 
     def __str__(self) -> str:
         base = super().__str__()
@@ -360,17 +366,27 @@ def _translate(response: httpx.Response) -> YouTubeError:
     message = message or f"YouTube returned HTTP {response.status_code}."
 
     if reason == "quotaExceeded" or "quota" in message.lower():
+        # The project's daily quota is gone. That is not a failure: the
+        # quota comes back on its own, so the upload waits for the reset
+        # rather than being written off. If YouTube's own reset falls
+        # after ours, the retry simply waits again — which costs nothing
+        # and loses nothing.
         return YouTubeError(
             message,
             hint=(
                 "The project's daily YouTube API quota is used up. Uploads cost "
-                "1600 units of the 10,000/day default — roughly six per day."
+                "1600 units of the 10,000/day default — roughly six per day. "
+                "The upload will be tried again when the quota comes back."
             ),
+            transient=True,
+            retry_at=quota.reset_at(),
         )
     if reason == "uploadLimitExceeded":
         return YouTubeError(
             message,
             hint="This channel has reached YouTube's daily upload limit. Try again tomorrow.",
+            transient=True,
+            retry_at=quota.reset_at(),
         )
     if reason in {"forbidden", "youtubeSignupRequired"} or response.status_code == 403:
         return YouTubeError(

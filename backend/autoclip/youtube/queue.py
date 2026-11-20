@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from typing import Any
 
 from .. import config
 from ..db import store
@@ -103,17 +104,27 @@ class UploadQueue:
         except Exception as exc:  # one bad upload must not stop the queue
             message = _message(exc)
             transient = bool(getattr(exc, "transient", False))
-            if transient and backoff.should_retry(attempts):
+            retry_at = str(getattr(exc, "retry_at", "") or "")
+            if transient and (retry_at or backoff.should_retry(attempts)):
                 # A dropped connection is worth another try, but not
                 # straight away: the delay grows with each attempt so a
                 # failing upload backs off instead of hammering the API.
-                due = backoff.next_attempt_at(attempts)
-                store.update_upload(
-                    upload_id,
-                    status="pending",
-                    error=message,
-                    next_attempt_at=due,
-                )
+                # A known reset time beats the backoff's guess — the
+                # day's quota comes back when it comes back.
+                due = retry_at or backoff.next_attempt_at(attempts)
+                fields: dict[str, Any] = {
+                    "status": "pending",
+                    "error": message,
+                    "next_attempt_at": due,
+                }
+                if retry_at:
+                    # The file never left the machine: the day's quota
+                    # was gone before the call. That is not an attempt
+                    # at publishing, and counting it would use up the
+                    # row's own retry allowance for a limit that has
+                    # nothing to do with it.
+                    fields["attempts"] = max(attempts - 1, 0)
+                store.update_upload(upload_id, **fields)
                 log.info(
                     "YouTube upload %s stopped (%s); trying again at %s.",
                     upload_id,

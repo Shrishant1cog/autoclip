@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 
 from ..db.store import connection
 
@@ -34,6 +34,7 @@ __all__ = [
     "QuotaLedger",
     "READ_UNITS",
     "UPLOAD_UNITS",
+    "reset_at",
     "today",
 ]
 
@@ -48,7 +49,11 @@ DAILY_LIMIT = 10000
 
 
 class QuotaExceeded(RuntimeError):
-    """The day's quota would be exceeded by this call."""
+    """The day's quota would be exceeded by this call.
+
+    ``resets_at`` is when the quota comes back. An upload that runs out
+    of quota is not a failure: it waits for the reset and goes out then.
+    """
 
     def __init__(self, needed: int, used: int, limit: int) -> None:
         super().__init__(
@@ -58,11 +63,25 @@ class QuotaExceeded(RuntimeError):
         self.needed = needed
         self.used = used
         self.limit = limit
+        #: When the day's quota comes back, as an ISO-8601 string.
+        self.resets_at = reset_at()
 
 
 def today() -> str:
     """Today's date, in the format the ledger keys on."""
     return date.today().isoformat()
+
+
+def reset_at() -> str:
+    """When the day's quota comes back — local midnight.
+
+    The ledger keys on the local date, so the day rolls over at local
+    midnight rather than at UTC midnight. Getting this wrong would put
+    the retry an hour early or an hour late, and in the worst case
+    queue it for a day that has already been and gone.
+    """
+    tomorrow = date.today() + timedelta(days=1)
+    return datetime.combine(tomorrow, time.min).astimezone().isoformat(timespec="seconds")
 
 
 @dataclass(frozen=True)
