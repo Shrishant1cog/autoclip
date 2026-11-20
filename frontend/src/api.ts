@@ -145,11 +145,53 @@ export interface Clip {
    * measurements into one.
    */
   diagnostics: ClipDiagnostics | null
+  /**
+   * Where this clip would be published, and why.
+   *
+   * Six fields: the category, the channel, the reason, the rule, the
+   * confidence and whether it was a fallback.
+   */
+  routing: RoutingDecision | null
   exports: ExportRecord[]
   validation: {
     ok: boolean
     checks: { name: string; ok: boolean; detail: string }[]
   } | null
+}
+
+/**
+ * Where a clip goes, and why — in six fields.
+ *
+ * The confidence is the classifier's own figure, reported by the model
+ * that read the transcript. It is not a quality score, and there is no
+ * quality score anywhere.
+ */
+export interface RoutingDecision {
+  clip_id: string
+  /** What the clip was classified as. */
+  category: string
+  /** The channel *row* id, not the YouTube channel id. */
+  channel_row_id: string
+  /** The YouTube channel id. */
+  channel_id: string
+  channel_title: string
+  /** The sentence that explains the decision. */
+  reason: string
+  rule_id: string
+  /** The rule, as a person reads it: its name, or its keyword. */
+  rule: string
+  rule_name: string
+  rule_keyword: string
+  confidence: number
+  /** True when the decision did not come from a rule. */
+  fallback: boolean
+  /** Why it was a fallback: "no rule matched", "no classification". */
+  fallback_reason: string
+  /** The other channel rows the same rule sends the clip to. */
+  extra_channel_ids: string[]
+  /** Whether the destination's own auto-upload is on. */
+  auto_upload: boolean
+  created_at: string
 }
 
 /** One measurement from the objective quality report. */
@@ -1750,6 +1792,16 @@ export const api = {
     request<YouTubeChannel & { channel_row_id?: string }>(
       `/api/routing/clips/${encodeURIComponent(clipId)}/target`,
     ),
+  /**
+   * Where this clip would go right now, and why: the category, the
+   * channel, the reason, the rule, the confidence and whether it was a
+   * fallback.
+   */
+  clipRouting: (clipId: string) =>
+    request<RoutingDecision>(`/api/routing/clips/${encodeURIComponent(clipId)}/decision`),
+  /** The routing decisions that have already been made, newest first. */
+  routingDecisions: (limit = 20) =>
+    request<RoutingDecision[]>(`/api/routing/decisions?limit=${limit}`),
 
   // -- Restart history (Phase 17) ------------------------------------------
   listRestarts: (limit = 20) =>

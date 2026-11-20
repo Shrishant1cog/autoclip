@@ -1137,6 +1137,41 @@ def _migration_v25(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_youtube_uploads_status ON youtube_uploads(status)")
 
 
+# --- v26: the routing decision ---------------------------------------------
+
+_V26 = """
+-- Every routing decision, with the six fields that explain it:
+-- category, channel, reason, rule, confidence and fallback.
+--
+-- The decision is stored whole, so the record of what was decided does
+-- not depend on the rules still looking the same way afterwards. A rule
+-- edited tomorrow leaves yesterday's decision readable.
+CREATE TABLE routing_decisions (
+    id                TEXT PRIMARY KEY,
+    clip_id           TEXT NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+    category          TEXT NOT NULL DEFAULT '',
+    channel_row_id    TEXT NOT NULL DEFAULT '',
+    channel_id        TEXT NOT NULL DEFAULT '',
+    channel_title     TEXT NOT NULL DEFAULT '',
+    reason            TEXT NOT NULL DEFAULT '',
+    rule_id           TEXT NOT NULL DEFAULT '',
+    rule_name         TEXT NOT NULL DEFAULT '',
+    rule_keyword      TEXT NOT NULL DEFAULT '',
+    confidence        REAL NOT NULL DEFAULT 0,
+    fallback          INTEGER NOT NULL DEFAULT 0,
+    fallback_reason   TEXT NOT NULL DEFAULT '',
+    extra_channel_ids_json TEXT NOT NULL DEFAULT '[]',
+    auto_upload       INTEGER NOT NULL DEFAULT 1,
+    created_at        TEXT NOT NULL
+);
+CREATE INDEX idx_routing_decisions_clip ON routing_decisions(clip_id, created_at);
+"""
+
+
+def _migration_v26(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V26)
+
+
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v1,
     _migration_v2,
@@ -1163,6 +1198,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v23,
     _migration_v24,
     _migration_v25,
+    _migration_v26,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)

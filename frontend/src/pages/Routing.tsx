@@ -12,13 +12,14 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { api, type RoutingRule, type YouTubeChannel } from '../api'
+import { api, type RoutingDecision, type RoutingRule, type YouTubeChannel } from '../api'
 import { ErrorNote } from '../components/ErrorNote'
 
 export function Routing() {
   const [rules, setRules] = useState<RoutingRule[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [channels, setChannels] = useState<YouTubeChannel[]>([])
+  const [decisions, setDecisions] = useState<RoutingDecision[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<Error | null>(null)
@@ -28,14 +29,16 @@ export function Routing() {
     setLoading(true)
     setError(null)
     try {
-      const [ruleList, categoryList, accounts] = await Promise.all([
+      const [ruleList, categoryList, accounts, decisionList] = await Promise.all([
         api.listRoutingRules(),
         api.routingCategories(),
         api.listYouTubeAccounts(),
+        api.routingDecisions(12),
       ])
       setRules(ruleList)
       setCategories(categoryList)
       setChannels(accounts.flatMap((a) => a.channels))
+      setDecisions(decisionList)
     } catch (err) {
       setError(err as Error)
     } finally {
@@ -194,9 +197,69 @@ export function Routing() {
               onCreate={create}
             />
           )}
+
+          <section className="mt-10">
+            <div className="flex items-baseline gap-4">
+              <h2 className="eyebrow">Decisions</h2>
+              <span className="numeric text-xs text-ink-600">{decisions.length}</span>
+            </div>
+            <p className="mt-2 max-w-prose text-xs leading-relaxed text-ink-500">
+              Every clip that was routed, with the six fields that explain it: the
+              category, the channel, the reason, the rule, the classifier&rsquo;s confidence
+              and whether it fell back to the default. The confidence is the
+              classifier&rsquo;s own figure for the category, not a quality score.
+            </p>
+
+            {decisions.length === 0 ? (
+              <p className="mt-4 max-w-prose text-sm leading-relaxed text-ink-500">
+                Nothing has been routed yet. A decision is recorded when a clip is queued
+                for publishing.
+              </p>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {decisions.map((decision) => (
+                  <DecisionRow key={`${decision.clip_id}-${decision.created_at}`} decision={decision} />
+                ))}
+              </div>
+            )}
+          </section>
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * One recorded routing decision, with its six fields.
+ */
+function DecisionRow({ decision }: { decision: RoutingDecision }) {
+  const destination = decision.channel_title || decision.channel_id || 'no channel set up'
+  return (
+    <article className="border border-ink-800 bg-ink-850/30 p-4">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="text-ink-100">{destination}</span>
+        {decision.category && (
+          <span className="numeric text-[10px] uppercase tracking-wider text-ink-500">
+            {decision.category}
+          </span>
+        )}
+        {decision.rule ? (
+          <span className="text-[10px] uppercase tracking-wider text-ink-600">
+            rule “{decision.rule}”
+          </span>
+        ) : (
+          <span className="text-[10px] uppercase tracking-wider text-sodium-500">
+            {decision.fallback_reason || 'default channel'}
+          </span>
+        )}
+        {decision.category && (
+          <span className="numeric text-[10px] uppercase tracking-wider text-ink-600">
+            classifier confidence {decision.confidence.toFixed(2)}
+          </span>
+        )}
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-ink-400">{decision.reason}</p>
+    </article>
   )
 }
 

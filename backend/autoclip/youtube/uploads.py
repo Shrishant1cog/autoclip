@@ -25,6 +25,7 @@ from ..pipeline import thumbnails
 from ..pipeline.transcript import Transcript, Word
 from ..providers import LLMProvider, build_provider
 from ..providers.base import looks_like_auth_failure
+from . import accounts as accounts_store
 from . import duplicates, oauth, quota, uploader
 from . import metadata as metadata_module
 from . import policy as policy_module
@@ -80,12 +81,29 @@ def enqueue_export_all(
             return []
 
         try:
-            from ..routing import resolve_target_channels
+            from ..routing import decision as decision_module
 
-            targets = resolve_target_channels(export.clip_id, settings)
+            primary, fanout = decision_module.resolve(export.clip_id)
+            targets = []
+            for decision in fanout:
+                channel = accounts_store.get_channel(decision.channel_row_id)
+                if channel is not None:
+                    targets.append(channel)
         except Exception:  # routing must never block publishing
             log.warning("Channel routing failed; using the default destination.", exc_info=True)
             targets = []
+            primary = None
+
+        # The decision is recorded so the owner can read back why a clip
+        # went where it went. A failure to record must never stop a
+        # publish that is otherwise fine.
+        if primary is not None:
+            try:
+                from ..routing import decision as decision_module
+
+                decision_module.record(primary)
+            except Exception:  # noqa: BLE001
+                log.warning("Could not record the routing decision.", exc_info=True)
 
         if not targets:
             row = store.create_upload(

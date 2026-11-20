@@ -42,7 +42,18 @@ def _clip_out(clip) -> ClipOut:
     uploads: dict[str, list] = {}
     for upload in store.list_uploads_for_clip(clip.id):
         uploads.setdefault(upload.export_id, []).append(upload)
-    return ClipOut.of(clip, edit=edit, exports=exports, uploads=uploads)
+    # Where the clip would go, and why. The routing layer reads the
+    # clip's classification and the user's rules, so it is asked here
+    # rather than being carried around in the clip row.
+    routing = None
+    try:
+        from ..routing import decision as decision_module
+
+        routing = decision_module.decide(clip.id)
+    except Exception:  # noqa: BLE001
+        # A routing lookup must never stop a clip from being listed.
+        log.debug("Could not work out the routing for clip %s.", clip.id, exc_info=True)
+    return ClipOut.of(clip, edit=edit, exports=exports, uploads=uploads, routing=routing)
 
 
 def _notify_export(clip, *, ok: bool, failures: list[str]) -> None:

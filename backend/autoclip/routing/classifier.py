@@ -18,6 +18,7 @@ from ..db.store import connection
 from ..providers.base import extract_json_object
 from ..providers.resolver import AllProvidersFailedError, run_with_fallback
 from ..youtube import accounts as accounts_store
+from . import decision as decision_module
 
 log = logging.getLogger(__name__)
 
@@ -263,27 +264,15 @@ def resolve_target_channel(
     Order: first enabled routing rule whose keyword matches the clip's
     classification (or title/keywords as a fallback), else the default channel.
     Returns the full youtube_channels row or None (no channels at all).
+
+    The decision behind this lives in :mod:`autoclip.routing.decision`,
+    which is also where the six-field explanation comes from — so the
+    destination and its explanation can never drift apart.
     """
-    settings = settings or config.load()
-    classification = classification_for(clip_id)
-    # Currently the category drives matching; clip title keywords can join the
-    # haystack later without changing the rule semantics.
-    haystack = classification["category"] if classification is not None else ""
-
-    hay = haystack.lower()
-    for rule in list_rules(enabled_only=True):
-        if rule["match_keyword"] in hay:
-            channel = accounts_store.get_channel(rule["target_channel_id"])
-            if channel is not None:
-                log.info(
-                    "Routing clip %s to %s via rule %r.",
-                    clip_id,
-                    channel["channel_id"],
-                    rule["match_keyword"],
-                )
-                return channel
-
-    return accounts_store.default_channel()
+    decision = decision_module.decide(clip_id)
+    if not decision.channel_row_id:
+        return None
+    return accounts_store.get_channel(decision.channel_row_id)
 
 
 def resolve_target_channels(
@@ -297,52 +286,9 @@ def resolve_target_channels(
     published to by surprise. With no channel profiles at all this returns an
     empty list, and the caller falls back to the legacy single upload.
     """
-    settings = settings or config.load()
-    classification = classification_for(clip_id)
-    hay = (classification["category"] if classification is not None else "").lower()
-
-    primary: dict[str, Any] | None = None
-    extras: list[dict[str, Any]] = []
-    for rule in list_rules(enabled_only=True):
-        if rule["match_keyword"] in hay:
-            channel = accounts_store.get_channel(rule["target_channel_id"])
-            if channel is not None:
-                log.info(
-                    "Routing clip %s to %s via rule %r.",
-                    clip_id,
-                    channel["channel_id"],
-                    rule["match_keyword"],
-                )
-                primary = channel
-                for extra_id in rule.get("extra_channel_ids") or []:
-                    extra = accounts_store.get_channel(extra_id)
-                    if extra is not None:
-                        extras.append(extra)
-            break
-    else:
-        default = accounts_store.default_channel()
-        if default is not None:
-            primary = default
-
-    if primary is None:
-        return []
-
-    ordered: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for channel in [primary, *extras]:
-        # Two profiles can point at the same underlying YouTube channel (for
-        # example the default profile plus a hand-added duplicate); publishing
-        # twice to one channel would be a duplicate upload, so collapse them.
-        identity = f"{channel['account_id']}:{channel['channel_id'] or channel['id']}"
-        if identity in seen:
-            continue
-        seen.add(identity)
-        if not channel.get("auto_upload"):
-            log.info(
-                "Channel %s has auto-upload off; skipping fan-out for clip %s.",
-                channel["channel_id"],
-                clip_id,
-            )
-            continue
-        ordered.append(channel)
-    return ordered
+    channels: list[dict[str, Any]] = []
+    for decision in decision_module.decide_all(clip_id):
+        channel = accounts_store.get_channel(decision.channel_row_id)
+        if channel is not None:
+            channels.append(channel)
+    return channels

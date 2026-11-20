@@ -6,6 +6,7 @@ import {
   formatBytes,
   formatDuration,
   type LibraryClip,
+  type RoutingDecision,
 } from '../api'
 import { ErrorNote } from '../components/ErrorNote'
 
@@ -256,6 +257,7 @@ function ClipLibraryRow({
             {sourceTitle}
           </Link>
         </div>
+        {clip.routing && <RoutingNote routing={clip.routing} />}
       </div>
 
       <Link
@@ -324,6 +326,47 @@ function ClipLibraryRow({
         )}
       </div>
     </li>
+  )
+}
+
+/**
+ * Where this clip would go, and why.
+ *
+ * Six fields: the category, the channel, the reason, the rule, the
+ * confidence and whether it was a fallback. The confidence is the
+ * classifier's own figure for the category — not a quality score, and
+ * it is labelled as such so it cannot be mistaken for one.
+ */
+function RoutingNote({ routing }: { routing: RoutingDecision }) {
+  const destination = routing.channel_title || routing.channel_id || 'no channel set up'
+  return (
+    <p className="mt-1 truncate text-xs text-ink-500" title={routing.reason}>
+      <span className="text-ink-500">routes to</span>{' '}
+      <span className="text-ink-300">{destination}</span>
+      {routing.category && (
+        <>
+          {' · '}
+          <span className="lowercase">{routing.category}</span>
+        </>
+      )}
+      {routing.rule ? (
+        <>
+          {' · '}
+          <span>rule “{routing.rule}”</span>
+        </>
+      ) : (
+        <>
+          {' · '}
+          <span className="text-sodium-500">{routing.fallback_reason || 'default channel'}</span>
+        </>
+      )}
+      {routing.category && (
+        <>
+          {' · '}
+          <span className="numeric">classifier confidence {routing.confidence.toFixed(2)}</span>
+        </>
+      )}
+    </p>
   )
 }
 

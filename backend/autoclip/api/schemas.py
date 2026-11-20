@@ -13,6 +13,49 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from ..db import models
+from ..routing.decision import RoutingDecision
+
+
+class RoutingDecisionOut(BaseModel):
+    """Where a clip goes, and why — in six fields.
+
+    **category** — what the clip was classified as.
+    **channel** — where it is going.
+    **reason** — the sentence that explains it.
+    **rule** — the user's rule that decided it, if any.
+    **confidence** — the classifier's own figure, 0–1. This is not a
+    quality score; there is no quality score anywhere.
+    **fallback** — whether this was the default rather than a rule.
+
+    The rest is supporting detail: the fan-out, when the decision was
+    made, and whether the destination's own auto-upload is on.
+    """
+
+    clip_id: str = ""
+    category: str = ""
+    #: The channel *row* id (``youtube_channels.id``).
+    channel_row_id: str = ""
+    #: The YouTube channel id behind that row.
+    channel_id: str = ""
+    channel_title: str = ""
+    reason: str = ""
+    rule_id: str = ""
+    #: The rule, as a person reads it: its name, or its keyword.
+    rule: str = ""
+    rule_name: str = ""
+    rule_keyword: str = ""
+    confidence: float = 0.0
+    fallback: bool = False
+    fallback_reason: str = ""
+    extra_channel_ids: list[str] = Field(default_factory=list)
+    auto_upload: bool = True
+    created_at: str = ""
+
+    @classmethod
+    def of(cls, decision: RoutingDecision | None) -> RoutingDecisionOut | None:
+        if decision is None:
+            return None
+        return cls(**decision.to_dict())
 
 
 class SourceOut(BaseModel):
@@ -357,6 +400,10 @@ class ClipOut(BaseModel):
     #: The objective quality measurements. These are measurements, not a
     #: score — there is no single quality number.
     diagnostics: dict | None = None
+    #: Where this clip would be published, and why: the category, the
+    #: channel, the reason, the rule, the confidence and whether it was
+    #: a fallback.
+    routing: RoutingDecisionOut | None = None
     exports: list[ExportOut] = Field(default_factory=list)
 
     @classmethod
@@ -367,6 +414,7 @@ class ClipOut(BaseModel):
         edit: models.ClipEdit | None = None,
         exports: list[models.Export] | None = None,
         uploads: dict[str, list[models.YouTubeUpload]] | None = None,
+        routing: RoutingDecision | None = None,
     ) -> ClipOut:
         uploads = uploads or {}
         return cls(
@@ -391,6 +439,7 @@ class ClipOut(BaseModel):
             music_source=clip.music_source,
             music_reason=clip.music_reason,
             diagnostics=clip.diagnostics,
+            routing=RoutingDecisionOut.of(routing),
             exports=[ExportOut.of(e, uploads=uploads.get(e.id, [])) for e in (exports or [])],
         )
 

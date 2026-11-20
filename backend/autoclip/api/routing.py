@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from ..db import store as db_store
 from ..routing import classifier
+from ..routing import decision as decision_module
+from .schemas import RoutingDecisionOut
 
 log = logging.getLogger(__name__)
 
@@ -127,3 +130,27 @@ async def clip_target(clip_id: str) -> dict:
     if target is None:
         raise HTTPException(status_code=404, detail="No channels are configured.")
     return target
+
+
+@router.get("/clips/{clip_id}/decision", response_model=RoutingDecisionOut)
+async def clip_decision(clip_id: str) -> RoutingDecisionOut:
+    """Where this clip goes, and why — in six fields.
+
+    This is the *live* decision: what would happen now. The decisions
+    that have already been made are listed at
+    ``/api/routing/decisions``.
+    """
+    decision = decision_module.decide(clip_id)
+    return RoutingDecisionOut.of(decision) or RoutingDecisionOut(clip_id=clip_id)
+
+
+@router.get("/decisions", response_model=list[RoutingDecisionOut])
+async def decisions(limit: int = Query(default=20, ge=1, le=200)) -> list[RoutingDecisionOut]:
+    """The routing decisions that have been made, newest first."""
+    rows = await asyncio.to_thread(decision_module.recent, limit)
+    recorded: list[RoutingDecisionOut] = []
+    for row in rows:
+        out = RoutingDecisionOut.of(row)
+        if out is not None:
+            recorded.append(out)
+    return recorded
