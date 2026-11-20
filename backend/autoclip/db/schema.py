@@ -615,6 +615,75 @@ def _migration_v15(conn: sqlite3.Connection) -> None:
     conn.executescript(_V15)
 
 
+# --- v16: the music library -------------------------------------------------
+
+_V16 = """
+-- The music library is an index of files the user already owns. AutoClip never
+-- copies them and never uploads them: the path is the identity, and the file
+-- stays where the user put it.
+--
+-- music_folders records the folders the user pointed AutoClip at.
+CREATE TABLE IF NOT EXISTS music_folders (
+    id       TEXT PRIMARY KEY,
+    path     TEXT NOT NULL UNIQUE,
+    added_at TEXT NOT NULL
+);
+
+-- music_tracks is one row per audio file found in those folders. The analysis
+-- column holds the measured metadata as JSON; it is empty until the track has
+-- been analysed, and it is keyed by the file's size and mtime so an unchanged
+-- file is never analysed twice.
+CREATE TABLE IF NOT EXISTS music_tracks (
+    id          TEXT PRIMARY KEY,
+    path        TEXT NOT NULL UNIQUE,
+    folder_id   TEXT NOT NULL DEFAULT '',
+    name        TEXT NOT NULL,
+    title       TEXT NOT NULL DEFAULT '',
+    artist      TEXT NOT NULL DEFAULT '',
+    tags        TEXT NOT NULL DEFAULT '',
+    format      TEXT NOT NULL DEFAULT '',
+    size_bytes  INTEGER NOT NULL DEFAULT 0,
+    mtime       REAL NOT NULL DEFAULT 0,
+    duration_s  REAL NOT NULL DEFAULT 0,
+    analysis_at TEXT NOT NULL DEFAULT '',
+    analysis    TEXT NOT NULL DEFAULT '{}',
+    excluded    INTEGER NOT NULL DEFAULT 0,
+    favourite   INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_music_tracks_name ON music_tracks(name);
+CREATE INDEX IF NOT EXISTS idx_music_tracks_folder ON music_tracks(folder_id);
+
+-- music_licenses records what the user knows about a track's rights.
+--
+-- The state vocabulary is deliberately narrow, and 'verified' cannot be set
+-- from the UI: independent verification is not something a user can assert
+-- about themselves. A user's own confirmation is 'user_confirmed', which is
+-- weaker, and the export gate treats the two differently.
+CREATE TABLE IF NOT EXISTS music_licenses (
+    track_id       TEXT PRIMARY KEY,
+    state          TEXT NOT NULL DEFAULT 'unknown',
+    source         TEXT NOT NULL DEFAULT '',
+    evidence       TEXT NOT NULL DEFAULT '',
+    attribution    TEXT NOT NULL DEFAULT '',
+    commercial_use INTEGER NOT NULL DEFAULT 0,
+    non_commercial INTEGER NOT NULL DEFAULT 0,
+    derivative     INTEGER NOT NULL DEFAULT 0,
+    share_alike    INTEGER NOT NULL DEFAULT 0,
+    expires_at     TEXT NOT NULL DEFAULT '',
+    verified_by    TEXT NOT NULL DEFAULT '',
+    verified_at    TEXT NOT NULL DEFAULT '',
+    updated_at     TEXT NOT NULL
+);
+"""
+
+
+def _migration_v16(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V16)
+
+
 #: Ordered migrations. Index + 1 is the resulting ``user_version``.
 #: Append only — never edit a migration that has shipped.
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
@@ -633,6 +702,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v13,
     _migration_v14,
     _migration_v15,
+    _migration_v16,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)

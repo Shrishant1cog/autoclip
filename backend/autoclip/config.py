@@ -136,6 +136,11 @@ class ExportSettings(BaseModel):
     music_ducking: bool = True
     #: How far the bed drops when speech is detected, in dB (negative).
     ducking_amount_db: float = -12.0
+    #: How quickly the bed ducks when speech starts, in milliseconds. A slow
+    #: attack sounds musical; a fast one sounds like a fader move.
+    ducking_attack_ms: int = 120
+    #: How quickly the bed comes back up when speech stops, in milliseconds.
+    ducking_release_ms: int = 350
 
 
 class ResourceSettings(BaseModel):
