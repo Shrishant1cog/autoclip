@@ -84,6 +84,57 @@ def test_url_04_ipv4_mapped_v6_is_loopback():
     assert _policy().classify_url("http://[::ffff:127.0.0.1]/") == "loopback"
 
 
+# --------------------------------------------------------------------------
+# NAT64: an IPv6-only network reaches an IPv4 service through an IPv6
+# address with the IPv4 one embedded in it.
+# --------------------------------------------------------------------------
+
+
+def test_a_nat64_address_is_classified_by_the_ipv4_it_stands_for():
+    # 64:ff9b::2208:b8bf is 34.8.184.191 — a public address.
+    assert _policy().classify_url("http://[64:ff9b::2208:b8bf]/") == "public"
+
+
+def test_a_nat64_address_that_stands_for_loopback_is_loopback():
+    # 64:ff9b::7f00:1 is 127.0.0.1. A name that resolves to it must not
+    # be treated as a public address.
+    assert _policy().classify_url("http://[64:ff9b::7f00:1]/") == "loopback"
+
+
+def test_a_nat64_address_that_stands_for_a_private_address_is_private():
+    # 64:ff9b::0a00:1 is 10.0.0.1.
+    assert _policy().classify_url("http://[64:ff9b::a00:1]/") == "private"
+
+
+def test_a_nat64_address_that_stands_for_the_metadata_address_is_refused():
+    # 64:ff9b::a9fe:a9fe is 169.254.169.254 — the cloud metadata address.
+    with pytest.raises(_policy().UrlRejected):
+        _policy().classify_url("http://[64:ff9b::a9fe:a9fe]/latest/meta-data/")
+
+
+def test_a_nat64_address_with_a_non_zero_u_octet_is_not_translated():
+    # The u-octet must be zero for the address to be a NAT64 address.
+    # 64:ff9b:0:1::2208:b8bf is some other address, and it is reserved.
+    with pytest.raises(_policy().UrlRejected):
+        _policy().classify_url("http://[64:ff9b:0:1::2208:b8bf]/")
+
+
+def test_a_nat64_address_for_a_documentation_range_is_public():
+    # 64:ff9b::c000:201 is 192.0.2.1.
+    assert _policy().classify_url("http://[64:ff9b::c000:201]/") == "public"
+
+
+def test_the_local_use_nat64_prefix_is_understood_too():
+    # RFC 8215's prefix, in its /96 form: 64:ff9b:1::2208:b8bf is
+    # 34.8.184.191.
+    assert _policy().classify_url("http://[64:ff9b:1::2208:b8bf]/") == "public"
+
+
+def test_the_local_use_nat64_prefix_still_refuses_loopback():
+    # 64:ff9b:1::7f00:1 is 127.0.0.1.
+    assert _policy().classify_url("http://[64:ff9b:1::7f00:1]/") == "loopback"
+
+
 def test_url_05_private_10_slash_8():
     assert _policy().classify_url("http://10.0.0.5/") == "private"
 

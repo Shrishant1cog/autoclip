@@ -94,6 +94,24 @@ _DOCUMENTATION = (
     ipaddress.ip_network("203.0.113.0/24"),
     ipaddress.ip_network("2001:db8::/32"),
 )
+#: The NAT64 prefixes, with the prefix lengths RFC 6052 allows for each.
+#:
+#: RFC 6052 defines the well-known prefix ``64:ff9b::/32`` and its shorter
+#: forms; RFC 8215 defines the local-use prefix ``64:ff9b:1::/48``. A host
+#: on an IPv6-only network reaches an IPv4 service through one of these: the
+#: IPv4 address is *embedded* in the IPv6 one.
+#:
+#: This matters for two reasons. Refusing every NAT64 address outright
+#: breaks every IPv6-only network — including this machine, where
+#: ``api.elevenlabs.io`` resolves to one. And allowing them without
+#: looking inside would open an SSRF hole, because
+#: ``64:ff9b::7f00:1`` is a perfectly valid encoding of ``127.0.0.1``.
+#:
+#: So the embedded IPv4 is extracted and *that* is what gets classified.
+_NAT64_PREFIXES = (
+    (ipaddress.ip_network("64:ff9b::/32"), (32, 40, 48, 56, 64, 96)),
+    (ipaddress.ip_network("64:ff9b:1::/48"), (48, 56, 64, 96)),
+)
 _LOCAL_SUFFIX = ".localhost"
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
 _DEFAULT_TIMEOUT = 15.0
@@ -102,6 +120,48 @@ _DEFAULT_TIMEOUT = 15.0
 # --------------------------------------------------------------------------
 # Address classification
 # --------------------------------------------------------------------------
+
+
+def _nat64_embedded_ipv4(address: ipaddress.IPv6Address) -> ipaddress.IPv4Address | None:
+    """The IPv4 address a NAT64 address stands for, if it is one.
+
+    RFC 6052 lays the IPv4 address into the IPv6 one after the prefix,
+    with a one-byte "u-octet" between them. The well-known prefix's
+    ``/96`` form has no u-octet, which is the form almost every network
+    uses::
+
+        64:ff9b::/96   64:ff9b::<the four IPv4 bytes>
+
+    The u-octet must be zero for the address to be a valid NAT64
+    address, and the bits after the IPv4 address must be zero too. A
+    non-zero u-octet means this is simply some other address that
+    happens to share the prefix, and it is not translated.
+
+    ``None`` is returned for an address that is not NAT64 at all.
+    """
+    value = int(address)
+    for network, lengths in _NAT64_PREFIXES:
+        base = int(network.network_address)
+        for prefix_length in lengths:
+            # The first ``prefix_length`` bits must match the prefix.
+            head_mask = ((1 << prefix_length) - 1) << (128 - prefix_length)
+            if (value & head_mask) != (base & head_mask):
+                continue
+            if prefix_length == 96:
+                # No u-octet: the IPv4 address is the last four bytes.
+                return ipaddress.IPv4Address(value & 0xFFFFFFFF)
+            # The u-octet sits immediately after the prefix and must be
+            # zero.
+            u_mask = 0xFF << (128 - prefix_length - 8)
+            if value & u_mask:
+                continue
+            # The bits after the IPv4 address must be zero as well.
+            suffix_mask = (1 << (128 - prefix_length - 40)) - 1
+            if value & suffix_mask:
+                continue
+            embedded = (value >> (128 - prefix_length - 40)) & 0xFFFFFFFF
+            return ipaddress.IPv4Address(embedded)
+    return None
 
 
 def _classify_ip(raw: str) -> UrlClass:
@@ -113,6 +173,15 @@ def _classify_ip(raw: str) -> UrlClass:
     mapped = getattr(address, "ipv4_mapped", None)
     if mapped is not None:
         address = mapped
+
+    # A NAT64 address is the IPv4 address it stands for. Classifying it as
+    # itself would call every IPv6-only network's hosts "reserved" and
+    # refuse them — and would let a name that translates to 127.0.0.1
+    # through.
+    if address.version == 6:
+        embedded = _nat64_embedded_ipv4(address)
+        if embedded is not None:
+            return _classify_ip(str(embedded))
 
     if address.is_loopback:
         return UrlClass.LOOPBACK
