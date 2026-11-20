@@ -307,3 +307,11 @@ Not started. Sequence and ordering constraints are in `docs/upgrade-audit.md` §
 | 2026-11-20 | `1529b5b` | M2 — the layout wired into the runner, the per-source record (migration v17), and the `/api/layout` endpoints |
 | 2026-11-20 | `b5810a5` | M2 — Settings → Webcam layout |
 | 2026-11-20 | `41a8c82` | M2 — the ledger, the matrix and the audit updated with the M2 evidence |
+| 2026-11-20 | `975e376` | M2 — the ledger changelog row for the milestone commit |
+| 2026-11-20 | `7ab6e19` | M3 — the AI call budget: one plan, one repair and one music call per clip, counted in the database so a retry does not get a fresh allowance (migration v18) |
+| 2026-11-20 | `d3c5828` | M3 — the structured creative plan: a fixed shape, validated before use, malformed output rejected rather than patched, and a declined consent treated as an answer (migration v19) |
+| 2026-11-20 | `df67aa5` | M3 — the music choice: three preference scopes, the shapes derived from the measurements, and the clip's music stored with whose choice it was (migration v20) |
+| 2026-11-20 | `1f3ff9c` | M3 — the objective measurements and the story/action balance: ten measurements with their evidence and no quality score anywhere (migration v21) |
+| 2026-11-20 | `b3d1c25` | M3 — the creative stage wired into the runner, and the budget, plan, preference, format and diagnostics endpoints |
+| 2026-11-20 | `fd64fd2` | M3 — the Review screen shows the plan, the budget and the measurements; the score is labelled as the model's suggestion |
+| 2026-11-20 | `7cdcf7a` | M3 — the ledger, the matrix and the audit updated with the M3 evidence |
