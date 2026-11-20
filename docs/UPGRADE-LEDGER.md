@@ -17,7 +17,7 @@ milestone `In progress` and is reported as such.
 | M0.5 — Security and consent | **Complete** | 12/12 gate items done; 49 security tests passing; the residual yt-dlp secondary-request surface is documented, not claimed |
 | M1 — Music intelligence | **Complete** | 12/12 gate items done; 101 tests across the M1 area passing; four named residuals recorded (not claimed as verified) |
 | M2 — Webcam intelligence | **Complete** | 13/13 gate items done; 76 tests across the M2 area passing, including 6 real-ffmpeg render tests; three named residuals recorded (not claimed as verified) |
-| M3 — Creative intelligence | Not started | — |
+| M3 — Creative intelligence | **Complete** | 11/11 gate items done; 126 tests across the M3 area passing; two named residuals recorded (not claimed as verified) |
 | M4a — YouTube hardening | Not started | — |
 | M4b — Instagram | Not started | — |
 | M5 — Audit and release | Not started | — |
@@ -216,14 +216,69 @@ asserted against synthetic geometry rather than against real streamer footage.
 | The transition frequency has **not been measured on held-out footage** | Unverified — the rule is implemented and asserted against synthetic segments, but there is no held-out streamer footage on this machine | M5 — measure it on the Lane C material and record the number |
 | The manual override sets the **variant and the corner**, not a free rectangle drawn by hand | Partial — the rectangle is stored and honoured, but the UI offers variants rather than a drag-to-draw region | M5 — a drag-to-draw region on a source thumbnail |
 | The face-legibility rule is asserted against **synthetic geometry**, not real streamer footage | Partial — the rule is exact and tested, but no real webcam overlay was available to measure | M5 — Lane C acceptance on the downloaded material |
-| The AI music-selection module (`music/selection.py`) is built and tested but **not called from the pipeline** | Partial — carried from M1 | M3 |
-| The library filter has **no energy or format filter** | Partial — carried from M1 | M3 |
-| The music preference is still **one global setting** | Partial — carried from M1 | M3 |
+| The AI music-selection module (`music/selection.py`) is built and tested but **not called from the pipeline** | Partial — carried from M1 | **Closed in M3** — `pipeline/music_selection.py:select_for_clips` calls it from the runner |
+| The library filter has **no energy or format filter** | Partial — carried from M1 | **Closed in M3** — the library filters on energy and on the measured shapes |
+| The music preference is still **one global setting** | Partial — carried from M1 | **Closed in M3** — three scopes: global, source and clip |
 | The **eight-scenario ducking matrix** is asserted at the filter level, not as eight end-to-end renders | Partial — carried from M1 | M5 |
 
 ---
 
-## M3–M5
+## M3 — Creative intelligence
+
+**Status: Complete.** The milestone ships the AI call budget, the structured creative plan, the
+per-clip music selection, the three-scope music preference, the measured music shapes, the
+story/gameplay intent, and the objective quality diagnostics — with the API and the UI that
+show them. Two residuals are named below rather than being written up as finished: the scene
+detector discards PySceneDetect's per-cut confidence, and the "visual action" signal is a
+measured proxy (the cut rate) rather than a visual-action model.
+
+| # | Gate item | State | Evidence |
+|---|---|---|---|
+| 1 | **One planning call, one repair, and at most one music call per clip**, capped by `max_clips` | Done | `backend/autoclip/budget.py` — three separate allowances (plan 1, repair 1, music = `max_clips`), so spending the music allowance cannot stop the plan. The total is **12 at the default `max_clips=10`**. `tests/test_budget.py` — 19 tests |
+| 2 | The budget **survives a retry** and its refusals are recorded with their category | Done | `db/budget_store.py` + migration v18 (`job_ai_budget`) — a retried job does not get a fresh allowance; an overrun is stored with the allowance it belongs to, because a silently capped budget reads like a budget that was never needed. `::test_a_retry_does_not_get_a_fresh_allowance`, `::test_the_overruns_carry_the_category_they_belong_to` |
+| 3 | Usage and overruns are **displayed** | Done | `GET /api/jobs/{job_id}/budget` → `frontend/src/components/JobPlanPanel.tsx` — the three allowances, the total, and every refusal with its reason. Browser verified: "2 of 3 used · Plan 1/1 · Repair 0/1 · Music 1/1" and "music — the second clip needed a music call too" |
+| 4 | A **structured creative plan** with the nine specified fields | Done | `pipeline/creative.py` — clip boundaries, selection reasoning, layout, crop, caption strategy, music, ducking, transition and export settings, as one validated object. `tests/test_creative.py` — 39 tests |
+| 5 | **Every output is validated before execution**, and malformed output is rejected rather than patched | Done | `creative.validate_plan` — an unknown layout, crop, caption strategy or transition, an unknown track id, a duplicate clip id, a ducking value outside the range, an unknown export ratio and an answer that is not JSON are each rejected with their reasons. `::TestValidation` |
+| 6 | A **deterministic fallback**, with the reasons kept | Done | `creative.fallback_plan` — the absence of a plan in the same shape; the reason is in `problems` only, so the screen does not show the same sentence twice. `::test_a_bad_answer_and_a_bad_repair_fall_back_with_the_reasons` |
+| 7 | The plan is **stored per job**, including what was rejected | Done | `db/plan_store.py` (`creative_plans`, migration v19) — the whole plan is kept, problems included. A plan that silently fell back would read exactly like one the model agreed with. `GET /api/jobs/{job_id}/plan` |
+| 8 | **Story and gameplay intent**, configurable, with **no arbitrary 50/50 split** | Done | `pipeline/intent.py` — story is the speech density from the shared M1 timeline, action is the cut rate from the shared shot list. `ClipSettings.story_density` (0–1) and `highlight_style` (auto/story/action). **At the default (0.5 / auto) the adjustment is exactly zero for every clip**, and nothing produces filler. `tests/test_diagnostics.py::TestIntent` (12 tests) |
+| 9 | **Ten objective quality measurements**, each measurable and explainable, with **no aggregate quality score** | Done | `pipeline/diagnostics.py` — `diagnostics.MEASUREMENTS` names all ten: audio clipping, caption timing, crop safety, resolution, frame-rate consistency, black frames, export validity, duplicate clips, missing audio and duration. Each carries `measured` (the evidence), `detail` (the problem in a sentence) and `available` — an unmeasurable thing is never reported as a pass. `tests/test_diagnostics.py` — 31 tests |
+| 10 | The music selection is **called from the pipeline**, and the M1 residuals are closed | Done | `pipeline/music_selection.py:select_for_clips` — one set of rules shared by the sync and async paths; the library filters on **energy** and **shape** (`music/formats.py`, derived from the measurements, never stored); the preference lives at **three scopes** (global, source, clip — migration v20) with the most specific winning and `__none__` meaning "no music at all". `tests/test_music_selection.py` (18 tests) |
+| 11 | The model's own score is **labelled as a creative suggestion**, not a quality number | Done | `api/schemas.py:ClipOut.score`, `cli.py` (the column is "Suggestion"), and both screens that show it — the number is the model's suggestion for how strong the moment is, and the measured diagnostics live separately under Measurements. `pipeline/diagnostics.py` has no score field at all |
+
+### Decisions taken in M3
+
+| Decision | Why | Where recorded |
+|---|---|---|
+| The budget lives in a **top-level** `backend/autoclip/budget.py`, not inside `pipeline/` or `music/` | Both the music selection and the pipeline need it, and putting it in either would make one import the other. A neutral package level has no such edge | `backend/autoclip/budget.py` |
+| The three allowances are **separate counters**, not one pool | A clip choosing its music must not be able to use up the planning call. One pool would let the wrong thing starve the right thing | `backend/autoclip/budget.py:JobBudget` |
+| A **refusal is recorded**, not silently applied | A budget that was quietly capped reads exactly like a budget that was never needed. The refusal and its category are stored with the counters | `backend/autoclip/budget.py:overrun_records` |
+| A malformed plan is **rejected, not patched** | Patching a model's mistakes means AutoClip is quietly deciding what the model meant. One repair is offered; if that fails, the deterministic plan is used and the reasons are kept | `pipeline/creative.py:validate_plan` |
+| A **declined consent is an answer, not a failure** | If the user has switched off AI creative planning, that is a decision, not an error. The plan falls back deterministically with the reason "AI creative planning is switched off in the privacy settings", and the music proposer is switched off for the rest of the job rather than asking again | `pipeline/runner.py:_stage_creative`, `pipeline/music_selection.py` |
+| The **story/action balance is a bias, not a quota** | A 50/50 split would force filler: a video with no action in it would get action clips anyway. Nothing here requires a ratio, and at the default the adjustment is exactly zero | `pipeline/intent.py` |
+| The model's own score is **never thrown away** — the balance is a bounded tilt on top of it | The model judges the hook and the payoff, which cannot be measured from a signal. The measured signals tilt it by at most fifteen points either way | `pipeline/intent.py:STORY_BIAS` |
+| The diagnostics carry **no score, no rating and no number** | Ten different measurements cannot be folded into one number honestly, and a number that looked like a verdict would be a lie. Each measurement stands on its own, and an unmeasurable one says so | `pipeline/diagnostics.py` |
+| The **model's score is labelled** as a suggestion wherever it is shown | A bare 0–100 next to a clip invites the reading that it is a quality measurement. It is a creative judgement, and the screen now says so | `api/schemas.py`, `cli.py`, `frontend/src/pages/Review.tsx` |
+| The music preference is **three rows, not three columns** | A clip's choice has to survive the source's choice being changed, and clearing one scope must not clear another. Separate rows make that structural rather than a convention | `music/preferences.py` |
+| An empty track id means "**no preference here**"; the sentinel `__none__` means "**no music at all**" | Those are different answers. One is an absence and the other is a decision, and conflating them makes "no music" impossible to express | `music/preferences.py:NO_MUSIC` |
+| The music **shapes are derived from the measurements**, never stored | "Steady" means a beat regularity of at least 0.55. If the shape were a stored field it could drift away from the number it came from | `music/formats.py` |
+| The scene changes per clip are counted from a **shot list detected once for the source** | The same argument as the M2 webcam decision: the cuts do not change between clips, so detecting once and slicing is both faster and steadier | `pipeline/runner.py:_load_or_detect_shots` |
+| A job with no speech timeline answers the envelope route with **200 and an empty envelope** | A browser logs a 404 as a failed request, and a job waiting to be transcribed is not a failure. A 404 remains for an unknown job id; 400 for a missing job id | `api/music.py:envelope` |
+
+### Residuals carried into later milestones
+
+| Residual | Status | Action |
+|---|---|---|
+| The scene detector **discards PySceneDetect's per-cut confidence** | Partial — the shot boundaries are recorded and cached per source, but `detect_shots` keeps only the times, so a cut's own confidence is not stored | M5 — record the detector's score per cut alongside the times |
+| "Visual action" is a **measured proxy** — the cut rate — rather than a visual-action model | Partial — it is a documented, reproducible measure and it moves the ranking measurably, but it is not a model of what is happening on screen | M5 — a real action signal, measured on the Lane C material |
+| The M1 **ducking regression matrix** is asserted at the filter level, not as eight end-to-end renders | Partial — carried from M1 | M5 |
+| The M2 **transition frequency** has not been measured on held-out footage | Unverified — carried from M2 | M5 |
+| The M2 **manual layout** sets the variant and the corner, not a free rectangle drawn by hand | Partial — carried from M2 | M5 |
+| The M2 **face-legibility rule** is asserted against synthetic geometry, not real streamer footage | Partial — carried from M2 | M5 |
+
+---
+
+## M4–M5
 
 Not started. Sequence and ordering constraints are in `docs/upgrade-audit.md` §19.
 

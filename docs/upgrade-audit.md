@@ -274,9 +274,13 @@ interrupted-migration test, and no table for rights confirmation, consent decisi
 music licensing, upload attempts/idempotency, quota reservations, provider usage, or learning
 versions.
 
-**Since this audit (M0):** three migrations have closed part of that list — v15 added
+**Since this audit (M0):** seven migrations have closed part of that list — v15 added
 `egress_consents` and `egress_log`, v16 added `music_folders`, `music_tracks` and
-`music_licenses`, and v17 added `source_layouts`. The schema is now at v17 with 25 live tables.
+`music_licenses`, v17 added `source_layouts`, v18 added `job_ai_budget`, v19 added
+`creative_plans`, and v20 added `music_preferences` (plus the three clip columns that record
+which music each clip ended up with). v21 added the `clips.diagnostics_json` column — no new
+table, because there is exactly one report per clip and it is read with the clip. The schema is
+now at **v21 with 28 live tables** (measured against a migrated database, not counted by hand).
 The gaps that remain — backup before migration, an interrupted-migration test, upload
 attempts/idempotency, quota reservations, provider usage and learning versions — are still
 open and are carried in the ledger.
@@ -285,10 +289,12 @@ open and are carried in the ledger.
 
 ## 11. Pipeline and queue behaviour
 
-**Pipeline.** `PipelineRunner` runs `prepare → transcribe → highlights → reframe → captions →
+**Pipeline.** `PipelineRunner` runs `prepare → transcribe → highlights → creative → reframe → captions →
 export`. Each stage writes artifacts into `work/{job_id}/`, so a retry skips completed stages. Stage
 implementation is delegated to `pipeline/<stage>.py`; the runner owns ordering, progress emission
-(`_emit`), notices (`_set_notice`) and cancellation checks (`_check_cancelled`).
+(`_emit`), notices (`_set_notice`) and cancellation checks (`_check_cancelled`). The `creative` stage
+was added in M3, between the highlights and the reframe, and it runs on the shared M1 timeline and the
+shared shot list rather than on a second detector.
 
 **Queue.** `jobs/queue.py:JobQueue` holds one asyncio task (`_worker` → `_run_one`) that pulls
 `store.next_queued_job()`. It supports `cancel` and `forget_cancel` only. There is no pause, no
@@ -357,6 +363,15 @@ would have failed the format step before reaching the tests — which is consist
   populate a per-account keyring entry. Therefore a second account cannot be connected
   independently, and "multiple accounts" currently means "one token displayed twice".
 - **D15 — the formatter gate is broken on a clean checkout** (above).
+
+**Since the baseline (through M3).** The table above is the *M0 baseline* and is deliberately left
+as it was measured. The current state is recorded per milestone in `docs/UPGRADE-LEDGER.md`; at
+the end of M3 it is: **1,022 passed** in the local unit suite (excluding the e2e collection),
+**0 xfailed** — the 26 SSRF xfails registered at M0 became ordinary passing tests and the marker
+was deleted at M0.5 — `ruff check` clean, `ruff format --check` clean, the frontend build green,
+and mypy at **10 errors in 8 files** (down from the 14-error baseline; the four that were fixed
+were in the modules M1 touched). The `ruff` version is still unpinned (`>=0.7`); pinning it is
+deferred to M5.
 
 ---
 
