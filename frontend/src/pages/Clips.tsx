@@ -74,6 +74,19 @@ export function Clips() {
     }
   }, [])
 
+  const retryInstagram = useCallback(async (clip: LibraryClip, uploadId: string) => {
+    setError(null)
+    try {
+      await api.retryInstagramUpload(uploadId)
+      const updated = await api.getClip(clip.id)
+      setClips((current) =>
+        current.map((row) => (row.id === clip.id ? { ...row, ...updated } : row)),
+      )
+    } catch (err) {
+      setError(err as Error)
+    }
+  }, [])
+
   const revalidate = useCallback(async (clip: LibraryClip) => {
     setError(null)
     try {
@@ -190,6 +203,7 @@ export function Clips() {
               exporting={exporting.has(clip.id)}
               onExport={() => exportClip(clip)}
               onRetryUpload={(uploadId) => retryUpload(clip, uploadId)}
+              onRetryInstagram={(uploadId) => retryInstagram(clip, uploadId)}
               onRevalidate={() => revalidate(clip)}
             />
           ))}
@@ -205,6 +219,7 @@ function ClipLibraryRow({
   exporting,
   onExport,
   onRetryUpload,
+  onRetryInstagram,
   onRevalidate,
 }: {
   clip: LibraryClip
@@ -212,6 +227,7 @@ function ClipLibraryRow({
   exporting: boolean
   onExport: () => void
   onRetryUpload: (uploadId: string) => void
+  onRetryInstagram: (uploadId: string) => void
   onRevalidate: () => void
 }) {
   const latest = clip.exports[clip.exports.length - 1]
@@ -303,6 +319,14 @@ function ClipLibraryRow({
             />
           ))
         })()}
+
+        {(latest?.instagram_uploads ?? []).map((upload) => (
+          <InstagramBadge
+            key={upload.id}
+            upload={upload}
+            onRetry={() => onRetryInstagram(upload.id)}
+          />
+        ))}
 
         {clip.validation && !clip.validation.ok && (
           <span
@@ -464,6 +488,94 @@ function UploadBadge({
         : upload.next_attempt_at
           ? 'waiting to retry'
           : 'queued for YouTube'}
+    </span>
+  )
+}
+
+/**
+ * Instagram state for the newest export of a clip.
+ *
+ * Instagram publishes on its own queue, so this badge is independent of
+ * the YouTube one above: a post waiting for Meta never looks like a
+ * YouTube failure, and vice versa.
+ */
+function InstagramBadge({
+  upload,
+  onRetry,
+}: {
+  upload: NonNullable<LibraryClip['exports'][number]['instagram_uploads']>[number]
+  onRetry: () => void
+}) {
+  if (upload.status === 'done') {
+    const label = upload.permalink ? 'on Instagram' : 'posted to Instagram'
+    if (upload.permalink) {
+      return (
+        <a
+          href={upload.permalink}
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs text-signal-good underline underline-offset-4"
+          title={upload.publish_detail || upload.caption || 'Published to Instagram.'}
+        >
+          {label}
+        </a>
+      )
+    }
+    return (
+      <span
+        className="text-xs text-signal-good"
+        title={upload.publish_detail || upload.caption || 'Published to Instagram.'}
+      >
+        {label}
+      </span>
+    )
+  }
+  if (upload.status === 'needs_reconciliation') {
+    // The post may or may not have reached Instagram. It was not sent
+    // again and it was not called published — saying either would be a
+    // guess dressed up as a fact.
+    return (
+      <button
+        onClick={onRetry}
+        className="text-xs text-signal-warn underline underline-offset-4"
+        title={
+          upload.reconcile_detail ||
+          upload.error ||
+          'It is not clear whether this post reached Instagram. Check Instagram, then retry.'
+        }
+      >
+        needs checking - retry
+      </button>
+    )
+  }
+  if (upload.status === 'failed') {
+    return (
+      <button
+        onClick={onRetry}
+        className="text-xs text-signal-bad underline underline-offset-4"
+        title={upload.error || 'The post failed.'}
+      >
+        Instagram failed - retry
+      </button>
+    )
+  }
+  if (upload.status === 'skipped') {
+    return (
+      <span
+        className="text-xs text-ink-400"
+        title={upload.error || 'This clip is already on Instagram.'}
+      >
+        skipped (duplicate)
+      </span>
+    )
+  }
+  return (
+    <span className="text-xs text-ink-500" title={upload.error || upload.caption}>
+      {upload.status === 'uploading'
+        ? `uploading to Instagram${upload.progress_percent ? ` · ${upload.progress_percent}%` : '…'}`
+        : upload.next_attempt_at
+          ? 'waiting to retry'
+          : 'queued for Instagram'}
     </span>
   )
 }

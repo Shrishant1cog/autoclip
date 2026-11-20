@@ -11,6 +11,7 @@ import {
   type YouTubeStatus,
 } from '../api'
 import { ErrorNote } from '../components/ErrorNote'
+import { InstagramSettings } from '../components/InstagramSettings'
 import { MusicLibrary } from '../components/MusicLibrary'
 import { MusicPreference } from '../components/MusicPreference'
 import { LayoutSettings } from '../components/LayoutSettings'
@@ -777,6 +778,18 @@ export function Settings() {
             </ol>
           </details>
         </div>
+      </Section>
+
+      <Section
+        title="Instagram"
+        note="Reels are published through your own Meta app. Tokens stay in your OS keyring."
+      >
+        <InstagramSettings
+          settings={settings}
+          onPatch={patch}
+          onReload={reload}
+          onError={setError}
+        />
       </Section>
 
       {system && (

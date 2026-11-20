@@ -100,6 +100,108 @@ export interface YouTubeQuota {
   remaining: number
 }
 
+/** Which of Meta's three API setups this install uses. */
+export type InstagramLoginType = 'unified' | 'facebook' | 'instagram'
+
+/** What the Instagram connection looks like right now. */
+export interface InstagramStatus {
+  configured: boolean
+  connected: boolean
+  auto_upload: boolean
+  app_id: string
+  redirect_uri: string
+  login_type: InstagramLoginType
+  api_version: string
+  config_id: string
+  ig_user_id: string
+  username: string
+  connected_at: string
+  professional: boolean
+}
+
+/** One Instagram account this install can publish to. */
+export interface InstagramAccount {
+  id: string
+  ig_user_id: string
+  username: string
+  name: string
+  label: string
+  login_type: InstagramLoginType
+  page_id: string
+  business_id: string
+  professional: boolean
+  needs_reconnect: boolean
+  last_error: string
+  created_at: string
+  updated_at: string
+  connected_at: string
+  /** Whether a credential is held for this account. The token is never sent. */
+  has_token: boolean
+}
+
+/** One Instagram publish attempt. */
+export interface InstagramUpload {
+  id: string
+  export_id: string
+  clip_id: string
+  account_row_id: string
+  status: string
+  media_id: string
+  container_id: string
+  caption: string
+  media_type: string
+  /** Whether the owner declared the media as AI-generated. */
+  is_ai_generated: boolean
+  error: string | null
+  created_at: string
+  updated_at: string
+  /** How many bytes Instagram has. The worker writes it as it goes. */
+  bytes_sent: number
+  total_bytes: number
+  attempts: number
+  next_attempt_at: string
+  progress_percent: number
+  permalink: string
+  published_at: string
+  /** What the publish actually did — including the parts Meta dropped. */
+  publish_detail: string
+  reconcile_status: string
+  reconcile_detail: string
+  reconciled_at: string
+  needs_reconciliation: boolean
+}
+
+/** The account's publishing allowance, as Meta reports it. */
+export interface InstagramPublishingLimit {
+  quota_total: number
+  quota_duration_s: number
+  quota_usage: number
+  /** True when Meta actually answered. */
+  known: boolean
+  remaining: number
+}
+
+/**
+ * What can and cannot be published, and what is still unverified.
+ *
+ * The endpoint never refuses — it reports, so the page can say what is
+ * still missing rather than showing a blank refusal.
+ */
+export interface InstagramEligibility {
+  login_type: InstagramLoginType
+  setup_label: string
+  host: string
+  scopes: string[]
+  /** Whether the official resumable upload protocol is available. */
+  resumable_upload: boolean
+  /** Whether a local file can be sent at all on this setup. */
+  local_file_supported: boolean
+  requirements: string[]
+  observations: string[]
+  unverified: string[]
+  publishing_limit: InstagramPublishingLimit
+}
+
 export interface ExportRecord {
   id: string
   clip_id: string
@@ -110,6 +212,13 @@ export interface ExportRecord {
   download_url: string
   upload: UploadRecord | null
   uploads: UploadRecord[]
+  /**
+   * The Instagram posts made from this export.
+   *
+   * Instagram runs on its own queue, so these rows are independent of the
+   * YouTube ones: a failed Instagram post never touches a YouTube upload.
+   */
+  instagram_uploads?: InstagramUpload[]
 }
 
 export type ClipStatus = 'candidate' | 'kept' | 'discarded' | 'exported' | 'invalid'
@@ -346,9 +455,25 @@ export interface Settings {
     channel_url: string
     connected_at: string
   }
+  /** Absent on a server older than M4b. */
+  instagram?: {
+    app_id: string
+    redirect_uri: string
+    login_type: InstagramLoginType
+    api_version: string
+    config_id: string
+    business_id: string
+    auto_upload: boolean
+    ig_user_id: string
+    username: string
+    connected_at: string
+    professional: boolean
+  }
   insecure_secret_storage: boolean
   keys_present: Record<string, boolean>
   youtube_secret_present: boolean
+  /** Absent on a server older than M4b. */
+  instagram_secret_present?: boolean
 }
 
 export interface YouTubeStatus {
@@ -1278,6 +1403,58 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ made_for_kids: madeForKids }),
     }),
+
+  instagramStatus: () => request<InstagramStatus>('/api/instagram/status'),
+  /** Start the Meta sign-in and get the consent URL to open. */
+  instagramConnect: (accountId = '', label = '') =>
+    request<{ auth_url: string }>('/api/instagram/connect', {
+      method: 'POST',
+      body: JSON.stringify({ account_id: accountId, label }),
+    }),
+  instagramDisconnect: (accountId = '') =>
+    request<InstagramStatus>('/api/instagram/disconnect', {
+      method: 'POST',
+      body: JSON.stringify({ account_id: accountId }),
+    }),
+  setInstagramAuto: (enabled: boolean) =>
+    request<InstagramStatus>('/api/instagram/auto-upload', {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    }),
+  instagramAccounts: () => request<InstagramAccount[]>('/api/instagram/accounts'),
+  /** What can and cannot be published, and what is still unverified. */
+  instagramEligibility: () => request<InstagramEligibility>('/api/instagram/eligibility'),
+  /** The publishing allowance, read from Meta rather than hardcoded. */
+  instagramLimit: () => request<InstagramPublishingLimit>('/api/instagram/limit'),
+  instagramUploads: (clipId: string) =>
+    request<InstagramUpload[]>(`/api/instagram/uploads?clip_id=${encodeURIComponent(clipId)}`),
+  /** Queue one export for Instagram. The account is named explicitly. */
+  enqueueInstagram: (exportId: string, accountRowId = '', caption = '', isAiGenerated = false) =>
+    request<InstagramUpload>('/api/instagram/uploads', {
+      method: 'POST',
+      body: JSON.stringify({
+        export_id: exportId,
+        account_row_id: accountRowId,
+        caption,
+        is_ai_generated: isAiGenerated,
+      }),
+    }),
+  /** Change what a queued post will say, before it leaves the machine. */
+  editInstagramUpload: (
+    uploadId: string,
+    patch: { caption?: string; is_ai_generated?: boolean },
+  ) =>
+    request<InstagramUpload>(`/api/instagram/uploads/${uploadId}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+  retryInstagramUpload: (uploadId: string) =>
+    request<InstagramUpload>(`/api/instagram/uploads/${uploadId}/retry`, { method: 'POST' }),
+  /** Measure an export against Instagram's documented limits. Sends nothing. */
+  validateInstagram: (exportId: string) =>
+    request<{ ok: boolean; problems: string[] }>(
+      `/api/instagram/validate?export_id=${encodeURIComponent(exportId)}`,
+    ),
 
   getSettings: () => request<Settings>('/api/settings'),
   putSettings: (patch: Partial<Settings>) =>
