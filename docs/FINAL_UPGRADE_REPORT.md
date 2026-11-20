@@ -360,7 +360,7 @@ touched. The branch was created from `bf76811` and every commit since is in fron
 | M3 | `7ab6e19` · `d3c5828` · `df67aa5` · `1f3ff9c` · `b3d1c25` · `fd64fd2` · `7cdcf7a` · `7b9751b` |
 | M4a | `20f6578` · `aa1f27f` · `7ed2a8d` · `53bc065` · `5d46feb` · `8038890` · `e837faf` |
 | M4b | `b55bfad` · `3bbf876` · `6318655` · `2cfeb65` · `521cec5` · `5fc04cc` |
-| M5 | `0ef1548` (the keyring test fix) · `4cf309b` (the formatter pin) · `94c6d9c` (no test may touch the owner's real OS keyring) · `69498e3` (the CI ffmpeg-check fix) · `bcdfc47` (the export and ducking fixes, with their tests) · the release commit |
+| M5 | `0ef1548` (the keyring test fix) · `4cf309b` (the formatter pin) · `94c6d9c` (no test may touch the owner's real OS keyring) · `69498e3` (the CI ffmpeg-check fix) · `bcdfc47` (the export and ducking fixes, with their tests) · `64d253d` (the release package) |
 
 **The M5 commits, in order, and what each one is for.**
 
@@ -371,7 +371,7 @@ touched. The branch was created from `bf76811` and every commit since is in fron
 | `94c6d9c` | The **autouse** `isolated_keyring` fixture | Closes the **class**, not the instance. The first fix covered one test; CI then found another. This one is for every test in the suite |
 | `69498e3` | `.github/workflows/ci.yml` — the ffmpeg `ass`-filter check no longer pipes into `grep -q` | A change to the **workflow**, not to the product. It is kept apart so the product diff stays reviewable |
 | `bcdfc47` | `api/clips.py` (the user's music choice and the speech timeline), `pipeline/export.py` (the malformed filtergraphs), and the three test files | The product fix and its guards travel together — the tests are the evidence that the fix is real, and **6 of the 7 API tests and 2 of the 3 render tests fail without it** |
-| *release commit* | The M5 deliverables, the matrix, the ledger, the audit, this report, the README | Documentation only |
+| `64d253d` | The M5 deliverables, the matrix, the ledger, the audit, this report, the README | Documentation only |
 
 The full, dated list is in `docs/UPGRADE-LEDGER.md` §Change log.
 

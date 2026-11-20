@@ -504,3 +504,4 @@ as a condition of the release, not quietly upgraded.
 | 2026-11-20 | `94c6d9c` | M5 — no test may touch the owner's real OS keyring: an autouse fixture isolates it for every test in the suite |
 | 2026-11-21 | `69498e3` | M5 — the CI's ffmpeg subtitle check no longer pipes into `grep -q`: the broken pipe was making CI report that an ffmpeg *with* the `ass` filter did not have one |
 | 2026-11-21 | `bcdfc47` | M5 — the export honours the user's music choice and the speech timeline, and the two malformed ducking filtergraphs are fixed; guarded by 7 API tests, 3 real-render tests and a version-independent structural graph check |
+| 2026-11-21 | `64d253d` | M5 — the release package: the application-testing evidence, the regression report, the security review, the performance report, the installation guide, the final report, the audit through M5, the matrix, the ledger and the README |
