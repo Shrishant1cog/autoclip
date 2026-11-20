@@ -29,6 +29,20 @@ def utcnow() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+def _column(row: sqlite3.Row, name: str, default: str = "") -> str:
+    """A column's value, or the default when the row predates the column.
+
+    A database that has not been migrated yet still has to be readable:
+    the clip rows are the one place a missing column would otherwise
+    crash the whole application on startup.
+    """
+    try:
+        value = row[name]
+    except (IndexError, KeyError):
+        return default
+    return default if value is None else str(value)
+
+
 @dataclass
 class Source:
     id: str
@@ -154,6 +168,12 @@ class Clip:
     #: Validator report from the last export (checks + pass/fail). Empty when
     #: the clip has not been validated yet.
     validation: dict[str, Any] | None = None
+    #: The music this clip ended up with. Empty when it has none.
+    music_track_id: str = ""
+    #: Whose choice it was: "user", "ai" or "deterministic".
+    music_source: str = ""
+    #: Why that track was chosen, in plain words.
+    music_reason: str = ""
     created_at: str = field(default_factory=utcnow)
 
     @property
@@ -177,6 +197,9 @@ class Clip:
             status=row["status"],
             user_trimmed=bool(row["user_trimmed"]),
             validation=json.loads(row["validation_json"]) if row["validation_json"] else None,
+            music_track_id=_column(row, "music_track_id"),
+            music_source=_column(row, "music_source"),
+            music_reason=_column(row, "music_reason"),
             created_at=row["created_at"],
         )
 

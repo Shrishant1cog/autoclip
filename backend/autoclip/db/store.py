@@ -282,8 +282,9 @@ def replace_clips(job_id: str, clips: list[Clip]) -> list[Clip]:
         conn.executemany(
             """
             INSERT INTO clips (id, job_id, rank, start_s, end_s, start_word, end_word,
-                               title, hook, score, reason, status, user_trimmed, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               title, hook, score, reason, status, user_trimmed, created_at,
+                               music_track_id, music_source, music_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -301,6 +302,9 @@ def replace_clips(job_id: str, clips: list[Clip]) -> list[Clip]:
                     c.status,
                     int(c.user_trimmed),
                     c.created_at,
+                    c.music_track_id,
+                    c.music_source,
+                    c.music_reason,
                 )
                 for c in clips
             ],
@@ -342,6 +346,9 @@ def update_clip(
     status: ClipStatus | None = None,
     user_trimmed: bool | None = None,
     validation: dict[str, Any] | None = None,
+    music_track_id: str | None = None,
+    music_source: str | None = None,
+    music_reason: str | None = None,
 ) -> None:
     fields: dict[str, Any] = {}
     for name, value in (
@@ -351,6 +358,9 @@ def update_clip(
         ("end_word", end_word),
         ("title", title),
         ("status", status),
+        ("music_track_id", music_track_id),
+        ("music_source", music_source),
+        ("music_reason", music_reason),
     ):
         if value is not None:
             fields[name] = value

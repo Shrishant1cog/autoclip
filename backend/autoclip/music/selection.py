@@ -23,6 +23,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from ..budget import CallBudget
 from . import store
 from .analysis import Analysis
 from .licensing import evaluate
@@ -30,6 +31,7 @@ from .licensing import evaluate
 log = logging.getLogger(__name__)
 
 __all__ = [
+    "AsyncProposer",
     "CallBudget",
     "ClipContext",
     "MusicSelection",
@@ -38,6 +40,7 @@ __all__ = [
     "default_budget",
     "parse_proposal",
     "select_track",
+    "select_track_async",
     "score_track",
 ]
 
@@ -51,6 +54,15 @@ class Proposer(Protocol):
     """
 
     def __call__(self, context: dict[str, Any]) -> str: ...
+
+
+class AsyncProposer(Protocol):
+    """Something that can propose a track, asynchronously.
+
+    The provider's call is asynchronous, so the pipeline uses this one.
+    """
+
+    async def __call__(self, context: dict[str, Any]) -> str: ...
 
 
 @dataclass
@@ -103,37 +115,6 @@ class MusicSelection:
             "reason": self.reason,
             "score": round(self.score, 4),
             "warnings": list(self.warnings),
-        }
-
-
-@dataclass
-class CallBudget:
-    """A hard cap on how many AI calls a job may make.
-
-    The approved budget is one music call per eligible clip, capped by the
-    clip count — ten clips means ten calls, and no more, whatever the model
-    asks for.
-    """
-
-    max_calls: int
-    used: int = 0
-
-    @property
-    def remaining(self) -> int:
-        return max(0, self.max_calls - self.used)
-
-    def take(self) -> bool:
-        """Reserve one call. Returns False when the budget is spent."""
-        if self.used >= self.max_calls:
-            return False
-        self.used += 1
-        return True
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "max_calls": self.max_calls,
-            "used": self.used,
-            "remaining": self.remaining,
         }
 
 
@@ -271,78 +252,68 @@ def parse_proposal(raw: str) -> tuple[str, str]:
     return ("", "")
 
 
-def select_track(
-    context: ClipContext,
-    *,
-    candidates: list[store.MusicTrack] | None = None,
-    proposer: Proposer | None = None,
-    user_choice: str = "",
-    budget: CallBudget | None = None,
-) -> MusicSelection | None:
-    """Choose a track for a clip.
+def _usable_tracks(pool: list[store.MusicTrack]) -> list[store.MusicTrack]:
+    """The tracks that may be used at all.
 
-    The order is deliberate:
-
-    1. A manual choice wins, and no model is consulted.
-    2. A model's proposal is used only if it names a candidate that exists
-       **and** may legally be used.
-    3. Otherwise the deterministic scorer picks.
-
-    Returns ``None`` when there is nothing to choose from.
+    A track that may not legally be exported is not a candidate, whatever
+    the model says about it. That check happens here, before the model is
+    asked, so an unlicensed track is never even named in the prompt.
     """
-    if user_choice:
-        chosen = store.get_track(user_choice)
-        if chosen is not None:
-            return MusicSelection(
-                track_id=chosen.id,
-                track_name=chosen.name,
-                source="user",
-                reason="Chosen by you.",
-                score=1.0,
-            )
-
-    pool = candidates if candidates is not None else store.list_tracks()
     usable: list[store.MusicTrack] = []
     for track in pool:
         if track.excluded:
             continue
         record = store.get_license(track.id)
         if not evaluate(record).allowed:
-            # A track that may not be exported is not a candidate, whatever the
-            # model says about it.
             continue
         usable.append(track)
+    return usable
 
-    if not usable:
+
+def _manual_choice(user_choice: str) -> MusicSelection | None:
+    """The track the user picked, if there is one and it still exists."""
+    if not user_choice:
         return None
+    chosen = store.get_track(user_choice)
+    if chosen is None:
+        return None
+    return MusicSelection(
+        track_id=chosen.id,
+        track_name=chosen.name,
+        source="user",
+        reason="Chosen by you.",
+        score=1.0,
+    )
 
-    if proposer is not None:
-        if budget is None or budget.take():
-            try:
-                raw = proposer(build_proposal_context(context, usable))
-            except Exception as exc:  # noqa: BLE001 - a model failure is not a crash
-                log.warning("Music proposal failed: %s", exc)
-            else:
-                track_id, reason = parse_proposal(raw)
-                match = next((track for track in usable if track.id == track_id), None)
-                if match is not None:
-                    verdict = evaluate(store.get_license(match.id))
-                    return MusicSelection(
-                        track_id=match.id,
-                        track_name=match.name,
-                        source="ai",
-                        reason=reason or "Chosen by the AI model.",
-                        score=score_track(context, match.analysis),
-                        warnings=list(verdict.warnings),
-                    )
-                log.info(
-                    "The music proposal named %r, which is not an available track; "
-                    "falling back to the deterministic choice.",
-                    track_id,
-                )
-        elif budget is not None:
-            log.warning("Music selection budget spent; choosing deterministically.")
 
+def _from_proposal(
+    raw: str,
+    context: ClipContext,
+    usable: list[store.MusicTrack],
+) -> MusicSelection | None:
+    """Turn the model's answer into a selection, if it names a usable track."""
+    track_id, reason = parse_proposal(raw)
+    match = next((track for track in usable if track.id == track_id), None)
+    if match is None:
+        log.info(
+            "The music proposal named %r, which is not an available track; "
+            "falling back to the deterministic choice.",
+            track_id,
+        )
+        return None
+    verdict = evaluate(store.get_license(match.id))
+    return MusicSelection(
+        track_id=match.id,
+        track_name=match.name,
+        source="ai",
+        reason=reason or "Chosen by the AI model.",
+        score=score_track(context, match.analysis),
+        warnings=list(verdict.warnings),
+    )
+
+
+def _deterministic(context: ClipContext, usable: list[store.MusicTrack]) -> MusicSelection:
+    """The scorer's own answer, with the numbers that produced it."""
     best = max(usable, key=lambda track: score_track(context, track.analysis))
     return MusicSelection(
         track_id=best.id,
@@ -355,6 +326,104 @@ def select_track(
         score=score_track(context, best.analysis),
         warnings=list(evaluate(store.get_license(best.id)).warnings),
     )
+
+
+def select_track(
+    context: ClipContext,
+    *,
+    candidates: list[store.MusicTrack] | None = None,
+    proposer: Proposer | None = None,
+    user_choice: str = "",
+    budget: CallBudget | None = None,
+    fatal: tuple[type[BaseException], ...] = (),
+) -> MusicSelection | None:
+    """Choose a track for a clip.
+
+    The order is deliberate:
+
+    1. A manual choice wins, and no model is consulted.
+    2. A model's proposal is used only if it names a candidate that exists
+       **and** may legally be used.
+    3. Otherwise the deterministic scorer picks.
+
+    Returns ``None`` when there is nothing to choose from.
+
+    ``fatal`` lists the exception types that are *not* model failures. A
+    provider that refuses because the user withdrew consent is not a
+    broken model — it is an answer — so it is passed up rather than
+    swallowed. The caller decides what to do with it.
+    """
+    manual = _manual_choice(user_choice)
+    if manual is not None:
+        return manual
+
+    pool = candidates if candidates is not None else store.list_tracks()
+    usable = _usable_tracks(pool)
+    if not usable:
+        return None
+
+    if proposer is not None:
+        if budget is None or budget.take(
+            "the music-selection budget was spent, so this clip was chosen deterministically"
+        ):
+            try:
+                raw = proposer(build_proposal_context(context, usable))
+            except fatal:
+                raise
+            except Exception as exc:  # noqa: BLE001 - a model failure is not a crash
+                log.warning("Music proposal failed: %s", exc)
+            else:
+                chosen = _from_proposal(raw, context, usable)
+                if chosen is not None:
+                    return chosen
+        elif budget is not None:
+            log.warning("Music selection budget spent; choosing deterministically.")
+
+    return _deterministic(context, usable)
+
+
+async def select_track_async(
+    context: ClipContext,
+    *,
+    candidates: list[store.MusicTrack] | None = None,
+    proposer: AsyncProposer | None = None,
+    user_choice: str = "",
+    budget: CallBudget | None = None,
+    fatal: tuple[type[BaseException], ...] = (),
+) -> MusicSelection | None:
+    """Choose a track for a clip, with an asynchronous proposer.
+
+    The provider's call is asynchronous, so the pipeline needs this
+    variant. The order of decisions is the same as :func:`select_track`,
+    and the two share every helper — there is one set of rules, not two.
+    """
+    manual = _manual_choice(user_choice)
+    if manual is not None:
+        return manual
+
+    pool = candidates if candidates is not None else store.list_tracks()
+    usable = _usable_tracks(pool)
+    if not usable:
+        return None
+
+    if proposer is not None:
+        if budget is None or budget.take(
+            "the music-selection budget was spent, so this clip was chosen deterministically"
+        ):
+            try:
+                raw = await proposer(build_proposal_context(context, usable))
+            except fatal:
+                raise
+            except Exception as exc:  # noqa: BLE001 - a model failure is not a crash
+                log.warning("Music proposal failed: %s", exc)
+            else:
+                chosen = _from_proposal(raw, context, usable)
+                if chosen is not None:
+                    return chosen
+        elif budget is not None:
+            log.warning("Music selection budget spent; choosing deterministically.")
+
+    return _deterministic(context, usable)
 
 
 def default_budget(max_clips: int) -> CallBudget:

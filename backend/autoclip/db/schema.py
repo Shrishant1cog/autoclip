@@ -784,6 +784,53 @@ def _migration_v19(conn: sqlite3.Connection) -> None:
     conn.executescript(_V19)
 
 
+# --- v20: the music preferences, and the clip's music -------------------------
+
+_V20 = """
+-- music_preferences is the user's music choice, at three scopes.
+--
+-- The scopes are separate rows rather than one row with three columns,
+-- because a clip's choice has to survive the source's choice being
+-- changed, and clearing one scope must not clear another.
+--
+--   scope 'global' — the default for every job.
+--   scope 'source' — for one video (the project).
+--   scope 'clip'   — for one clip of one job.
+--
+-- The most specific scope wins: clip, then source, then global, then the
+-- automatic selection.
+--
+-- 'track_id' is empty when the scope means "no preference" rather than
+-- "no music": an empty track at clip scope falls back to the source's
+-- choice rather than turning the music off.
+CREATE TABLE IF NOT EXISTS music_preferences (
+    scope       TEXT NOT NULL,
+    scope_id    TEXT NOT NULL DEFAULT '',
+    track_id    TEXT NOT NULL DEFAULT '',
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (scope, scope_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_music_preferences_scope ON music_preferences(scope);
+
+-- The music each clip ended up with. These are the *selection*, not the
+-- preference: the preference is what the user asked for, and this is what
+-- the pipeline decided. 'source' says which -- 'user', 'ai' or
+-- 'deterministic' — so the user can see whose choice it was.
+-- The columns are added by the migration function, because SQLite has no
+-- 'ADD COLUMN IF NOT EXISTS' and a half-applied migration must not stop
+-- the database from opening.
+"""
+
+
+def _migration_v20(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V20)
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(clips)").fetchall()}
+    for column in ("music_track_id", "music_source", "music_reason"):
+        if column not in existing:
+            conn.execute(f"ALTER TABLE clips ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
+
+
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v1,
     _migration_v2,
@@ -804,6 +851,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v17,
     _migration_v18,
     _migration_v19,
+    _migration_v20,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)

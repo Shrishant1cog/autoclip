@@ -24,6 +24,7 @@ from pathlib import Path
 from ..pipeline import music as legacy_music
 from . import store
 from .analysis import Analysis, AnalysisError, analyze_track
+from .formats import classify as classify_formats
 from .licensing import LicenseBlocked, LicenseRecord, LicenseState, evaluate
 
 log = logging.getLogger(__name__)
@@ -56,6 +57,10 @@ class LibraryTrack:
         data["license_allowed"] = self.allowed
         data["license_reason"] = self.reason
         data["license_warnings"] = self.warnings or []
+        # The formats are derived from the measurements, so they are computed
+        # here rather than stored: a stale stored format would be a lie about
+        # a file that has since changed.
+        data["formats"] = classify_formats(self.track.analysis)
         return data
 
 
@@ -160,6 +165,9 @@ def search(
     mood: str = "",
     min_bpm: float | None = None,
     max_bpm: float | None = None,
+    min_energy: float | None = None,
+    max_energy: float | None = None,
+    music_format: str = "",
     licence_state: str = "",
     favourite_only: bool = False,
     tag: str = "",
@@ -168,10 +176,15 @@ def search(
 
     Every filter runs on the server so the result set is the same whether it
     is fetched by the Settings screen or by the selection code.
+
+    The energy filter runs on the measured energy, and the format filter on
+    the formats derived from the measurements — both are numbers the file
+    produced, never a guess.
     """
     needle = query.strip().casefold()
     wanted_licence = licence_state.strip()
     wanted_tag = tag.strip().casefold()
+    wanted_format = music_format.strip().casefold()
 
     results: list[LibraryTrack] = []
     for entry in list_tracks():
@@ -191,6 +204,12 @@ def search(
         if min_bpm is not None and track.analysis.bpm < min_bpm:
             continue
         if max_bpm is not None and track.analysis.bpm > max_bpm:
+            continue
+        if min_energy is not None and track.analysis.energy < min_energy:
+            continue
+        if max_energy is not None and track.analysis.energy > max_energy:
+            continue
+        if wanted_format and wanted_format not in classify_formats(track.analysis):
             continue
         if wanted_licence and entry.license.state != wanted_licence:
             continue
