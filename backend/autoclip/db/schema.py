@@ -859,6 +859,36 @@ def _migration_v21(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE clips ADD COLUMN diagnostics_json TEXT NOT NULL DEFAULT ''")
 
 
+# --- v22: the health of a Google connection ---------------------------------
+
+_V22 = """
+-- A Google account that Google has refused to refresh has to be connected
+-- again. The flag is per-account, so one broken credential never takes the
+-- other accounts down with it: the other channels keep publishing while
+-- this one waits for the owner.
+--
+-- 'last_error' keeps the reason in plain words, so the Channels page can
+-- say what happened instead of only "not connected".
+--
+-- The columns are added by the migration function, because SQLite has no
+-- 'ADD COLUMN IF NOT EXISTS' and a half-applied migration must not stop
+-- the database from opening.
+"""
+
+
+def _migration_v22(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V22)
+    existing = {
+        row["name"] for row in conn.execute("PRAGMA table_info(google_accounts)").fetchall()
+    }
+    for column, definition in (
+        ("needs_reconnect", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_error", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if column not in existing:
+            conn.execute(f"ALTER TABLE google_accounts ADD COLUMN {column} {definition}")
+
+
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v1,
     _migration_v2,
@@ -881,6 +911,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v19,
     _migration_v20,
     _migration_v21,
+    _migration_v22,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)

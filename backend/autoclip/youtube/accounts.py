@@ -51,39 +51,40 @@ def claim_legacy_token(account_id: str, settings: config.Settings | None = None)
 def list_accounts() -> list[dict[str, Any]]:
     with connection() as conn:
         rows = conn.execute(
-            "SELECT id, label, email, client_id, connected_at, created_at"
-            " FROM google_accounts ORDER BY created_at"
+            "SELECT id, label, email, client_id, connected_at, created_at,"
+            " needs_reconnect, last_error"
+            " FROM google_accounts ORDER BY created_at, rowid"
         ).fetchall()
-    return [
-        {
-            "id": r[0],
-            "label": r[1],
-            "email": r[2],
-            "client_id": r[3],
-            "connected_at": r[4],
-            "created_at": r[5],
-        }
-        for r in rows
-    ]
+    return [_account_row(r) for r in rows]
+
+
+def _account_row(r: tuple[Any, ...]) -> dict[str, Any]:
+    return {
+        "id": r[0],
+        "label": r[1],
+        "email": r[2],
+        "client_id": r[3],
+        "connected_at": r[4],
+        "created_at": r[5],
+        #: True when Google has refused to refresh this account's credential
+        #: and the owner has to connect it again.
+        "needs_reconnect": bool(r[6]),
+        #: Why the connection broke, in plain words.
+        "last_error": r[7],
+    }
 
 
 def get_account(account_id: str) -> dict[str, Any] | None:
     with connection() as conn:
         row = conn.execute(
-            "SELECT id, label, email, client_id, connected_at, created_at"
+            "SELECT id, label, email, client_id, connected_at, created_at,"
+            " needs_reconnect, last_error"
             " FROM google_accounts WHERE id = ?",
             (account_id,),
         ).fetchone()
     if row is None:
         return None
-    return {
-        "id": row[0],
-        "label": row[1],
-        "email": row[2],
-        "client_id": row[3],
-        "connected_at": row[4],
-        "created_at": row[5],
-    }
+    return _account_row(row)
 
 
 def create_account(
@@ -115,6 +116,57 @@ def update_account(account_id: str, **fields: str) -> dict[str, Any] | None:
     return get_account(account_id)
 
 
+def mark_needs_reconnect(account_id: str, reason: str) -> None:
+    """Record that Google has refused this account's credential.
+
+    The flag is per-account on purpose. One Google account whose refresh
+    token has been revoked must not stop the other accounts from
+    publishing, so only this row is marked and the reason is kept.
+    """
+    with connection() as conn:
+        conn.execute(
+            "UPDATE google_accounts SET needs_reconnect = 1, last_error = ? WHERE id = ?",
+            (reason, account_id),
+        )
+
+
+def clear_needs_reconnect(account_id: str) -> None:
+    """Forget a previous failure — the account has been connected again."""
+    with connection() as conn:
+        conn.execute(
+            "UPDATE google_accounts SET needs_reconnect = 0, last_error = '' WHERE id = ?",
+            (account_id,),
+        )
+
+
+def store_refresh_token(
+    account_id: str, token: str, settings: config.Settings | None = None
+) -> None:
+    """Keep an account's refresh token in the keyring, under its own entry."""
+    config.set_secret(_refresh_entry(account_id), token, settings)
+
+
+def forget_refresh_token(account_id: str, settings: config.Settings | None = None) -> None:
+    """Remove an account's refresh token from the keyring."""
+    config.delete_secret(_refresh_entry(account_id), settings)
+
+
+def is_first_account(account_id: str) -> bool:
+    """True when this is the oldest account.
+
+    The oldest account is the one the pre-multi-account code paths mean
+    when they say "the connected channel", so it is the one that keeps
+    the legacy settings and the legacy keyring entry in step.
+
+    The order is the row's insertion order, not its timestamp. Two
+    accounts connected in the same second share a timestamp, and the
+    timestamp alone would make "the oldest" a coin toss.
+    """
+    with connection() as conn:
+        row = conn.execute("SELECT id FROM google_accounts ORDER BY rowid LIMIT 1").fetchone()
+    return bool(row) and row[0] == account_id
+
+
 def delete_account(account_id: str) -> None:
     """Remove the account, its channels, and its refresh token."""
     with connection() as conn:
@@ -125,7 +177,7 @@ def delete_account(account_id: str) -> None:
 def default_account() -> dict[str, Any] | None:
     """The first-created account, mirroring the legacy single-account setup."""
     with connection() as conn:
-        row = conn.execute("SELECT id FROM google_accounts ORDER BY created_at LIMIT 1").fetchone()
+        row = conn.execute("SELECT id FROM google_accounts ORDER BY rowid LIMIT 1").fetchone()
     return get_account(row[0]) if row else None
 
 
@@ -143,7 +195,7 @@ def list_channels(account_id: str | None = None) -> list[dict[str, Any]]:
     if account_id:
         query += " WHERE account_id = ?"
         params = (account_id,)
-    query += " ORDER BY is_default DESC, created_at"
+    query += " ORDER BY is_default DESC, created_at, rowid"
     with connection() as conn:
         rows = conn.execute(query, params).fetchall()
     return [_channel_row(r) for r in rows]
@@ -221,6 +273,57 @@ def add_channel(
     return result
 
 
+def upsert_channel(
+    account_id: str,
+    channel: dict[str, str],
+    *,
+    privacy: str = "private",
+    category_id: str = "24",
+    auto_upload: bool = False,
+) -> dict[str, Any]:
+    """Register the channel Google just signed in to, or refresh its record.
+
+    The destination identity lives here, not in the settings file: a
+    channel row is what an upload names, so the upload can be proved to
+    have gone to the channel the user chose.
+
+    A channel that is already registered under this account is updated in
+    place. Its own policy — privacy, category, automatic publishing — is
+    left exactly as it was, because a second sign-in is not a reason to
+    change how the channel publishes.
+    """
+    channel_id = channel.get("id", "")
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM youtube_channels WHERE account_id = ? AND channel_id = ?",
+            (account_id, channel_id),
+        ).fetchone()
+
+    if row is not None:
+        with connection() as conn:
+            conn.execute(
+                "UPDATE youtube_channels SET title = ?, url = ?, updated_at = ? WHERE id = ?",
+                (
+                    channel.get("title", ""),
+                    channel.get("url", ""),
+                    utcnow(),
+                    row[0],
+                ),
+            )
+        result = get_channel(row[0])
+        assert result is not None
+        return result
+
+    return add_channel(
+        account_id,
+        channel,
+        is_default=None,
+        privacy=privacy,
+        category_id=category_id,
+        auto_upload=auto_upload,
+    )
+
+
 def update_channel(channel_row_id: str, **fields: Any) -> dict[str, Any] | None:
     allowed = {"privacy", "category_id", "auto_upload", "is_default", "title", "title_suffix"}
     updates = {k: v for k, v in fields.items() if k in allowed}
@@ -262,12 +365,19 @@ def default_channel(account_id: str | None = None) -> dict[str, Any] | None:
 
 
 def refresh_token_for(account_id: str, settings: config.Settings | None = None) -> str | None:
-    """Refresh token for an account: per-account entry, then legacy fallback."""
+    """Refresh token for an account: its own entry, then the legacy one.
+
+    The legacy fallback belongs to the **oldest** account only. It used to
+    belong to whichever account asked, which meant a second account that
+    had never been connected looked as though it held a token — and could
+    publish to the first account's channel.
+    """
     token = config.get_secret(_refresh_entry(account_id), settings)
     if token:
         return token
-    # Legacy fallback: exactly one account exists from the pre-multi era.
-    return legacy_refresh_token(settings)
+    if is_first_account(account_id):
+        return legacy_refresh_token(settings)
+    return None
 
 
 def ensure_legacy_migrated(settings: config.Settings | None = None) -> None:
@@ -311,18 +421,24 @@ def _connect_version(conn: sqlite3.Connection) -> int:  # pragma: no cover - tes
 __all__ = [
     "add_channel",
     "claim_legacy_token",
+    "clear_needs_reconnect",
     "create_account",
     "default_account",
     "default_channel",
     "delete_account",
     "delete_channel",
     "ensure_legacy_migrated",
+    "forget_refresh_token",
     "get_account",
     "get_channel",
+    "is_first_account",
     "legacy_refresh_token",
     "list_accounts",
     "list_channels",
+    "mark_needs_reconnect",
     "refresh_token_for",
+    "store_refresh_token",
     "update_account",
     "update_channel",
+    "upsert_channel",
 ]

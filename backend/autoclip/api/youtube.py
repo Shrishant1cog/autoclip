@@ -16,7 +16,9 @@ from ..youtube.queue import upload_queue
 from .schemas import (
     UploadOut,
     YouTubeAutoIn,
+    YouTubeConnectIn,
     YouTubeConnectOut,
+    YouTubeDisconnectIn,
     YouTubePrivacyIn,
     YouTubeStatusOut,
 )
@@ -47,10 +49,21 @@ async def status() -> YouTubeStatusOut:
 
 
 @router.post("/connect", response_model=YouTubeConnectOut)
-async def connect() -> YouTubeConnectOut:
-    """Start the Google sign-in and hand the browser the consent URL."""
+async def connect(payload: YouTubeConnectIn | None = None) -> YouTubeConnectOut:
+    """Start the Google sign-in and hand the browser the consent URL.
+
+    ``account_id`` says which connected account this sign-in is for; an
+    empty one creates a new account slot. Either way the token that comes
+    back is filed under that account, so a second account keeps its own
+    credential.
+    """
+    payload = payload or YouTubeConnectIn()
     try:
-        url = oauth.build_auth_url(config.load())
+        url = oauth.build_auth_url(
+            config.load(),
+            account_id=payload.account_id,
+            label=payload.label,
+        )
     except oauth.OAuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return YouTubeConnectOut(auth_url=url)
@@ -78,9 +91,15 @@ async def callback(
 
 
 @router.post("/disconnect", response_model=YouTubeStatusOut)
-async def disconnect() -> YouTubeStatusOut:
+async def disconnect(payload: YouTubeDisconnectIn | None = None) -> YouTubeStatusOut:
+    """Disconnect one account, or the legacy connection.
+
+    Disconnecting one account leaves the others connected: a channel that
+    is no longer wanted must not take the other channels down with it.
+    """
+    payload = payload or YouTubeDisconnectIn()
     settings = config.load()
-    await asyncio.to_thread(oauth.disconnect, settings)
+    await asyncio.to_thread(oauth.disconnect, settings, account_id=payload.account_id)
     return _status(settings)
 
 

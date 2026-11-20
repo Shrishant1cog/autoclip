@@ -992,6 +992,13 @@ export interface YouTubeAccount {
   created_at: string
   /** Whether a refresh token is stored. The token itself never leaves the server. */
   has_refresh_token: boolean
+  /**
+   * True when Google refused this account's credential and it has to be
+   * connected again. Other accounts keep working.
+   */
+  needs_reconnect: boolean
+  /** Why the connection broke, in plain words. */
+  last_error: string
   channels: YouTubeChannel[]
 }
 
@@ -1101,10 +1108,16 @@ export const api = {
   providerStatus: () => request<ProviderStatus[]>('/api/providers/status'),
 
   youtubeStatus: () => request<YouTubeStatus>('/api/youtube/status'),
-  youtubeConnect: () =>
-    request<{ auth_url: string }>('/api/youtube/connect', { method: 'POST' }),
-  youtubeDisconnect: () =>
-    request<YouTubeStatus>('/api/youtube/disconnect', { method: 'POST' }),
+  youtubeConnect: (accountId = '', label = '') =>
+    request<{ auth_url: string }>('/api/youtube/connect', {
+      method: 'POST',
+      body: JSON.stringify({ account_id: accountId, label }),
+    }),
+  youtubeDisconnect: (accountId = '') =>
+    request<YouTubeStatus>('/api/youtube/disconnect', {
+      method: 'POST',
+      body: JSON.stringify({ account_id: accountId }),
+    }),
   setYouTubeAuto: (enabled: boolean) =>
     request<YouTubeStatus>('/api/youtube/auto-upload', {
       method: 'POST',
@@ -1540,6 +1553,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ label, email }),
     }),
+  /** Start a sign-in for one account. The token comes back filed under it. */
+  connectYouTubeAccount: (accountId: string) =>
+    request<{ auth_url: string }>(`/api/youtube/accounts/${encodeURIComponent(accountId)}/connect`, {
+      method: 'POST',
+    }),
+  /** Disconnect one account. The other accounts are left alone. */
+  disconnectYouTubeAccount: (accountId: string) =>
+    request<{ disconnected: boolean }>(
+      `/api/youtube/accounts/${encodeURIComponent(accountId)}/disconnect`,
+      { method: 'POST' },
+    ),
   deleteYouTubeAccount: (id: string) =>
     request<void>(`/api/youtube/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   listYouTubeChannels: (accountId: string) =>

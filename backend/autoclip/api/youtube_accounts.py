@@ -6,6 +6,7 @@ keep working) with account and channel management.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException
@@ -13,6 +14,7 @@ from pydantic import BaseModel
 
 from .. import config
 from ..youtube import accounts as accounts_store
+from ..youtube import oauth
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +60,31 @@ async def list_all_accounts() -> list[dict]:
     return result
 
 
+@router.post("/{account_id}/connect")
+async def connect_account(account_id: str) -> dict:
+    """Start a sign-in for one account and hand back the consent URL.
+
+    The token that comes back is filed under this account, so connecting
+    a second Google account never disturbs the first one's credential.
+    """
+    if accounts_store.get_account(account_id) is None:
+        raise HTTPException(status_code=404, detail="Account not found.")
+    try:
+        url = oauth.build_auth_url(config.load(), account_id=account_id)
+    except oauth.OAuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"auth_url": url}
+
+
+@router.post("/{account_id}/disconnect")
+async def disconnect_account(account_id: str) -> dict:
+    """Disconnect one account. The other accounts are left alone."""
+    if accounts_store.get_account(account_id) is None:
+        raise HTTPException(status_code=404, detail="Account not found.")
+    await asyncio.to_thread(oauth.disconnect, config.load(), account_id=account_id)
+    return {"disconnected": True, "account_id": account_id}
+
+
 @router.post("", status_code=201)
 async def create_account(payload: AccountIn) -> dict:
     """Register an account slot. The OAuth flow attaches its token later."""
@@ -74,6 +101,16 @@ async def get_account(account_id: str) -> dict:
         "has_refresh_token": accounts_store.refresh_token_for(account_id) is not None,
         "channels": accounts_store.list_channels(account_id),
     }
+
+
+@router.put("/{account_id}")
+async def update_account(account_id: str, payload: AccountIn) -> dict:
+    """Rename an account or record the email that owns it."""
+    if accounts_store.get_account(account_id) is None:
+        raise HTTPException(status_code=404, detail="Account not found.")
+    fields = {k: v for k, v in payload.model_dump().items() if v}
+    updated = accounts_store.update_account(account_id, **fields)
+    return updated or {}
 
 
 @router.delete("/{account_id}", status_code=204)

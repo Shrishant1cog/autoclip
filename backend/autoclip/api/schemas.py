@@ -169,6 +169,24 @@ class YouTubeConnectOut(BaseModel):
     auth_url: str
 
 
+class YouTubeConnectIn(BaseModel):
+    """Which account a sign-in is for.
+
+    ``account_id`` empty means "a new account". The sign-in that comes
+    back is filed under that account, so two accounts never share a
+    credential.
+    """
+
+    account_id: str = ""
+    label: str = ""
+
+
+class YouTubeDisconnectIn(BaseModel):
+    """Which account to disconnect. Empty means the legacy connection."""
+
+    account_id: str = ""
+
+
 class YouTubeAutoIn(BaseModel):
     enabled: bool
 

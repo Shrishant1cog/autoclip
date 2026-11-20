@@ -180,6 +180,15 @@ function AccountBlock({
     }
   }
 
+  const connectAccount = async (accountId: string) => {
+    try {
+      const { auth_url } = await api.connectYouTubeAccount(accountId)
+      window.open(auth_url, '_blank', 'noopener')
+    } catch (err) {
+      onError(err as Error)
+    }
+  }
+
   return (
     <section>
       <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-ink-800 pb-3">
@@ -215,6 +224,24 @@ function AccountBlock({
           This account has no refresh token, so it cannot publish. Connect it through
           Google sign-in to give it one.
         </p>
+      )}
+
+      {account.needs_reconnect && (
+        <p className="mt-3 max-w-prose text-xs leading-relaxed text-signal-warn">
+          Google refused this account's credential, so it has to be connected again. The
+          other accounts are not affected and keep publishing.
+          {account.last_error ? ` (${account.last_error})` : ''}
+        </p>
+      )}
+
+      {!account.has_refresh_token && (
+        <button
+          onClick={() => void connectAccount(account.id)}
+          disabled={busy}
+          className="btn btn-ghost mt-3 text-xs disabled:opacity-50"
+        >
+          Connect this account
+        </button>
       )}
 
       {account.channels.length === 0 ? (
