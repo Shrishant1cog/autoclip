@@ -64,6 +64,12 @@ class Operation:
     VOICEOVER = "voiceover"
     #: Transcript text and standing instructions are sent to an LLM provider.
     HIGHLIGHTS = "highlights"
+    #: A structured creative plan is requested from an LLM provider.
+    CREATIVE_PLANNING = "creative_planning"
+    #: The measured metadata of candidate music tracks is sent to an LLM
+    #: provider so it can propose a track. No audio and no file path is ever
+    #: sent.
+    MUSIC_SELECTION = "music_selection"
     #: A rendered clip and its metadata are sent to a publishing API.
     PUBLISHING = "publishing"
     #: yt-dlp fetches a page and its media from a user-supplied URL.
@@ -79,6 +85,8 @@ class Operation:
             cls.TRANSCRIPTION,
             cls.VOICEOVER,
             cls.HIGHLIGHTS,
+            cls.CREATIVE_PLANNING,
+            cls.MUSIC_SELECTION,
             cls.PUBLISHING,
             cls.MEDIA_DOWNLOAD,
             cls.MODEL_DOWNLOAD,
@@ -104,6 +112,25 @@ OPERATION_DESCRIPTIONS: dict[str, dict[str, str]] = {
         "title": "AI highlight detection",
         "data": "Transcript windows and your standing instructions (improve.txt).",
         "why": "The language model needs the text to propose clips and explain why.",
+    },
+    Operation.CREATIVE_PLANNING: {
+        "title": "AI creative planning",
+        "data": (
+            "Your clip titles, boundaries, the layout that was detected and the "
+            "measured metadata of your music."
+        ),
+        "why": (
+            "The language model needs to see the clips to recommend a layout, a "
+            "caption strategy and a music track."
+        ),
+    },
+    Operation.MUSIC_SELECTION: {
+        "title": "AI music selection",
+        "data": (
+            "The measured metadata of your music tracks — tempo, energy, mood, "
+            "loudness. Never the audio, and never a file path."
+        ),
+        "why": "The language model needs the measurements to propose a track for a clip.",
     },
     Operation.PUBLISHING: {
         "title": "Publishing",

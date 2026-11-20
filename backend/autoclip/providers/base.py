@@ -249,7 +249,7 @@ class LLMProvider(ABC):
 
     # -- shared behaviour --------------------------------------------------
 
-    def _authorize(self, data_summary: str) -> None:
+    def _authorize(self, data_summary: str, *, operation: str = "") -> None:
         """Check that this provider's destination may be contacted.
 
         The check happens here, in the base class, because this is the one
@@ -259,6 +259,11 @@ class LLMProvider(ABC):
         A refusal raises :class:`ProviderConsentRequired`, which the caller
         treats differently from a provider failure: it is not retried against
         another external provider.
+
+        ``operation`` says which kind of transfer this is, so the user can
+        grant and withdraw each one on its own. It defaults to the
+        highlight-detection operation, which is the oldest and still the
+        most common.
         """
         endpoint = self.endpoint
         if not endpoint:
@@ -268,7 +273,7 @@ class LLMProvider(ABC):
                 hint="Set the provider's base URL in Settings → Providers.",
             )
         transfer = Transfer(
-            operation=consent.Operation.HIGHLIGHTS,
+            operation=operation or consent.Operation.HIGHLIGHTS,
             url=endpoint,
             data_summary=data_summary,
             provider=self.name,
@@ -292,22 +297,31 @@ class LLMProvider(ABC):
                 hint="Change the provider's base URL in Settings → Providers.",
             ) from exc
 
-    async def _send(self, system: str, user: str, config: DetectionConfig) -> str:
+    async def _send(
+        self,
+        system: str,
+        user: str,
+        config: DetectionConfig,
+        *,
+        operation: str = "",
+        data_summary: str = "",
+    ) -> str:
         """Authorize, then perform the request.
 
         Every provider call goes through here, so the consent check cannot be
         forgotten by an adapter.
         """
-        self._authorize("Transcript text and standing instructions for AI analysis.")
+        summary = data_summary or "Transcript text and standing instructions for AI analysis."
+        self._authorize(summary, operation=operation)
         started = time.perf_counter()
         try:
             raw = await self._complete(system, user, config)
         except Exception as exc:
             gateway.record(
                 Transfer(
-                    operation=consent.Operation.HIGHLIGHTS,
+                    operation=operation or consent.Operation.HIGHLIGHTS,
                     url=self.endpoint,
-                    data_summary="Transcript text and standing instructions.",
+                    data_summary=summary,
                     provider=self.name,
                 ),
                 "failed",
@@ -317,9 +331,9 @@ class LLMProvider(ABC):
             raise
         gateway.record(
             Transfer(
-                operation=consent.Operation.HIGHLIGHTS,
+                operation=operation or consent.Operation.HIGHLIGHTS,
                 url=self.endpoint,
-                data_summary="Transcript text and standing instructions.",
+                data_summary=summary,
                 provider=self.name,
             ),
             "ok",
@@ -348,14 +362,31 @@ class LLMProvider(ABC):
 
     # -- shared behaviour --------------------------------------------------
 
-    async def generate_text(self, system: str, user: str, *, temperature: float = 0.4) -> str:
+    async def generate_text(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.4,
+        operation: str = "",
+        data_summary: str = "",
+    ) -> str:
         """Send one free-form prompt and return the raw reply.
 
         Used for tasks that are not clip detection (e.g. YouTube metadata).
         Providers only see a system/user pair, so no extra implementations are
         needed.
+
+        ``operation`` says which kind of transfer this is, so the user can
+        grant and withdraw each one on its own.
         """
-        return await self._send(system, user, DetectionConfig(temperature=temperature))
+        return await self._send(
+            system,
+            user,
+            DetectionConfig(temperature=temperature),
+            operation=operation,
+            data_summary=data_summary,
+        )
 
     async def detect_highlights(
         self, window: TranscriptWindow, config: DetectionConfig

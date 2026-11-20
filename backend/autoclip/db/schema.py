@@ -761,6 +761,29 @@ def _migration_v18(conn: sqlite3.Connection) -> None:
     conn.executescript(_V18)
 
 
+# --- v19: the creative plans ---------------------------------------------------
+
+_V19 = """
+-- creative_plans is the structured plan for one job: what the model
+-- proposed, what was accepted, and what was rejected.
+--
+-- The whole plan is kept, including the problems, because a plan that
+-- silently fell back to the deterministic one would read exactly like a
+-- plan the model agreed with.
+CREATE TABLE IF NOT EXISTS creative_plans (
+    job_id      TEXT PRIMARY KEY,
+    source      TEXT NOT NULL DEFAULT 'fallback',
+    payload     TEXT NOT NULL DEFAULT '{}',
+    problems    TEXT NOT NULL DEFAULT '[]',
+    created_at  TEXT NOT NULL
+);
+"""
+
+
+def _migration_v19(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V19)
+
+
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v1,
     _migration_v2,
@@ -780,6 +803,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v16,
     _migration_v17,
     _migration_v18,
+    _migration_v19,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)
