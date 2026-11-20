@@ -726,8 +726,41 @@ def _migration_v17(conn: sqlite3.Connection) -> None:
     conn.executescript(_V17)
 
 
-#: Ordered migrations. Index + 1 is the resulting ``user_version``.
-#: Append only — never edit a migration that has shipped.
+# --- v18: the AI call budget ---------------------------------------------------
+
+_V18 = """
+-- job_ai_budget records how many AI calls one job made and how many it was
+-- allowed.
+--
+-- The approved budget is one creative-planning call, one repair retry, and
+-- up to one music-selection call per eligible clip. With the default of ten
+-- clips that is twelve calls.
+--
+-- The counters are in the database rather than in memory so that retrying a
+-- failed job does not hand it a fresh allowance.
+--
+-- 'overruns' holds the refusals as JSON: a list of {category, reason}. A
+-- silently capped budget reads exactly like a budget that was never
+-- needed, so the refusals are written down.
+CREATE TABLE IF NOT EXISTS job_ai_budget (
+    job_id                 TEXT PRIMARY KEY,
+    plan_limit            INTEGER NOT NULL DEFAULT 1,
+    plan_used             INTEGER NOT NULL DEFAULT 0,
+    repair_limit          INTEGER NOT NULL DEFAULT 1,
+    repair_used           INTEGER NOT NULL DEFAULT 0,
+    music_limit           INTEGER NOT NULL DEFAULT 0,
+    music_used            INTEGER NOT NULL DEFAULT 0,
+    overruns              TEXT NOT NULL DEFAULT '[]',
+    user_approved_overrides INTEGER NOT NULL DEFAULT 0,
+    updated_at            TEXT NOT NULL
+);
+"""
+
+
+def _migration_v18(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V18)
+
+
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v1,
     _migration_v2,
@@ -746,6 +779,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v15,
     _migration_v16,
     _migration_v17,
+    _migration_v18,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)
