@@ -9,6 +9,7 @@ from . import (
     batches,
     chat,
     clips,
+    instagram,
     jobs,
     layout,
     learning,
@@ -35,6 +36,7 @@ api_router.include_router(jobs.router)
 api_router.include_router(clips.router)
 api_router.include_router(settings.router)
 api_router.include_router(youtube.router)
+api_router.include_router(instagram.router)
 api_router.include_router(workflows.router)
 api_router.include_router(ai_providers.router)
 api_router.include_router(youtube_accounts.router)

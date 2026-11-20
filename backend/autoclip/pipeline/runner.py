@@ -80,6 +80,23 @@ def _maybe_enqueue_upload(export_id: str, settings: Settings) -> None:
         log.exception("Could not queue a YouTube upload for export %s.", export_id)
 
 
+def _maybe_enqueue_instagram(export_id: str, settings: Settings) -> None:
+    """Queue an Instagram post when automation is on. Never raises.
+
+    Separate from the YouTube call on purpose: the two platforms have
+    their own queues, and one platform's problem must not affect the
+    other's.
+    """
+    try:
+        from ..instagram.queue import instagram_upload_queue
+        from ..instagram.uploads import enqueue_export
+
+        if enqueue_export(export_id, settings):
+            instagram_upload_queue.notify()
+    except Exception:  # an upload must never fail the pipeline
+        log.exception("Could not queue an Instagram upload for export %s.", export_id)
+
+
 def _job_title(job: Job) -> str:
     """The human name of the video a job is processing."""
     source = store.get_source(job.source_id)
@@ -1427,6 +1444,7 @@ class PipelineRunner:
             store.create_export(record)
             if combined["ok"]:
                 _maybe_enqueue_upload(record.id, self.settings)
+                _maybe_enqueue_instagram(record.id, self.settings)
 
         self._finish_stage(stage)
 

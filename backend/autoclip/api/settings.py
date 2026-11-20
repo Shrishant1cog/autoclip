@@ -30,6 +30,7 @@ def _settings_out(settings: config.Settings) -> SettingsOut:
         export=payload["export"],
         resources=payload["resources"],
         youtube=payload["youtube"],
+        instagram=payload.get("instagram", {}),
         insecure_secret_storage=payload["insecure_secret_storage"],
         keys_present={
             name: config.get_secret(name, settings) is not None for name in config.KEYED_PROVIDERS
@@ -37,6 +38,9 @@ def _settings_out(settings: config.Settings) -> SettingsOut:
         | {config.HF_TOKEN_KEY: config.get_secret(config.HF_TOKEN_KEY, settings) is not None},
         youtube_secret_present=(
             config.get_secret(config.YOUTUBE_CLIENT_SECRET_KEY, settings) is not None
+        ),
+        instagram_secret_present=(
+            config.get_secret(config.INSTAGRAM_APP_SECRET_KEY, settings) is not None
         ),
     )
 
@@ -68,6 +72,7 @@ async def put_settings(payload: SettingsIn) -> SettingsOut:
         "export",
         "resources",
         "youtube",
+        "instagram",
     ):
         if section in updates:
             current = getattr(settings, section)
@@ -103,6 +108,15 @@ async def put_settings(payload: SettingsIn) -> SettingsOut:
                 detail="Connect a YouTube channel before turning automation on.",
             )
 
+    if settings.instagram.auto_upload:
+        from ..instagram import oauth as instagram_oauth
+
+        if not instagram_oauth.is_connected(settings):
+            raise HTTPException(
+                status_code=400,
+                detail="Connect an Instagram account before turning automation on.",
+            )
+
     config.save(settings)
     # The ffmpeg concurrency limit is process-wide, so a change to the
     # settings has to reach the running gate, not just the file.
@@ -113,7 +127,12 @@ async def put_settings(payload: SettingsIn) -> SettingsOut:
 @router.put("/settings/secrets", status_code=204)
 async def put_secret(payload: SecretIn) -> None:
     """Store an API key or token. Values are write-only — never read back."""
-    valid = (*config.KEYED_PROVIDERS, config.HF_TOKEN_KEY, config.YOUTUBE_CLIENT_SECRET_KEY)
+    valid = (
+        *config.KEYED_PROVIDERS,
+        config.HF_TOKEN_KEY,
+        config.YOUTUBE_CLIENT_SECRET_KEY,
+        config.INSTAGRAM_APP_SECRET_KEY,
+    )
     if payload.key not in valid:
         raise HTTPException(
             status_code=400, detail=f"Unknown secret. Expected one of: {', '.join(valid)}"

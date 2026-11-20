@@ -17,6 +17,8 @@ from .models import (
     ClipEdit,
     ClipStatus,
     Export,
+    InstagramAccount,
+    InstagramUpload,
     Job,
     JobResources,
     JobStatus,
@@ -664,6 +666,275 @@ def requeue_interrupted_uploads() -> list[str]:
                  WHERE status = 'uploading'
                 """,
                 (utcnow(),),
+            )
+    return ids
+
+
+# --------------------------------------------------------------------------
+# Instagram accounts and uploads (M4b)
+# --------------------------------------------------------------------------
+#
+# These live apart from the YouTube rows on purpose. The spec requires the
+# two platforms to be independent, and a shared table would make one
+# platform's failure show up in the other's records.
+
+
+def create_instagram_account(account: InstagramAccount) -> InstagramAccount:
+    """Insert an account row. A row for the same Instagram id is reused.
+
+    Connecting the same account twice must not create a second row: the
+    token would then be filed twice and the owner would see two accounts
+    that are really one.
+    """
+    with connection() as conn:
+        existing = conn.execute(
+            "SELECT * FROM instagram_accounts WHERE ig_user_id = ? AND ig_user_id <> ''",
+            (account.ig_user_id,),
+        ).fetchone()
+        if existing:
+            return InstagramAccount.from_row(existing)
+        conn.execute(
+            """
+            INSERT INTO instagram_accounts (
+                id, ig_user_id, username, name, label, login_type, page_id,
+                business_id, config_id, professional, needs_reconnect,
+                last_error, created_at, updated_at, connected_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                account.id,
+                account.ig_user_id,
+                account.username,
+                account.name,
+                account.label,
+                account.login_type,
+                account.page_id,
+                account.business_id,
+                account.config_id,
+                int(account.professional),
+                int(account.needs_reconnect),
+                account.last_error,
+                account.created_at,
+                account.updated_at,
+                account.connected_at,
+            ),
+        )
+    return account
+
+
+def get_instagram_account(account_id: str) -> InstagramAccount | None:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM instagram_accounts WHERE id = ?", (account_id,)
+        ).fetchone()
+    return InstagramAccount.from_row(row) if row else None
+
+
+def list_instagram_accounts() -> list[InstagramAccount]:
+    """Every account, oldest first — the insertion order is the tie-break."""
+    with connection() as conn:
+        rows = conn.execute("SELECT * FROM instagram_accounts ORDER BY rowid ASC").fetchall()
+    return [InstagramAccount.from_row(r) for r in rows]
+
+
+def default_instagram_account() -> InstagramAccount | None:
+    """The oldest account, which is the one the legacy settings refer to."""
+    accounts = list_instagram_accounts()
+    return accounts[0] if accounts else None
+
+
+def update_instagram_account(account_id: str, **fields: Any) -> None:
+    """Update an account row. Unknown fields are ignored."""
+    allowed = {
+        "ig_user_id",
+        "username",
+        "name",
+        "label",
+        "login_type",
+        "page_id",
+        "business_id",
+        "config_id",
+        "professional",
+        "needs_reconnect",
+        "last_error",
+        "connected_at",
+    }
+    values: dict[str, Any] = {"updated_at": utcnow()}
+    for name, value in fields.items():
+        if name not in allowed:
+            continue
+        values[name] = int(value) if isinstance(value, bool) else value
+    if not values:
+        return
+    assignments = ", ".join(f"{name} = ?" for name in values)
+    with connection() as conn:
+        conn.execute(
+            f"UPDATE instagram_accounts SET {assignments} WHERE id = ?",
+            (*values.values(), account_id),
+        )
+
+
+def create_instagram_upload(upload: InstagramUpload) -> InstagramUpload:
+    """Insert an upload row. An existing row for the export is returned.
+
+    The unique index makes a double enqueue a no-op rather than an error,
+    which is what stops a clip being published twice by accident.
+    """
+    with connection() as conn:
+        existing = conn.execute(
+            "SELECT * FROM instagram_uploads WHERE export_id = ? AND account_row_id = ?",
+            (upload.export_id, upload.account_row_id),
+        ).fetchone()
+        if existing:
+            return InstagramUpload.from_row(existing)
+        conn.execute(
+            """
+            INSERT INTO instagram_uploads (
+                id, export_id, clip_id, account_row_id, status, media_id,
+                container_id, upload_uri, caption, media_type, is_ai_generated,
+                error, created_at, updated_at, bytes_sent, total_bytes,
+                attempts, next_attempt_at, permalink, published_at,
+                publish_detail, reconcile_status, reconcile_detail, reconciled_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                upload.id,
+                upload.export_id,
+                upload.clip_id,
+                upload.account_row_id,
+                upload.status,
+                upload.media_id,
+                upload.container_id,
+                upload.upload_uri,
+                upload.caption,
+                upload.media_type,
+                int(upload.is_ai_generated),
+                upload.error,
+                upload.created_at,
+                upload.updated_at,
+                upload.bytes_sent,
+                upload.total_bytes,
+                upload.attempts,
+                upload.next_attempt_at,
+                upload.permalink,
+                upload.published_at,
+                upload.publish_detail,
+                upload.reconcile_status,
+                upload.reconcile_detail,
+                upload.reconciled_at,
+            ),
+        )
+    return upload
+
+
+def get_instagram_upload(upload_id: str) -> InstagramUpload | None:
+    with connection() as conn:
+        row = conn.execute("SELECT * FROM instagram_uploads WHERE id = ?", (upload_id,)).fetchone()
+    return InstagramUpload.from_row(row) if row else None
+
+
+def list_instagram_uploads_for_clip(clip_id: str) -> list[InstagramUpload]:
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM instagram_uploads WHERE clip_id = ? ORDER BY created_at DESC",
+            (clip_id,),
+        ).fetchall()
+    return [InstagramUpload.from_row(r) for r in rows]
+
+
+def list_instagram_uploads_for_export(export_id: str) -> list[InstagramUpload]:
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM instagram_uploads WHERE export_id = ? ORDER BY created_at ASC",
+            (export_id,),
+        ).fetchall()
+    return [InstagramUpload.from_row(r) for r in rows]
+
+
+def list_all_instagram_uploads() -> list[InstagramUpload]:
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM instagram_uploads ORDER BY created_at ASC, id ASC"
+        ).fetchall()
+    return [InstagramUpload.from_row(r) for r in rows]
+
+
+def next_pending_instagram_upload() -> InstagramUpload | None:
+    """The next Instagram upload to work on, skipping the ones backing off.
+
+    A row with a ``next_attempt_at`` in the future is not due yet. The
+    comparison is on the stored ISO-8601 strings, which sort correctly
+    because they all carry the same offset.
+    """
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM instagram_uploads WHERE status = 'pending'"
+            " AND (next_attempt_at = '' OR next_attempt_at <= ?)"
+            " ORDER BY created_at ASC LIMIT 1",
+            (utcnow(),),
+        ).fetchone()
+    return InstagramUpload.from_row(row) if row else None
+
+
+def update_instagram_upload(upload_id: str, **fields: Any) -> None:
+    """Update an upload row. ``clear_error`` empties the error column."""
+    allowed = {
+        "status",
+        "media_id",
+        "container_id",
+        "upload_uri",
+        "caption",
+        "media_type",
+        "is_ai_generated",
+        "error",
+        "bytes_sent",
+        "total_bytes",
+        "attempts",
+        "next_attempt_at",
+        "permalink",
+        "published_at",
+        "publish_detail",
+        "reconcile_status",
+        "reconcile_detail",
+        "reconciled_at",
+    }
+    values: dict[str, Any] = {"updated_at": utcnow()}
+    for name, value in fields.items():
+        if name == "clear_error":
+            if value:
+                values["error"] = None
+            continue
+        if name not in allowed:
+            continue
+        values[name] = int(value) if isinstance(value, bool) else value
+    if not values:
+        return
+    assignments = ", ".join(f"{name} = ?" for name in values)
+    with connection() as conn:
+        conn.execute(
+            f"UPDATE instagram_uploads SET {assignments} WHERE id = ?",
+            (*values.values(), upload_id),
+        )
+
+
+def requeue_interrupted_instagram_uploads() -> list[str]:
+    """Turn rows left mid-upload by a crash back into pending work.
+
+    Returns the ids that were recovered, so the restart can be recorded and
+    the owner can be told what was resumed.
+    """
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT id FROM instagram_uploads WHERE status = 'uploading'"
+        ).fetchall()
+        ids = [row["id"] for row in rows]
+        if ids:
+            conn.execute(
+                """
+                UPDATE instagram_uploads
+                   SET status = 'pending', error = NULL
+                 WHERE status = 'uploading'
+                """
             )
     return ids
 

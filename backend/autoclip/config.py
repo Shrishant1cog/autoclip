@@ -52,6 +52,10 @@ ELEVENLABS_API_KEY = "elevenlabs"
 YOUTUBE_CLIENT_SECRET_KEY = "youtube_client_secret"
 YOUTUBE_REFRESH_TOKEN_KEY = "youtube_refresh_token"
 
+#: Meta app secret for the Instagram Platform. The app id is not a secret and
+#: lives in the settings file; this one goes in the OS keyring.
+INSTAGRAM_APP_SECRET_KEY = "instagram_app_secret"
+
 
 class ProviderSettings(BaseModel):
     """Per-provider configuration. The API key itself is never stored here."""
@@ -250,6 +254,52 @@ class YouTubeSettings(BaseModel):
     connected_at: str = ""
 
 
+class InstagramSettings(BaseModel):
+    """Instagram Platform connection and publishing policy.
+
+    The Meta app secret and the account access tokens are secrets, stored in
+    the OS keyring; only non-sensitive identifiers live here.
+
+    The three API setups Meta supports differ in host, token and permissions
+    (see ``docs/INSTAGRAM-API-EVALUATION.md`` §9.1.1):
+
+    * ``unified``  — Facebook Login for Business, ``graph.facebook.com``,
+      resumable local-file upload supported. **The recommended setup.**
+    * ``facebook`` — Page-linked, ``graph.facebook.com``, resumable local-file
+      upload supported, a Facebook Page is required.
+    * ``instagram`` — ``graph.instagram.com``, **no** resumable upload: a
+      local file cannot be sent on this setup, only a public URL can.
+    """
+
+    #: Meta app id. For the ``instagram`` setup this is the *Instagram* app id;
+    #: for the other two it is the *Meta* app id.
+    app_id: str = ""
+    #: Must exactly match a redirect URI registered on the Meta app.
+    redirect_uri: str = "http://localhost:8000/api/instagram/callback"
+    #: Which of Meta's three API setups this install uses.
+    login_type: Literal["unified", "facebook", "instagram"] = "unified"
+    #: The Graph API version to call. Meta's current version is ``v27.0``.
+    api_version: str = "v27.0"
+    #: The Facebook Login for Business configuration id. Required by the
+    #: ``unified`` and ``facebook`` setups. It is not a secret: it identifies
+    #: which permissions and assets the app asks for.
+    config_id: str = ""
+    #: The client business id that came back with the Unified Login token.
+    #: Needed to refresh a Business Integration System User access token.
+    business_id: str = ""
+    #: Publish automatically whenever a clip finishes exporting.
+    auto_upload: bool = False
+    #: The Instagram account the connection belongs to, as Meta reports it.
+    ig_user_id: str = ""
+    username: str = ""
+    connected_at: str = ""
+    #: Whether the connected account is known to be a professional account.
+    #: The Graph API does not report this with the publishing permissions
+    #: alone, so it stays false and the eligibility report says so rather
+    #: than claiming a fact AutoClip cannot see.
+    professional: bool = False
+
+
 class Settings(BaseModel):
     """Top-level persisted settings."""
 
@@ -269,6 +319,7 @@ class Settings(BaseModel):
     export: ExportSettings = Field(default_factory=ExportSettings)
     resources: ResourceSettings = Field(default_factory=ResourceSettings)
     youtube: YouTubeSettings = Field(default_factory=YouTubeSettings)
+    instagram: InstagramSettings = Field(default_factory=InstagramSettings)
 
     #: Set when secrets had to be written to config.json because no keyring
     #: backend was usable. Surfaced as a warning in the UI and in `doctor`.

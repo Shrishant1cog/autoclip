@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__, db, errors, paths
 from .api import api_router
+from .instagram.queue import instagram_upload_queue
 from .jobs.events import broker
 from .jobs.queue import queue
 from .youtube.queue import upload_queue
@@ -87,6 +88,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if worker_enabled:
         await queue.start()
         await upload_queue.start()
+        # A separate worker, so an Instagram failure cannot cancel a
+        # YouTube upload and the reverse is also true.
+        await instagram_upload_queue.start()
     else:
         log.info("Job worker disabled by %s=1.", ENV_NO_WORKER)
 
@@ -102,6 +106,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         await batch_runner.stop()
         if worker_enabled:
+            await instagram_upload_queue.stop()
             await upload_queue.stop()
             await queue.stop()
 
@@ -120,6 +125,7 @@ def _record_restart() -> None:
     try:
         job_ids = list(getattr(queue, "resumed_job_ids", []))
         upload_ids = list(getattr(upload_queue, "resumed_upload_ids", []))
+        instagram_ids = list(getattr(instagram_upload_queue, "resumed_upload_ids", []))
         item_ids = list(getattr(batch_runner, "resumed_item_ids", []))
 
         # Cleared once read: the queues are process-wide singletons, so a
@@ -127,19 +133,21 @@ def _record_restart() -> None:
         # one's recovery a second time.
         queue.resumed_job_ids = []
         upload_queue.resumed_upload_ids = []
+        instagram_upload_queue.resumed_upload_ids = []
         batch_runner.resumed_item_ids = []
 
         restart = store.record_restart(
             jobs_resumed=len(job_ids),
-            uploads_resumed=len(upload_ids),
+            uploads_resumed=len(upload_ids) + len(instagram_ids),
             batch_items_resumed=len(item_ids),
             job_ids=job_ids,
-            upload_ids=upload_ids,
+            upload_ids=[*upload_ids, *instagram_ids],
             details="; ".join(
                 part
                 for part in (
                     f"{len(job_ids)} job(s)" if job_ids else "",
-                    f"{len(upload_ids)} upload(s)" if upload_ids else "",
+                    f"{len(upload_ids)} YouTube upload(s)" if upload_ids else "",
+                    f"{len(instagram_ids)} Instagram upload(s)" if instagram_ids else "",
                     f"{len(item_ids)} batch item(s)" if item_ids else "",
                 )
                 if part

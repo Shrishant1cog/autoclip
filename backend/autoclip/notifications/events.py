@@ -189,6 +189,70 @@ def upload_skipped(upload_id: str, title: str, reason: str) -> Notification | No
     )
 
 
+def instagram_upload_done(
+    upload_id: str,
+    title: str,
+    media_id: str,
+    account_title: str = "",
+    detail: str = "",
+) -> Notification | None:
+    """A clip was published to Instagram.
+
+    ``detail`` carries the two things a publish can get wrong: Meta
+    reporting that part of the request was dropped, and the read-back
+    finding something other than what was asked for. Neither is hidden.
+    """
+    where = f" to {account_title}" if account_title else ""
+    body = f"Published{where}."
+    if media_id:
+        body += f" Instagram media {media_id}"
+    if detail:
+        body += f" {detail}"
+    return notify(
+        "instagram_upload_done",
+        severity="success",
+        title=f"Published “{title}”",
+        body=body,
+        link="/clips",
+        entity_id=upload_id,
+    )
+
+
+def instagram_upload_failed(
+    upload_id: str, title: str, error: str, owner_action_required: bool = False
+) -> Notification | None:
+    """An Instagram post could not be published."""
+    if owner_action_required:
+        return notify(
+            "instagram_upload_failed",
+            severity="warning",
+            title=f"Instagram needs your attention for “{title}”",
+            body=error.strip()[:500] or "Instagram is waiting for you to act on this account.",
+            link="/clips",
+            entity_id=upload_id,
+        )
+    return notify(
+        "instagram_upload_failed",
+        severity="error",
+        title=f"Could not publish “{title}”",
+        body=error.strip()[:500] or "Unknown error.",
+        link="/clips",
+        entity_id=upload_id,
+    )
+
+
+def instagram_upload_skipped(upload_id: str, title: str, reason: str) -> Notification | None:
+    """An Instagram post was deliberately not made (a duplicate, usually)."""
+    return notify(
+        "instagram_upload_skipped",
+        severity="info",
+        title=f"Skipped “{title}”",
+        body=reason.strip()[:500] or "Skipped.",
+        link="/clips",
+        entity_id=upload_id,
+    )
+
+
 def batch_done(batch_id: str, name: str, done: int, failed: int) -> Notification | None:
     """A batch queue finished."""
     body = f"{done} finished"

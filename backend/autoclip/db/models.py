@@ -382,6 +382,138 @@ class YouTubeUpload:
 
 
 @dataclass
+class InstagramAccount:
+    """One Instagram professional account this install can publish to.
+
+    The account is identified by the id Meta reports. AutoClip does not
+    infer the destination from a username, and it does not guess which
+    account a sign-in was for: the sign-in is bound to the account it was
+    started for, exactly as the YouTube one is.
+    """
+
+    id: str
+    #: The Instagram professional account id, as Meta reports it.
+    ig_user_id: str = ""
+    username: str = ""
+    name: str = ""
+    label: str = ""
+    #: Which of Meta's three API setups this account was connected with.
+    login_type: str = "unified"
+    #: The Facebook Page the account is linked to (the ``facebook`` setup).
+    page_id: str = ""
+    #: The client business id that came back with a Unified Login token.
+    business_id: str = ""
+    #: The Facebook Login for Business configuration the token belongs to.
+    config_id: str = ""
+    #: Whether the account is known to be a professional account. The Graph
+    #: API does not report this with the publishing permissions alone, so it
+    #: stays false unless something actually observed it.
+    professional: bool = False
+    #: Set when Meta stopped accepting this account's credential.
+    needs_reconnect: bool = False
+    last_error: str = ""
+    created_at: str = field(default_factory=utcnow)
+    updated_at: str = field(default_factory=utcnow)
+    connected_at: str = ""
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> InstagramAccount:
+        return cls(
+            id=row["id"],
+            ig_user_id=row["ig_user_id"],
+            username=row["username"],
+            name=row["name"],
+            label=row["label"],
+            login_type=row["login_type"],
+            page_id=row["page_id"],
+            business_id=row["business_id"],
+            config_id=row["config_id"],
+            professional=bool(row["professional"]),
+            needs_reconnect=bool(row["needs_reconnect"]),
+            last_error=row["last_error"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            connected_at=row["connected_at"],
+        )
+
+
+@dataclass
+class InstagramUpload:
+    """One Instagram publish attempt for one export.
+
+    The row records every step that was completed, so a publish that stopped
+    partway can be resumed and an ambiguous result can be reconciled. The
+    caption is written down before the container is created, so a retry
+    republishes the same thing rather than a new one.
+    """
+
+    id: str
+    export_id: str
+    clip_id: str
+    #: instagram_accounts.id this row publishes to; '' = the legacy default.
+    account_row_id: str = ""
+    status: UploadStatus = "pending"
+    #: The published Instagram media id, once Meta has confirmed it.
+    media_id: str = ""
+    #: The container the media was uploaded into.
+    container_id: str = ""
+    #: Where Meta said to send the file. It is the only way back into an
+    #: upload that stopped partway through.
+    upload_uri: str = ""
+    caption: str = ""
+    media_type: str = "REELS"
+    #: Whether the owner declared the media as AI-generated. Meta asks for
+    #: this self-disclosure; AutoClip never sets it on the owner's behalf.
+    is_ai_generated: bool = False
+    error: str | None = None
+    created_at: str = field(default_factory=utcnow)
+    updated_at: str = field(default_factory=utcnow)
+    #: How many bytes Meta has. The worker writes it as the transfer
+    #: proceeds, so the progress shown in the UI is the real figure.
+    bytes_sent: int = 0
+    total_bytes: int = 0
+    attempts: int = 0
+    #: When the next attempt is due. The worker skips the row until then.
+    next_attempt_at: str = ""
+    permalink: str = ""
+    published_at: str = ""
+    #: What the publish actually did — including the parts Meta dropped.
+    publish_detail: str = ""
+    reconcile_status: str = ""
+    reconcile_detail: str = ""
+    reconciled_at: str = ""
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> InstagramUpload:
+        return cls(
+            id=row["id"],
+            export_id=row["export_id"],
+            clip_id=row["clip_id"],
+            account_row_id=row["account_row_id"],
+            status=row["status"],
+            media_id=row["media_id"],
+            container_id=row["container_id"],
+            upload_uri=row["upload_uri"],
+            caption=row["caption"],
+            media_type=row["media_type"],
+            is_ai_generated=bool(row["is_ai_generated"]),
+            error=row["error"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            bytes_sent=int(row["bytes_sent"] or 0),
+            total_bytes=int(row["total_bytes"] or 0),
+            attempts=int(row["attempts"] or 0),
+            next_attempt_at=row["next_attempt_at"],
+            permalink=row["permalink"],
+            published_at=row["published_at"],
+            publish_detail=row["publish_detail"],
+            reconcile_status=row["reconcile_status"],
+            reconcile_detail=row["reconcile_detail"],
+            reconciled_at=row["reconciled_at"],
+        )
+
+
+@dataclass
 class AppRestart:
     """One restart of AutoClip, and what it had to recover (Phase 17).
 

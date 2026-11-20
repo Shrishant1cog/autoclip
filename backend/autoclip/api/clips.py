@@ -42,6 +42,11 @@ def _clip_out(clip) -> ClipOut:
     uploads: dict[str, list] = {}
     for upload in store.list_uploads_for_clip(clip.id):
         uploads.setdefault(upload.export_id, []).append(upload)
+    # Instagram runs on its own queue, so its rows are collected separately:
+    # an Instagram post never appears in a YouTube upload list.
+    instagram_uploads: dict[str, list] = {}
+    for row in store.list_instagram_uploads_for_clip(clip.id):
+        instagram_uploads.setdefault(row.export_id, []).append(row)
     # Where the clip would go, and why. The routing layer reads the
     # clip's classification and the user's rules, so it is asked here
     # rather than being carried around in the clip row.
@@ -53,7 +58,14 @@ def _clip_out(clip) -> ClipOut:
     except Exception:  # noqa: BLE001
         # A routing lookup must never stop a clip from being listed.
         log.debug("Could not work out the routing for clip %s.", clip.id, exc_info=True)
-    return ClipOut.of(clip, edit=edit, exports=exports, uploads=uploads, routing=routing)
+    return ClipOut.of(
+        clip,
+        edit=edit,
+        exports=exports,
+        uploads=uploads,
+        instagram_uploads=instagram_uploads,
+        routing=routing,
+    )
 
 
 def _notify_export(clip, *, ok: bool, failures: list[str]) -> None:

@@ -1172,6 +1172,78 @@ def _migration_v26(conn: sqlite3.Connection) -> None:
     conn.executescript(_V26)
 
 
+# --- v27: Instagram publishing ----------------------------------------------
+
+_V27 = """
+-- The Instagram accounts this install publishes to. One row per account,
+-- each with its own access token in the keyring, so a broken credential on
+-- one account never takes the others down.
+--
+-- The account is stored by the id Meta reports. AutoClip does not infer it
+-- from a username, and it does not guess which account a sign-in was for.
+CREATE TABLE instagram_accounts (
+    id                TEXT PRIMARY KEY,
+    ig_user_id        TEXT NOT NULL DEFAULT '',
+    username          TEXT NOT NULL DEFAULT '',
+    name              TEXT NOT NULL DEFAULT '',
+    label             TEXT NOT NULL DEFAULT '',
+    login_type        TEXT NOT NULL DEFAULT 'unified',
+    page_id           TEXT NOT NULL DEFAULT '',
+    business_id       TEXT NOT NULL DEFAULT '',
+    config_id         TEXT NOT NULL DEFAULT '',
+    professional      INTEGER NOT NULL DEFAULT 0,
+    needs_reconnect   INTEGER NOT NULL DEFAULT 0,
+    last_error        TEXT NOT NULL DEFAULT '',
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    connected_at      TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX idx_instagram_accounts_ig ON instagram_accounts(ig_user_id);
+
+-- One Instagram upload attempt for one export.
+--
+-- This is a separate table from youtube_uploads on purpose: the spec requires
+-- platform publishing to be independent, and a shared table would make one
+-- platform's failure land in the other's rows.
+CREATE TABLE instagram_uploads (
+    id                TEXT PRIMARY KEY,
+    export_id         TEXT NOT NULL,
+    clip_id           TEXT NOT NULL,
+    account_row_id    TEXT NOT NULL DEFAULT '',
+    status            TEXT NOT NULL DEFAULT 'pending',
+    media_id          TEXT NOT NULL DEFAULT '',
+    container_id      TEXT NOT NULL DEFAULT '',
+    upload_uri        TEXT NOT NULL DEFAULT '',
+    caption           TEXT NOT NULL DEFAULT '',
+    media_type        TEXT NOT NULL DEFAULT 'REELS',
+    is_ai_generated   INTEGER NOT NULL DEFAULT 0,
+    error             TEXT,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    bytes_sent        INTEGER NOT NULL DEFAULT 0,
+    total_bytes       INTEGER NOT NULL DEFAULT 0,
+    attempts          INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at   TEXT NOT NULL DEFAULT '',
+    permalink         TEXT NOT NULL DEFAULT '',
+    published_at      TEXT NOT NULL DEFAULT '',
+    publish_detail    TEXT NOT NULL DEFAULT '',
+    reconcile_status  TEXT NOT NULL DEFAULT '',
+    reconcile_detail  TEXT NOT NULL DEFAULT '',
+    reconciled_at     TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (export_id) REFERENCES exports(id) ON DELETE CASCADE,
+    FOREIGN KEY (clip_id) REFERENCES clips(id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_instagram_uploads_export_account
+    ON instagram_uploads(export_id, account_row_id);
+CREATE INDEX IF NOT EXISTS idx_instagram_uploads_status ON instagram_uploads(status);
+CREATE INDEX IF NOT EXISTS idx_instagram_uploads_clip ON instagram_uploads(clip_id);
+"""
+
+
+def _migration_v27(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V27)
+
+
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v1,
     _migration_v2,
@@ -1199,6 +1271,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v24,
     _migration_v25,
     _migration_v26,
+    _migration_v27,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)

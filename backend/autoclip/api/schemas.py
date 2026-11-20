@@ -250,6 +250,169 @@ class UploadOut(BaseModel):
         )
 
 
+class InstagramConnectOut(BaseModel):
+    auth_url: str
+
+
+class InstagramStatusOut(BaseModel):
+    """What the Instagram connection looks like right now."""
+
+    configured: bool
+    connected: bool
+    auto_upload: bool
+    app_id: str = ""
+    redirect_uri: str = ""
+    #: Which of Meta's three API setups this install uses.
+    login_type: str = "unified"
+    api_version: str = "v27.0"
+    config_id: str = ""
+    #: The Instagram account Meta reported for the connection.
+    ig_user_id: str = ""
+    username: str = ""
+    connected_at: str = ""
+    #: True when the connected account is known to be a professional
+    #: account. The Graph API does not report this with the publishing
+    #: permissions alone, so it is usually false and the eligibility
+    #: report says why.
+    professional: bool = False
+
+
+class InstagramAccountOut(BaseModel):
+    """One Instagram account this install can publish to."""
+
+    id: str
+    ig_user_id: str = ""
+    username: str = ""
+    name: str = ""
+    label: str = ""
+    login_type: str = "unified"
+    page_id: str = ""
+    business_id: str = ""
+    professional: bool = False
+    needs_reconnect: bool = False
+    last_error: str = ""
+    created_at: str
+    updated_at: str
+    connected_at: str = ""
+    #: Whether a credential is held for this account. The token itself is
+    #: never sent to the browser.
+    has_token: bool = False
+
+
+class InstagramUploadOut(BaseModel):
+    """One Instagram publish attempt attached to an export."""
+
+    id: str
+    export_id: str
+    clip_id: str
+    account_row_id: str = ""
+    status: str
+    media_id: str = ""
+    container_id: str = ""
+    caption: str = ""
+    media_type: str = "REELS"
+    is_ai_generated: bool = False
+    error: str | None = None
+    created_at: str
+    updated_at: str
+    #: How many bytes Instagram has. The worker writes it as the transfer
+    #: proceeds, so this is the real progress rather than a spinner.
+    bytes_sent: int = 0
+    total_bytes: int = 0
+    attempts: int = 0
+    next_attempt_at: str = ""
+    #: The progress as a percentage, or 0 when it is not known.
+    progress_percent: int = 0
+    permalink: str = ""
+    published_at: str = ""
+    #: What the publish actually did — including the parts Meta dropped.
+    publish_detail: str = ""
+    reconcile_status: str = ""
+    reconcile_detail: str = ""
+    reconciled_at: str = ""
+    needs_reconciliation: bool = False
+
+    @classmethod
+    def of(cls, upload: models.InstagramUpload) -> InstagramUploadOut:
+        percent = 0
+        if upload.total_bytes > 0:
+            percent = min(100, round(upload.bytes_sent * 100 / upload.total_bytes))
+        return cls(
+            id=upload.id,
+            export_id=upload.export_id,
+            clip_id=upload.clip_id,
+            account_row_id=upload.account_row_id,
+            status=upload.status,
+            media_id=upload.media_id,
+            container_id=upload.container_id,
+            caption=upload.caption,
+            media_type=upload.media_type,
+            is_ai_generated=upload.is_ai_generated,
+            error=upload.error,
+            created_at=upload.created_at,
+            updated_at=upload.updated_at,
+            bytes_sent=upload.bytes_sent,
+            total_bytes=upload.total_bytes,
+            attempts=upload.attempts,
+            next_attempt_at=upload.next_attempt_at,
+            progress_percent=percent,
+            permalink=upload.permalink,
+            published_at=upload.published_at,
+            publish_detail=upload.publish_detail,
+            reconcile_status=upload.reconcile_status,
+            reconcile_detail=upload.reconcile_detail,
+            reconciled_at=upload.reconciled_at,
+            needs_reconciliation=(upload.status == "needs_reconciliation"),
+        )
+
+
+class InstagramConnectIn(BaseModel):
+    """Which account a sign-in is for.
+
+    ``account_id`` empty means "a new account". The sign-in that comes
+    back is filed under that account, so two accounts never share a
+    credential.
+    """
+
+    account_id: str = ""
+    label: str = ""
+
+
+class InstagramDisconnectIn(BaseModel):
+    """Which account to disconnect. Empty means the oldest one."""
+
+    account_id: str = ""
+
+
+class InstagramAutoIn(BaseModel):
+    enabled: bool
+
+
+class InstagramUploadEditIn(BaseModel):
+    """What the owner wants to say about one queued post.
+
+    Every field is optional, and an omitted field is left exactly as it
+    was. The AI declaration is the owner's to make, so it is never set on
+    their behalf.
+    """
+
+    caption: str | None = None
+    is_ai_generated: bool | None = None
+
+
+class InstagramEnqueueIn(BaseModel):
+    """Queue a post for one export.
+
+    The account is named explicitly: AutoClip never guesses which
+    Instagram account a clip should go to.
+    """
+
+    export_id: str
+    account_row_id: str = ""
+    caption: str = ""
+    is_ai_generated: bool = False
+
+
 class YouTubeStatusOut(BaseModel):
     configured: bool
     connected: bool
@@ -345,6 +508,9 @@ class ExportOut(BaseModel):
     #: fan-out destination.
     upload: UploadOut | None = None
     uploads: list[UploadOut] = Field(default_factory=list)
+    #: The Instagram posts made from this export. Instagram runs on its own
+    #: queue, so these rows are independent of the YouTube ones above.
+    instagram_uploads: list[InstagramUploadOut] = Field(default_factory=list)
 
     @classmethod
     def of(
@@ -353,6 +519,7 @@ class ExportOut(BaseModel):
         upload: models.YouTubeUpload | None = None,
         *,
         uploads: list[models.YouTubeUpload] | None = None,
+        instagram_uploads: list[models.InstagramUpload] | None = None,
     ) -> ExportOut:
         rows = uploads if uploads is not None else ([upload] if upload else [])
         return cls(
@@ -365,6 +532,7 @@ class ExportOut(BaseModel):
             download_url=f"/api/exports/{export.id}/download",
             upload=UploadOut.of(rows[0]) if rows else None,
             uploads=[UploadOut.of(row) for row in rows],
+            instagram_uploads=[InstagramUploadOut.of(row) for row in (instagram_uploads or [])],
         )
 
 
@@ -414,9 +582,11 @@ class ClipOut(BaseModel):
         edit: models.ClipEdit | None = None,
         exports: list[models.Export] | None = None,
         uploads: dict[str, list[models.YouTubeUpload]] | None = None,
+        instagram_uploads: dict[str, list[models.InstagramUpload]] | None = None,
         routing: RoutingDecision | None = None,
     ) -> ClipOut:
         uploads = uploads or {}
+        instagram_uploads = instagram_uploads or {}
         return cls(
             id=clip.id,
             job_id=clip.job_id,
@@ -440,7 +610,14 @@ class ClipOut(BaseModel):
             music_reason=clip.music_reason,
             diagnostics=clip.diagnostics,
             routing=RoutingDecisionOut.of(routing),
-            exports=[ExportOut.of(e, uploads=uploads.get(e.id, [])) for e in (exports or [])],
+            exports=[
+                ExportOut.of(
+                    e,
+                    uploads=uploads.get(e.id, []),
+                    instagram_uploads=instagram_uploads.get(e.id, []),
+                )
+                for e in (exports or [])
+            ],
         )
 
 
@@ -499,12 +676,16 @@ class SettingsOut(BaseModel):
     export: dict[str, Any]
     resources: dict[str, Any] = Field(default_factory=dict)
     youtube: dict[str, Any]
+    #: The Instagram Platform connection and publishing policy.
+    instagram: dict[str, Any] = Field(default_factory=dict)
     insecure_secret_storage: bool
     #: Which providers have a key stored. The keys themselves never leave the
     #: keyring, so the UI shows presence, not value.
     keys_present: dict[str, bool] = Field(default_factory=dict)
     #: YouTube OAuth client secret presence (never the value).
     youtube_secret_present: bool = False
+    #: Meta app secret presence (never the value).
+    instagram_secret_present: bool = False
 
 
 class SettingsIn(BaseModel):
@@ -517,6 +698,7 @@ class SettingsIn(BaseModel):
     export: dict[str, Any] | None = None
     resources: dict[str, Any] | None = None
     youtube: dict[str, Any] | None = None
+    instagram: dict[str, Any] | None = None
 
 
 class SecretIn(BaseModel):
