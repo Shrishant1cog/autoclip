@@ -252,6 +252,14 @@ as `Authorization: Bearer <key>`, `model: "auto"` or `auto:<profile>`. Recorded 
 webcam-layout route, no creative-plan route, no Instagram route, no emergency-stop route,
 no job pause/resume route (only cancel/retry).
 
+**Since this audit (M0):** the gaps above are closed — the consent and egress routes
+(`privacy`, 3), the music routes (`music`, 19, covering the library, the licences, the
+preferences and the formats), the webcam-layout routes (`layout`, 6), the creative-plan and
+budget routes (`jobs`, 9) and the Instagram routes (`instagram`, 15) now exist. The count is
+**21 routers and 162 routes**, counted from the decorators rather than from memory. Two gaps
+remain open: there is no emergency-stop route, and a job can still only be cancelled or
+retried, not paused and resumed.
+
 ---
 
 ## 10. Database inventory
@@ -274,7 +282,7 @@ interrupted-migration test, and no table for rights confirmation, consent decisi
 music licensing, upload attempts/idempotency, quota reservations, provider usage, or learning
 versions.
 
-**Since this audit (M0):** twelve migrations have closed part of that list — v15 added
+**Since this audit (M0):** thirteen migrations have closed part of that list — v15 added
 `egress_consents` and `egress_log`, v16 added `music_folders`, `music_tracks` and
 `music_licenses`, v17 added `source_layouts`, v18 added `job_ai_budget`, v19 added
 `creative_plans`, and v20 added `music_preferences` (plus the three clip columns that record
@@ -282,10 +290,13 @@ which music each clip ended up with). v21 added the `clips.diagnostics_json` col
 table, because there is exactly one report per clip and it is read with the clip. v22 added the
 two per-account OAuth columns, v23 the publishing-policy columns on the channel and the upload,
 v24 the `youtube_quota` ledger plus the six resumable-upload columns, v25 the three
-reconciliation columns, and v26 the `routing_decisions` table. The schema is now at **v26 with
-30 live tables** (measured against a migrated database, not counted by hand). The gaps that
-remain — backup before migration, an interrupted-migration test, provider usage and learning
-versions — are still open and are carried in the ledger.
+reconciliation columns, and v26 the `routing_decisions` table. v27 added `instagram_accounts` and
+`instagram_uploads` — two tables of their own, on purpose, because the spec requires the
+platforms to be independent and a shared table would make one platform's failure land in the
+other's rows. The schema is now at **v27 with 32 live tables** (measured against a migrated
+database, not counted by hand). The gaps that remain — backup before migration, an
+interrupted-migration test, provider usage and learning versions — are still open and are carried
+in the ledger.
 
 ---
 
@@ -366,9 +377,9 @@ would have failed the format step before reaching the tests — which is consist
   independently, and "multiple accounts" currently means "one token displayed twice".
 - **D15 — the formatter gate is broken on a clean checkout** (above).
 
-**Since the baseline (through M4a).** The table above is the *M0 baseline* and is deliberately left
+**Since the baseline (through M4b).** The table above is the *M0 baseline* and is deliberately left
 as it was measured. The current state is recorded per milestone in `docs/UPGRADE-LEDGER.md`; at
-the end of M4a it is: **1,149 passed** in the local unit suite (excluding the e2e collection),
+the end of M4b it is: **1,279 passed** in the local unit suite (excluding the e2e collection),
 **0 xfailed** — the 26 SSRF xfails registered at M0 became ordinary passing tests and the marker
 was deleted at M0.5 — `ruff check` clean, `ruff format --check` clean, the frontend build green,
 and mypy at **10 errors in 8 files** (down from the 14-error baseline; the four that were fixed
@@ -518,3 +529,4 @@ Ordering constraints that are not negotiable:
 | External facts | `docs/EXTERNAL-CONSTRAINTS.md` |
 | Milestone state | `docs/UPGRADE-LEDGER.md` |
 | Feature status | `docs/feature-coverage-matrix.md` |
+| Instagram API facts | `docs/INSTAGRAM-API-EVALUATION.md` |

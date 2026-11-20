@@ -19,7 +19,7 @@ milestone `In progress` and is reported as such.
 | M2 — Webcam intelligence | **Complete** | 13/13 gate items done; 76 tests across the M2 area passing, including 6 real-ffmpeg render tests; three named residuals recorded (not claimed as verified) |
 | M3 — Creative intelligence | **Complete** | 11/11 gate items done; 126 tests across the M3 area passing; two named residuals recorded (not claimed as verified) |
 | M4a — YouTube hardening | **Complete** | 14/15 gate items done; 1149 tests passing; the live YouTube path is **Unverified (external)** — no authorised Google credentials were supplied |
-| M4b — Instagram | Not started | — |
+| M4b — Instagram | **Complete** | 14/15 gate items done; 126 tests across the M4b area passing; the live Instagram path is **Unverified (external)** — no authorised Meta credentials were supplied |
 | M5 — Audit and release | Not started | — |
 
 ---
@@ -339,7 +339,66 @@ no authorised Google credentials were supplied — and that is recorded rather t
 
 ---
 
-## M4b–M5
+## M4b — Instagram publishing hardening
+
+**Status: Complete**, with one item blocked on the owner (the live Instagram path needs an
+authorised Meta app, a Business Integration System User access token and a professional
+Instagram account, none of which were supplied). The milestone ships the §9.1 API evaluation,
+the publishing implementation on its own queue and its own tables, the export changes Meta's
+documented Reel rules require, and a screen that says what is known and what is not. Every part
+is covered by automated tests. The **live** Instagram path stays **Unverified (external)** — no
+authorised Meta credentials were supplied — and that is recorded rather than glossed over.
+
+| # | Gate item | State | Evidence |
+|---|---|---|---|
+| 1 | The **official API is evaluated**, with dates and sources | Done | `docs/INSTAGRAM-API-EVALUATION.md` — all eleven §9.1 questions answered against Meta's own documentation, read 2026-11-20, with the URL for every figure. The current API is the **Instagram Platform Content Publishing API**, Graph **v27.0**, and Meta supports **three** setups, not two |
+| 2 | The **three setups are handled as three**, not two | Done | `instagram/oauth.py` — Unified Login (`graph.facebook.com`, resumable upload supported), Facebook Login (Page-linked, resumable supported) and Instagram Login (`graph.instagram.com`, **no** resumable upload) each have their own authorisation URL, token exchange and permission set |
+| 3 | **Eligibility is reported**, and what is unknown stays unknown | Done | `api/instagram.py:/eligibility` never refuses: it names Meta's requirements, what AutoClip observed, and what is **unverified** — professional-account status, App Review and Business Verification are the owner's to complete, so AutoClip does not claim them. A local file on the Instagram Login setup is refused with the reason rather than routed to another host |
+| 4 | The **token is in the keyring**, one per account | Done | `instagram/accounts.py` — the token is filed under `instagram_token#<account_id>`, so two accounts never share a credential; the value never leaves the keyring and `has_token` reports presence, not content |
+| 5 | The **media is measured against Meta's documented rules** before it is sent | Done | `instagram/media.py` — container, codec, frame rate, width, bitrate, duration and size are checked against Meta's Reel specifications and the failing measurement is named; the MP4 box tree is walked to find the `moov` atom and any edit list. The caption is checked at **enqueue** time, so a bad caption is refused while it can still be changed |
+| 6 | The **export itself** meets those rules | Done | `pipeline/export.py` — ffmpeg's MP4 muxer writes an edit list by default and Meta documents that a Reel must carry none, so `-use_editlist 0` was added; and the audio bitrate was measured at 146.4 kbps against Meta's 128 kbps limit, so it is now `128k`. `tests/test_export_render.py:TestInstagramCompatibility` — 3 slow tests against a real render |
+| 7 | The **upload is resumable** and survives a dropped connection | Done | `instagram/publisher.py:upload_file` — 8 MiB chunks to Meta's `rupload` host with the `OAuth` header Meta documents; an upload that continues resumes from the offset **Meta reports**, not from zero |
+| 8 | The **publish status is verified**, not assumed | Done | `instagram/publisher.py` — the container is polled at Meta's documented cadence (once a minute, for at most five minutes), the publish returns a media id, and the media is read back afterwards. The read-back failure never fails a publish |
+| 9 | A **lost answer is never turned into a second post** | Done | A dropped connection during the publish is flagged `needs_reconciliation`, and the worker checks that flag **before** the transient branch — the backoff would have sent it again. The row waits for the owner: `PUT /api/instagram/uploads/{id}/confirm` verifies the media id with Instagram first and refuses (409) when Instagram does not recognise it |
+| 10 | **Meta's error table** decides what happens next | Done | `instagram/errors.py` — every documented code is transcribed and maps to one decision: a dropped connection is tried again with a bounded backoff, a suspected-spam block (4 / 2207051) is **not** retried into, a restricted account (25 / 2207050) is the owner's work, and the publishing limit (9 / 2207042) waits for its reset instead of backing off |
+| 11 | The **publishing limit is read, not guessed** | Done | `instagram/publisher.py:publishing_limit` reads `GET /<IG_ID>/content_publishing_limit`. Meta's own documents contradict each other — the content-publishing guide says 100 posts, the carousel limitations say 50, and the endpoint reference says `quota_total` is currently 50 — so AutoClip reads the number in force and hardcodes neither |
+| 12 | **The same clip cannot be posted twice** to one account | Done | Instagram has **no idempotency key**, so the guarantee is made locally: a unique index on `(export_id, account_row_id)` makes a double enqueue one row, and the worker refuses to send a clip that is already published to the same account, before the network call |
+| 13 | **The platforms are independent** | Done | `instagram/queue.py` and `db/schema.py` — Instagram has its own tables and its own worker. The two queues share nothing but a pure backoff helper, so an Instagram failure cannot cancel a YouTube upload and the reverse is also true |
+| 14 | The **screen says what happened** | Done | `frontend/src/components/InstagramSettings.tsx` — the app details, the three setups and what each can do, the accounts, and the eligibility report with its requirements, observations and unverified items. `frontend/src/pages/Clips.tsx` — an Instagram badge beside the YouTube one, distinguishing published, needs checking, failed, skipped and in progress. "On Instagram" and "probably on Instagram" are not the same claim |
+| 15 | The **live Instagram path** is verified against the real API | **Unverified (external)** | No authorised Meta app, access token or professional account was supplied, so nothing here is claimed as live-verified. The whole of M4b's evidence is automated, against doubles for the API |
+
+### Decisions taken in M4b
+
+| Decision | Why | Where recorded |
+|---|---|---|
+| **Three** setups, not two | Meta documents Unified Login, Facebook Login and Instagram Login, and they differ in host, token and permissions. Treating them as one setup breaks two of the three | `instagram/oauth.py:Setup` |
+| Unified Login is the **recommended** setup and the default | It needs no Page and supports the resumable upload protocol, so a local file can be sent without introducing cloud storage | `config.py:InstagramSettings.login_type` |
+| The **Instagram Login setup refuses a local file** | Meta documents the resumable upload protocol only for apps using Facebook Login for Business. AutoClip says so rather than routing the file to some other host | `instagram/uploads.py:process_upload` |
+| **No cloud storage was introduced** | The spec asks for an architecture that avoids it and forbids adding it without approval. The resumable upload protocol sends the file straight from the machine | `docs/INSTAGRAM-API-EVALUATION.md` §9.2 |
+| The **publishing limit is read from the API** | Meta's own documents disagree — 100 in one place, 50 in two others. Hardcoding either number would be a guess about a limit that changes | `instagram/publisher.py:publishing_limit` |
+| The **duplicate guarantee is local** | Instagram has no idempotency key, so there is no header that says "this is the same post as last time". The guarantee is made by AutoClip instead, and it is checked before the network call | `instagram/uploads.py:duplicate_reason`, migration v27 |
+| A **suspected-spam block is not retried into** | Meta's 4 / 2207051 means the publish looked like spam. Trying again makes the account's situation worse, and the decision is not AutoClip's to make | `instagram/errors.py` |
+| A **lost answer is not a failed post** | The request may have reached Instagram. Failing the row would say "this did not happen" when nobody knows, and retrying it could post the clip twice. There is a third state, and it is the honest one | `instagram/publisher.py:publish`, `instagram/queue.py:_run` |
+| The owner's confirmation is **verified with Instagram** | The owner found the post on Instagram's own page, but AutoClip reads the media id back before recording it. A wrong id is refused, not stored | `instagram/uploads.py:confirm_upload` |
+| The **caption is checked at enqueue time** | A caption over Meta's limit is a mistake the owner can still fix, but only while the file is still on the machine | `instagram/uploads.py:enqueue` |
+| The **`Authorization: OAuth` header** on the upload host | Meta's upload host takes `OAuth`, not `Bearer`; the Graph calls take `Bearer`. Using the wrong one is a 401 with no useful message | `instagram/publisher.py:upload_file` |
+| A **NAT64 address is classified by the address it wraps** | On an IPv6-only network every public host resolves through a NAT64 prefix, and `64:ff9b::7f00:1` is a valid encoding of 127.0.0.1. Refusing them all breaks the network; allowing them all opens an SSRF hole | `security/urlpolicy.py:_nat64_embedded_ipv4` |
+| The export carries **no edit list** and **128 kbps audio** | Both are Meta's documented requirements, and both were broken: ffmpeg writes an edit list by default, and the audio measured 146.4 kbps against a 128 kbps limit | `pipeline/export.py` |
+
+### Residuals carried into later milestones
+
+| Residual | Status | Action |
+|---|---|---|
+| The **live Instagram path** — OAuth, the container, the chunked upload, the publish, the read-back | Unverified — no authorised Meta app, token or professional account was supplied; the whole of M4b's evidence is against API doubles | Lane B — run the Lane B script with real credentials |
+| **App Review and Advanced Access** | Unverified — Meta requires both for accounts AutoClip does not own, and Business Verification as well | Owner — the Meta app's own review process |
+| The **professional-account requirement** cannot be checked locally | Partial — the Graph API does not report it with the publishing permissions alone, so AutoClip says "unverified" rather than guessing; Meta refuses the publish if it is not met | Owner — check the account in the Instagram app |
+| The **publishing-limit contradiction** is resolved by reading the API, but the two figures in Meta's documents remain | Partial — the number in force is read at request time, so AutoClip is right either way; the documents still disagree | M5 — note it in the release report |
+| The **confirm endpoint has no screen** | Partial — the owner can record a post Instagram already has through `PUT /api/instagram/uploads/{id}/confirm`, and the clip list says "needs checking - retry", but the confirmation itself is API-only — the same as YouTube's | M5 — add a confirm affordance if the field evidence asks for one |
+| The **caption and the AI disclosure** are the owner's to write | By design — AutoClip never writes a caption or declares the media as AI-generated on the owner's behalf | Owner |
+
+---
+
+## M5 — Audit and release
 
 Not started. Sequence and ordering constraints are in `docs/upgrade-audit.md` §19.
 
@@ -384,3 +443,9 @@ Not started. Sequence and ordering constraints are in `docs/upgrade-audit.md` §
 | 2026-11-20 | `53bc065` | M4a — the routing decision explains itself: the six fields, stored whole and shown (migration v26) |
 | 2026-11-20 | `5d46feb` | M4a — the clip list shows the whole routing explanation |
 | 2026-11-20 | `8038890` | M4a — running out of quota waits for the reset; a rate limit still backs off |
+| 2026-11-20 | `e837faf` | M4a — the ledger, the matrix and the audit updated with the M4a evidence |
+| 2026-11-20 | `b55bfad` | M4b — Instagram publishing on its own queue: three OAuth setups, Meta's error table, the chunked upload, the duplicate guard, and the publishing limit read from the API (migration v27) |
+| 2026-11-20 | `3bbf876` | M4b — an export that meets Instagram's Reel rules: no edit list, and audio at 128 kbps |
+| 2026-11-20 | `6318655` | M4b — a NAT64 address is classified by the address it wraps |
+| 2026-11-20 | `2cfeb65` | M4b — the Instagram screen: the connection, the eligibility report and the clip-list badge |
+| 2026-11-20 | `521cec5` | M4b — a post that may have succeeded is never sent twice; the owner confirms it with Instagram |

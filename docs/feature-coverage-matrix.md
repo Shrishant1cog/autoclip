@@ -136,17 +136,17 @@ Rows marked ⚠ are gaps this upgrade must close.
 
 | ID | Feature | Existing evidence | Source path | Status | Target | Deps | Acceptance criteria | Evidence |
 |---|---|---|---|---|---|---|---|---|
-| IG-01 | Any Instagram code | None anywhere in the tree | — | ⚠ Missing | M4b | — | — | Not yet started |
-| IG-02 | Official API evaluation | None | — | ⚠ Missing | M4b | IG-01 | Documented findings with dates | Blocked by missing credentials or permissions |
-| IG-03 | Eligibility checks | None | — | ⚠ Missing | M4b | IG-02 | Ineligible account is refused with the reason | Not yet started |
-| IG-04 | OAuth | None | — | ⚠ Missing | M4b | IG-02 | Token stored in keyring | Not yet started |
-| IG-05 | Media validation | None | — | ⚠ Missing | M4b | IG-01 | Format/aspect/duration validated before upload | Not yet started |
-| IG-06 | Resumable upload | None | — | ⚠ Missing | M4b | IG-05 | Interrupted upload resumes | Not yet started |
-| IG-07 | Publish status | None | — | ⚠ Missing | M4b | IG-04 | Status verified, not assumed | Not yet started |
-| IG-08 | Retry / rate limits | None | — | ⚠ Missing | M4b | IG-07 | Bounded retry; rate limit explained | Not yet started |
-| IG-09 | Duplicate prevention | None | — | ⚠ Missing | M4b | IG-01 | Same clip cannot publish twice to one account | Not yet started |
-| IG-10 | Platform isolation | — | — | ⚠ Missing | M4b | IG-04 | IG failure does not cancel YT, and vice versa | Not yet started |
-| IG-11 | No browser automation / scraping / password publishing | Not implemented | — | Implemented (vacuously) | M4b | — | No such mechanism exists | Verified by inspection |
+| IG-01 | Any Instagram code | None anywhere in the tree | `backend/autoclip/instagram/`, `api/instagram.py` | Implemented | M4b | — | — | Automated test verified (`tests/test_instagram.py` — 126 tests) — eight modules (accounts, errors, media, oauth, publisher, queue, uploads) behind `/api/instagram/*`, on their own tables (migration v27) and their own worker |
+| IG-02 | Official API evaluation | None | `docs/INSTAGRAM-API-EVALUATION.md` | Implemented | M4b | IG-01 | Documented findings with dates | Verified by inspection — all eleven §9.1 questions answered against Meta's own documentation, read 2026-11-20, with the URL for every figure; the two places Meta's documents contradict each other (the published-post limit, 100 vs 50) are recorded as contradictions and the number is read from the API instead |
+| IG-03 | Eligibility checks | None | `api/instagram.py:/eligibility`, `instagram/uploads.py:process_upload` | Implemented | M4b | IG-02 | Ineligible account is refused with the reason | Automated test verified — the eligibility report never refuses and always names what is still **unverified** (professional-account status, app review, business verification); a local file on the Instagram Login setup is refused with the reason rather than routed to another host, and Meta's own refusals (restricted account, suspected spam) become an owner-action failure with the reason |
+| IG-04 | OAuth | None | `instagram/oauth.py`, `instagram/accounts.py` | Implemented | M4b | IG-02 | Token stored in keyring | Automated test verified — the three setups Meta supports each have their own flow and their own authorisation URL; the token is filed under `instagram_token#<account_id>`, so two accounts never share a credential, and the value never leaves the keyring |
+| IG-05 | Media validation | None | `instagram/media.py` | Implemented | M4b | IG-01 | Format/aspect/duration validated before upload | Automated test verified — the exported file is measured against Meta's documented Reel rules (container, codec, frame rate, width, bitrate, duration, size) and the failing measurement is named; the MP4 box tree is walked to find the `moov` atom and any edit list, and the caption is checked at enqueue time so a bad caption is refused while it can still be changed |
+| IG-06 | Resumable upload | None | `instagram/publisher.py:upload_file` | Implemented | M4b | IG-05 | Interrupted upload resumes | Automated test verified — the file is sent in 8 MiB chunks to Meta's `rupload` host with the `OAuth` header Meta documents, and an upload that continues resumes from the offset Meta reports rather than from zero |
+| IG-07 | Publish status | None | `instagram/publisher.py:publish`, `read_back`, `instagram/uploads.py:process_upload` | Implemented | M4b | IG-04 | Status verified, not assumed | Automated test verified — the container's status is polled at Meta's documented cadence (once a minute, for at most five minutes), the publish returns a media id, and the media is read back afterwards; a publish that lost its answer becomes `needs_reconciliation` rather than a blind retry, and the owner can record the post with `PUT /api/instagram/uploads/{id}/confirm`, which verifies with Instagram first |
+| IG-08 | Retry / rate limits | None | `instagram/errors.py`, `instagram/queue.py` | Implemented | M4b | IG-07 | Bounded retry; rate limit explained | Automated test verified — Meta's documented error table is transcribed into `errors.py` and each code maps to one decision: a dropped connection is tried again with a bounded backoff, a suspected-spam block is not retried into, a restricted account is the owner's work, and the publishing limit waits for its reset instead of backing off |
+| IG-09 | Duplicate prevention | None | `instagram/uploads.py:duplicate_reason`, `db/store.py` | Implemented | M4b | IG-01 | Same clip cannot publish twice to one account | Automated test verified — **Instagram has no idempotency key**, so the guarantee is made locally: a unique index on `(export_id, account_row_id)` makes a double enqueue one row, and the worker refuses to send a clip that is already published to the same account, before the network call |
+| IG-10 | Platform isolation | — | `instagram/queue.py`, `db/schema.py` | Implemented | M4b | IG-04 | IG failure does not cancel YT, and vice versa | Automated test verified — Instagram has its own tables and its own worker, so a failure in one cannot reach into the other's rows; the two queues share nothing but a pure backoff helper |
+| IG-11 | No browser automation / scraping / password publishing | Not implemented | — | Implemented (vacuously) | M4b | — | No such mechanism exists | Verified by inspection — every call goes through the Instagram Platform Content Publishing API on `graph.facebook.com` / `graph.instagram.com` / `rupload.facebook.com`; there is no browser driver, no scraper, and no password anywhere in the package |
 
 ---
 
@@ -198,9 +198,9 @@ Rows marked ⚠ are gaps this upgrade must close.
 
 | Status | Count |
 |---|---|
-| Implemented | 97 |
+| Implemented | 107 |
 | Partial | 10 |
-| Missing | 12 |
+| Missing | 2 |
 | Blocked — source missing | 1 |
 | NOT APPLICABLE | 9 |
 | **Total rows** | **129** |
