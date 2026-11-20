@@ -24,6 +24,7 @@ from .schemas import (
     InstagramDisconnectIn,
     InstagramEnqueueIn,
     InstagramStatusOut,
+    InstagramUploadConfirmIn,
     InstagramUploadEditIn,
     InstagramUploadOut,
 )
@@ -318,6 +319,31 @@ async def enqueue(payload: InstagramEnqueueIn) -> InstagramUploadOut:
     except InstagramError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     instagram_upload_queue.notify()
+    return InstagramUploadOut.of(row)
+
+
+@router.put("/uploads/{upload_id}/confirm", response_model=InstagramUploadOut)
+async def confirm_upload(upload_id: str, payload: InstagramUploadConfirmIn) -> InstagramUploadOut:
+    """Record a post the owner found on Instagram.
+
+    The owner looked at Instagram's own page and saw the post, but
+    AutoClip does not take that on trust: the media id is read back from
+    Instagram first, and a media id Instagram does not recognise is
+    refused with a 409 rather than recorded.
+    """
+    upload = store.get_instagram_upload(upload_id)
+    if upload is None:
+        raise HTTPException(status_code=404, detail="Upload not found.")
+    try:
+        row = await asyncio.to_thread(
+            uploads.confirm_upload,
+            upload_id,
+            payload.media_id,
+        )
+    except InstagramError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if row is None:
+        raise HTTPException(status_code=404, detail="Upload not found.")
     return InstagramUploadOut.of(row)
 
 

@@ -120,7 +120,22 @@ class InstagramUploadQueue:
             message = _message(exc)
             transient = bool(getattr(exc, "transient", False))
             retry_at = str(getattr(exc, "retry_at", "") or "")
-            if transient and (retry_at or should_retry(attempts)):
+            # An unsettled publish is checked *before* the transient
+            # branch. The request may have reached Instagram, so sending
+            # it again could post the clip twice — and a backoff would
+            # do exactly that.
+            unsettled = bool(getattr(exc, "needs_reconciliation", False))
+            if unsettled:
+                unsettled_status: UploadStatus = "needs_reconciliation"
+                log.warning("Instagram upload %s %s: %s", upload_id, unsettled_status, exc)
+                store.update_instagram_upload(upload_id, status=unsettled_status, error=message)
+                _notify(
+                    upload,
+                    "failed",
+                    message,
+                    owner_action_required=isinstance(exc, OwnerActionRequired),
+                )
+            elif transient and (retry_at or should_retry(attempts)):
                 # A dropped connection is worth another try, but not
                 # straight away. A known reset time beats the backoff's
                 # guess: the publishing limit comes back when it comes back.
@@ -148,8 +163,7 @@ class InstagramUploadQueue:
                 # A publish that cannot be settled is not a failure and not
                 # a retry: it waits for the owner, because sending it again
                 # could post the clip twice.
-                unsettled = bool(getattr(exc, "needs_reconciliation", False))
-                status: UploadStatus = "needs_reconciliation" if unsettled else "failed"
+                status: UploadStatus = "failed"
                 log.warning("Instagram upload %s %s: %s", upload_id, status, exc)
                 store.update_instagram_upload(upload_id, status=status, error=message)
                 _notify(

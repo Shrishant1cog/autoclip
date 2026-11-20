@@ -382,6 +382,58 @@ async def _wait_for_container(
     )
 
 
+def confirm_upload(
+    upload_id: str,
+    media_id: str,
+    settings: config.Settings | None = None,
+) -> InstagramUpload | None:
+    """Record a post the owner found on Instagram.
+
+    The owner looked at Instagram's own page and saw the post. That is
+    the owner's word, but AutoClip does not take it on trust: the media id
+    is read back from Instagram first, and the row is only marked
+    published when Instagram itself recognises it.
+
+    A media id Instagram does not know is refused rather than recorded.
+    """
+    settings = settings or config.load()
+    upload = store.get_instagram_upload(upload_id)
+    if upload is None:
+        return None
+    if not media_id.strip():
+        raise InstagramError("The media id cannot be empty.")
+    if upload.status == "done":
+        return upload
+
+    account = accounts_store.get_account(upload.account_row_id)
+    if account is None:
+        raise InstagramError("The Instagram account for this post is gone.")
+
+    token = oauth.access_token(settings, account.id)
+    published = publisher.read_back(settings, account, token=token, media_id=media_id.strip())
+    if not published.id:
+        raise InstagramError(
+            f"Instagram does not recognise {media_id.strip()} as a published post.",
+            hint="Check the media id in Instagram, or retry the post instead.",
+        )
+
+    store.update_instagram_upload(
+        upload.id,
+        status="done",
+        media_id=published.id,
+        permalink=published.permalink,
+        published_at=utcnow(),
+        publish_detail="Confirmed by the owner and verified with Instagram.",
+        reconcile_status="owner_confirmed",
+        reconcile_detail=f"Instagram confirmed {published.id} as a published post.",
+        reconciled_at=utcnow(),
+        clear_error=True,
+        next_attempt_at="",
+    )
+    log.info("Instagram upload %s confirmed as %s.", upload.id, published.id)
+    return store.get_instagram_upload(upload.id)
+
+
 def retry_upload(upload_id: str) -> InstagramUpload | None:
     """Put a failed upload back in the queue.
 

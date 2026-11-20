@@ -60,6 +60,13 @@ class InstagramError(RuntimeError):
 
     ``owner_action_required`` marks the failures that only the account owner
     can fix: a restricted account, or a publish that Meta believes is spam.
+
+    ``needs_reconciliation`` marks the failures whose outcome is genuinely
+    unknown: the publish request may have reached Instagram and been
+    accepted, and the answer never came back. Such a row is neither failed
+    nor retried — sending it again could post the clip twice. It waits for
+    the owner, who checks Instagram and then either confirms the post or
+    asks for it to be sent again.
     """
 
     def __init__(
@@ -71,6 +78,7 @@ class InstagramError(RuntimeError):
         retry_at: str = "",
         owner_action_required: bool = False,
         needs_reconnect: bool = False,
+        needs_reconciliation: bool = False,
         code: int | None = None,
         subcode: int | None = None,
         fbtrace_id: str = "",
@@ -81,6 +89,7 @@ class InstagramError(RuntimeError):
         self.retry_at = retry_at
         self.owner_action_required = owner_action_required
         self.needs_reconnect = needs_reconnect
+        self.needs_reconciliation = needs_reconciliation
         self.code = code
         self.subcode = subcode
         self.fbtrace_id = fbtrace_id
@@ -102,6 +111,12 @@ class OwnerActionRequired(InstagramError):
     account has to be opened in the Instagram app and dealt with; no amount
     of retrying from here helps.
     """
+
+    def __init__(self, message: str, **kwargs: Any) -> None:
+        # The flag follows from the class, so raising one always says so
+        # on the instance — a caller never has to remember to set it.
+        kwargs.setdefault("owner_action_required", True)
+        super().__init__(message, **kwargs)
 
 
 @dataclass(frozen=True)

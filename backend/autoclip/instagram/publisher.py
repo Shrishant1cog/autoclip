@@ -408,20 +408,47 @@ def publish(
     token: str,
     container_id: str,
 ) -> PublishResult:
-    """Publish a finished container."""
-    body = _post_json(
-        settings,
-        account,
-        f"{account.ig_user_id}/media_publish",
-        {"creation_id": container_id},
-        token=token,
-        summary="The container to publish, and the clip's caption.",
-    )
+    """Publish a finished container.
+
+    A dropped connection here is **ambiguous**, not a plain failure: the
+    request may have reached Instagram and been accepted, and the answer
+    never came back. The error says so, so the row waits for the owner
+    instead of being sent again and posting the clip twice.
+    """
+    try:
+        body = _post_json(
+            settings,
+            account,
+            f"{account.ig_user_id}/media_publish",
+            {"creation_id": container_id},
+            token=token,
+            summary="The container to publish, and the clip's caption.",
+        )
+    except InstagramError as exc:
+        if exc.transient and not exc.owner_action_required:
+            raise InstagramError(
+                str(exc),
+                hint=(
+                    "Instagram may have published this before the connection dropped. "
+                    "Check Instagram before sending it again."
+                ),
+                transient=True,
+                needs_reconciliation=True,
+                code=exc.code,
+                subcode=exc.subcode,
+                fbtrace_id=exc.fbtrace_id,
+            ) from exc
+        raise
     media_id = str(body.get("id") or "")
     if not media_id:
         raise InstagramError(
             "Instagram did not return a media id for the publish.",
             transient=True,
+            needs_reconciliation=True,
+            hint=(
+                "The request was answered but no media id came back. "
+                "Check Instagram before sending it again."
+            ),
         )
     return PublishResult(
         media_id=media_id,

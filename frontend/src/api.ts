@@ -1450,6 +1450,17 @@ export const api = {
     }),
   retryInstagramUpload: (uploadId: string) =>
     request<InstagramUpload>(`/api/instagram/uploads/${uploadId}/retry`, { method: 'POST' }),
+  /**
+   * Record a post the owner found on Instagram.
+   *
+   * The server verifies the media id with Instagram first, so a wrong id
+   * is refused rather than turning an unsettled row into a claim.
+   */
+  confirmInstagramUpload: (uploadId: string, mediaId: string) =>
+    request<InstagramUpload>(`/api/instagram/uploads/${uploadId}/confirm`, {
+      method: 'PUT',
+      body: JSON.stringify({ media_id: mediaId }),
+    }),
   /** Measure an export against Instagram's documented limits. Sends nothing. */
   validateInstagram: (exportId: string) =>
     request<{ ok: boolean; problems: string[] }>(

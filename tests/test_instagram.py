@@ -1713,6 +1713,193 @@ def test_each_setup_asks_only_for_what_it_publishes_with() -> None:
 
 
 # --------------------------------------------------------------------------
+# The ambiguous result
+# --------------------------------------------------------------------------
+
+
+def test_a_publish_that_lost_its_answer_is_not_sent_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The request may have reached Instagram.
+
+    A row in this state is neither failed nor retried: sending it again
+    could post the clip twice. It waits for the owner.
+    """
+    account = _account()
+    _, _, _, export = _export_row(str(tmp_path / "clip.mp4"))
+    row = uploads.enqueue(export.id, account_row_id=account.id)
+
+    async def fail(upload: Any, settings: Any) -> str:
+        raise InstagramError(
+            "Could not reach Instagram: the connection dropped.",
+            transient=True,
+            needs_reconciliation=True,
+        )
+
+    monkeypatch.setattr(uploads, "process_upload", fail)
+
+    queue = InstagramUploadQueue()
+    asyncio.run(queue._run(row.id))
+
+    fresh = store.get_instagram_upload(row.id)
+    assert fresh is not None
+    assert fresh.status == "needs_reconciliation"
+    # Not pending either: the backoff would have sent it again.
+    assert fresh.next_attempt_at == ""
+
+
+def test_the_owner_can_confirm_a_post_instagram_already_has(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_keyring: Any
+) -> None:
+    """The owner looked at Instagram's page and saw the post."""
+    account = _account()
+    accounts_store.store_token(account.id, "token")
+    _, _, _, export = _export_row(str(tmp_path / "clip.mp4"))
+    row = uploads.enqueue(export.id, account_row_id=account.id)
+    store.update_instagram_upload(row.id, status="needs_reconciliation", error="no answer")
+
+    monkeypatch.setattr(
+        publisher,
+        "read_back",
+        lambda *a, **k: publisher.PublishedMedia(
+            id="post-1", permalink="https://www.instagram.com/p/post-1/"
+        ),
+    )
+
+    fresh = uploads.confirm_upload(row.id, "post-1")
+
+    assert fresh is not None
+    assert fresh.status == "done"
+    assert fresh.media_id == "post-1"
+    assert fresh.permalink == "https://www.instagram.com/p/post-1/"
+    assert fresh.reconcile_status == "owner_confirmed"
+
+
+def test_a_media_id_instagram_does_not_know_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_keyring: Any
+) -> None:
+    """The owner's word is checked. A wrong id cannot mark a post published."""
+    account = _account()
+    accounts_store.store_token(account.id, "token")
+    _, _, _, export = _export_row(str(tmp_path / "clip.mp4"))
+    row = uploads.enqueue(export.id, account_row_id=account.id)
+    store.update_instagram_upload(row.id, status="needs_reconciliation", error="no answer")
+
+    monkeypatch.setattr(
+        publisher,
+        "read_back",
+        lambda *a, **k: publisher.PublishedMedia(id=""),
+    )
+
+    with pytest.raises(InstagramError) as caught:
+        uploads.confirm_upload(row.id, "made-up")
+
+    assert "does not recognise" in str(caught.value)
+    fresh = store.get_instagram_upload(row.id)
+    assert fresh is not None
+    assert fresh.status == "needs_reconciliation"
+
+
+def test_the_confirm_endpoint_refuses_a_media_id_instagram_does_not_know(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, fake_keyring: Any
+) -> None:
+    account = accounts_store.create_account(label="Test", ig_user_id="17841")
+    accounts_store.store_token(account.id, "token")
+    _, _, _, export = _export_row()
+    row = uploads.enqueue(export.id, account_row_id=account.id)
+    store.update_instagram_upload(row.id, status="needs_reconciliation", error="no answer")
+
+    monkeypatch.setattr(
+        publisher,
+        "read_back",
+        lambda *a, **k: publisher.PublishedMedia(id=""),
+    )
+
+    response = client.put(
+        f"/api/instagram/uploads/{row.id}/confirm",
+        json={"media_id": "made-up"},
+    )
+
+    assert response.status_code == 409
+    assert "does not recognise" in response.json()["detail"]
+
+
+def test_the_confirm_endpoint_records_a_post_instagram_already_has(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, fake_keyring: Any
+) -> None:
+    account = accounts_store.create_account(label="Test", ig_user_id="17841")
+    accounts_store.store_token(account.id, "token")
+    _, _, _, export = _export_row()
+    row = uploads.enqueue(export.id, account_row_id=account.id)
+    store.update_instagram_upload(row.id, status="needs_reconciliation", error="no answer")
+
+    monkeypatch.setattr(
+        publisher,
+        "read_back",
+        lambda *a, **k: publisher.PublishedMedia(
+            id="post-1", permalink="https://www.instagram.com/p/post-1/"
+        ),
+    )
+
+    response = client.put(
+        f"/api/instagram/uploads/{row.id}/confirm",
+        json={"media_id": "post-1"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "done"
+    assert body["media_id"] == "post-1"
+    assert body["permalink"] == "https://www.instagram.com/p/post-1/"
+
+
+def test_a_publish_that_lost_its_answer_is_flagged_as_ambiguous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dropped connection during the publish is not a plain failure."""
+    account = _account()
+
+    def drop(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise InstagramError("Could not reach Instagram: timeout.", transient=True)
+
+    monkeypatch.setattr(publisher, "_post_json", drop)
+
+    with pytest.raises(InstagramError) as caught:
+        publisher.publish(
+            config.Settings(),
+            account,
+            token="token",
+            container_id="container-1",
+        )
+
+    assert caught.value.needs_reconciliation is True
+    assert caught.value.transient is True
+
+
+def test_a_graph_refusal_during_the_publish_is_not_ambiguous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Meta said no. That is a definite answer, so it is not a lost answer."""
+    account = _account()
+
+    def refuse(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise OwnerActionRequired("Your account is restricted.")
+
+    monkeypatch.setattr(publisher, "_post_json", refuse)
+
+    with pytest.raises(InstagramError) as caught:
+        publisher.publish(
+            config.Settings(),
+            account,
+            token="token",
+            container_id="container-1",
+        )
+
+    assert caught.value.needs_reconciliation is False
+    assert caught.value.owner_action_required is True
+
+
+# --------------------------------------------------------------------------
 # The settings and the clip list
 # --------------------------------------------------------------------------
 

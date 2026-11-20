@@ -413,6 +413,17 @@ class InstagramEnqueueIn(BaseModel):
     is_ai_generated: bool = False
 
 
+class InstagramUploadConfirmIn(BaseModel):
+    """The media id of a post the owner found on Instagram.
+
+    The server verifies it with Instagram before the row is marked
+    published, so a wrong id cannot turn an unsettled row into a claim
+    that the clip is on Instagram.
+    """
+
+    media_id: str
+
+
 class YouTubeStatusOut(BaseModel):
     configured: bool
     connected: bool
