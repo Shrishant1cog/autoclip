@@ -43,6 +43,21 @@ def _column(row: sqlite3.Row, name: str, default: str = "") -> str:
     return default if value is None else str(value)
 
 
+def _json_column(row: sqlite3.Row, name: str) -> dict[str, Any] | None:
+    """A JSON column's value, or ``None`` when it is empty or unreadable."""
+    try:
+        raw = row[name]
+    except (IndexError, KeyError):
+        return None
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
 @dataclass
 class Source:
     id: str
@@ -174,6 +189,10 @@ class Clip:
     music_source: str = ""
     #: Why that track was chosen, in plain words.
     music_reason: str = ""
+    #: The objective quality measurements from the last export. Empty when
+    #: the clip has not been measured yet. These are measurements, not a
+    #: score — there is no single quality number.
+    diagnostics: dict[str, Any] | None = None
     created_at: str = field(default_factory=utcnow)
 
     @property
@@ -200,6 +219,7 @@ class Clip:
             music_track_id=_column(row, "music_track_id"),
             music_source=_column(row, "music_source"),
             music_reason=_column(row, "music_reason"),
+            diagnostics=_json_column(row, "diagnostics_json"),
             created_at=row["created_at"],
         )
 

@@ -349,6 +349,7 @@ def update_clip(
     music_track_id: str | None = None,
     music_source: str | None = None,
     music_reason: str | None = None,
+    diagnostics: dict[str, Any] | None = None,
 ) -> None:
     fields: dict[str, Any] = {}
     for name, value in (
@@ -368,6 +369,8 @@ def update_clip(
         fields["user_trimmed"] = int(user_trimmed)
     if validation is not None:
         fields["validation_json"] = json.dumps(validation)
+    if diagnostics is not None:
+        fields["diagnostics_json"] = json.dumps(diagnostics)
 
     if not fields:
         return

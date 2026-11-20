@@ -831,6 +831,34 @@ def _migration_v20(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE clips ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
 
 
+# --- v21: the objective quality diagnostics --------------------------------
+
+#: The diagnostics are stored on the clip rather than in a table of their
+#: own: there is exactly one report per clip, it is read with the clip,
+#: and it is replaced wholesale when the clip is re-exported.
+_V21 = """
+-- diagnostics_json holds the objective quality measurements for one clip:
+-- audio clipping, caption timing, crop safety, resolution, frame-rate
+-- consistency, black frames, export validity, duplicate clips, missing
+-- audio and duration.
+--
+-- It holds measurements, not a score. There is no single "quality" number
+-- here, because there is no honest way to fold ten different measurements
+-- into one, and a number that looked like a verdict would be a lie.
+--
+-- The column is added by the migration function, because SQLite has no
+-- 'ADD COLUMN IF NOT EXISTS' and a half-applied migration must not stop
+-- the database from opening.
+"""
+
+
+def _migration_v21(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V21)
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(clips)").fetchall()}
+    if "diagnostics_json" not in existing:
+        conn.execute("ALTER TABLE clips ADD COLUMN diagnostics_json TEXT NOT NULL DEFAULT ''")
+
+
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v1,
     _migration_v2,
@@ -852,6 +880,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v18,
     _migration_v19,
     _migration_v20,
+    _migration_v21,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)

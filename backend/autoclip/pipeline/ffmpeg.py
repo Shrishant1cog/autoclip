@@ -289,6 +289,222 @@ def _as_int(value: object) -> int | None:
         return None
 
 
+def clipping_ratio(path: Path) -> float | None:
+    """The fraction of audio samples that reached full scale.
+
+    Clipping is a real, measurable fault: a sample at full scale has
+    already been cut off, so the sound is distorted. ``None`` means the
+    measurement could not be made — an unmeasurable file is not the same
+    as a clean one, and the two are never conflated.
+
+    The count comes from ffmpeg's ``astats`` filter. Older ffmpeg builds
+    print ``Number of clipped samples`` directly; newer ones do not, so
+    the same answer is worked out from the peak level and the number of
+    samples sitting at that peak: when the peak is at full scale, the
+    samples at the peak *are* the clipped ones.
+    """
+    command = [
+        ffmpeg_path(),
+        "-hide_banner",
+        "-nostats",
+        *protocol_args(),
+        "-i",
+        str(path),
+        "-map",
+        "0:a:0",
+        "-af",
+        "astats=metadata=0:reset=0",
+        "-f",
+        "null",
+        "-",
+    ]
+    try:
+        proc = run_captured(command)
+    except FFmpegError:
+        return None
+
+    stderr = proc.stderr or ""
+    if "does not contain any stream" in stderr:
+        return None
+
+    total = _last_stat(stderr, "Number of samples")
+    if not total or total <= 0:
+        return None
+
+    # Older ffmpeg prints the clipped count directly.
+    clipped = _last_stat(stderr, "Number of clipped samples")
+    if clipped is not None:
+        return round(clipped / total, 6)
+
+    channels = _channel_peaks(stderr)
+    if not channels:
+        return None
+
+    # Each channel holds the same number of samples, so the overall
+    # total splits evenly between them.
+    per_channel = total / len(channels)
+    if per_channel <= 0:
+        return None
+
+    worst = 0.0
+    for peak_db, peak_count in channels:
+        # Anything within 0.05 dB of full scale has been clipped.
+        if peak_db is None or peak_count is None:
+            continue
+        if peak_db < -0.05:
+            continue
+        worst = max(worst, peak_count / per_channel)
+    return round(worst, 6)
+
+
+def _channel_peaks(stderr: str) -> list[tuple[float | None, float | None]]:
+    """Each audio channel's peak level and the count of samples at it.
+
+    ffmpeg prints one block per channel and then an "Overall" block. Only
+    the per-channel blocks are wanted here: the overall peak is the
+    loudest channel's, and the overall count adds up channels that peak
+    at different levels, so combining them would overstate the clipping.
+    """
+    blocks: list[tuple[float | None, float | None]] = []
+    current: dict[str, float] | None = None
+
+    for line in stderr.splitlines():
+        if "Channel:" in line:
+            if current is not None:
+                blocks.append((current.get("peak"), current.get("count")))
+            current = {}
+            continue
+        if current is None:
+            continue
+        if "Overall" in line:
+            blocks.append((current.get("peak"), current.get("count")))
+            current = None
+            continue
+        if "Peak level dB:" in line:
+            value = _stat_value(line)
+            if value is not None:
+                current["peak"] = value
+        elif "Abs Peak count:" in line:
+            value = _stat_value(line)
+            if value is not None:
+                current["count"] = value
+
+    if current is not None:
+        blocks.append((current.get("peak"), current.get("count")))
+
+    return blocks
+
+
+def _stat_value(line: str) -> float | None:
+    """The number after the colon on an ffmpeg statistics line."""
+    match = re.search(r":\s*(-?(?:inf|\d+(?:\.\d+)?))", line)
+    if not match:
+        return None
+    raw = match.group(1)
+    if raw in {"-inf", "inf", "-Infinity", "Infinity"}:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _last_stat(stderr: str, label: str) -> float | None:
+    """The last value ffmpeg's astats printed for one label."""
+    values: list[float] = []
+    for line in stderr.splitlines():
+        if label not in line:
+            continue
+        value = _stat_value(line)
+        if value is not None:
+            values.append(value)
+    return values[-1] if values else None
+
+
+def black_intervals(path: Path, *, min_duration_s: float = 0.2) -> list[tuple[float, float]]:
+    """The black stretches in a file, as ``(start_s, end_s)`` pairs.
+
+    Measured with ffmpeg's ``blackdetect`` filter. A clip that opens on
+    a black frame is a real fault; a clip that fades to black at the very
+    end usually is not, so the caller decides what to do with the list.
+    """
+    command = [
+        ffmpeg_path(),
+        "-hide_banner",
+        "-nostats",
+        *protocol_args(),
+        "-i",
+        str(path),
+        "-vf",
+        f"blackdetect=d={min_duration_s}:pic_th=0.98",
+        "-an",
+        "-f",
+        "null",
+        "-",
+    ]
+    try:
+        proc = run_captured(command)
+    except FFmpegError:
+        return []
+
+    intervals: list[tuple[float, float]] = []
+    for line in (proc.stderr or "").splitlines():
+        if "black_start" not in line:
+            continue
+        start = re.search(r"black_start:([0-9.]+)", line)
+        end = re.search(r"black_end:([0-9.]+)", line)
+        if start is None:
+            continue
+        intervals.append(
+            (
+                float(start.group(1)),
+                float(end.group(1)) if end is not None else float("inf"),
+            )
+        )
+    return intervals
+
+
+def frame_durations(path: Path, *, limit: int = 900) -> list[float]:
+    """The gaps between consecutive frames, in seconds.
+
+    A constant frame rate produces a constant gap. The spread of these
+    gaps is what "frame-rate consistency" means, and it is measured
+    rather than assumed from the container's nominal rate.
+    """
+    command = [
+        ffprobe_path(),
+        "-v",
+        "error",
+        *protocol_args(),
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "frame=pts_time",
+        "-read_intervals",
+        f"%+{max(1, limit)}",
+        "-of",
+        "csv=p=0",
+        str(path),
+    ]
+    try:
+        proc = run_captured(command)
+    except FFmpegError:
+        return []
+
+    stamps: list[float] = []
+    for line in (proc.stdout or "").splitlines():
+        line = line.strip().strip(",")
+        if not line or line == "N/A":
+            continue
+        try:
+            stamps.append(float(line))
+        except ValueError:
+            continue
+
+    stamps.sort()
+    return [round(b - a, 6) for a, b in zip(stamps, stamps[1:], strict=False) if b > a]
+
+
 def _parse_fps(rate: str | None) -> float | None:
     """Convert ffprobe's ``"30000/1001"`` rational frame rate to a float."""
     if not rate:
