@@ -12,30 +12,40 @@ same runner serves the CLI (a progress bar) and the web API (an SSE stream).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .. import paths, resources
+from ..budget import budget_for
 from ..config import Settings
 from ..config import load as load_settings
-from ..db import store
+from ..db import plan_store, store
 from ..db.models import Clip, Export, Job, JobResources, Source, new_id, utcnow
 from ..db.models import Transcript as TranscriptRow
 from ..providers import LLMProvider, build_provider, detection_config
-from ..providers.base import looks_like_auth_failure, looks_like_transient_failure
+from ..providers.base import (
+    ProviderConsentRequired,
+    looks_like_auth_failure,
+    looks_like_transient_failure,
+)
 from ..speech import LocalWhisperSTT
 from ..speech import base as speech
 from . import (
     Stage,
     captions,
+    creative,
+    diagnostics,
     export,
     ffmpeg,
     highlights,
     ingest,
+    intent,
+    music_selection,
     prepare,
     speech_timeline,
     transcribe,
@@ -51,6 +61,7 @@ from .reframe.layout import (
     ManualLayout,
     plan_layout,
 )
+from .reframe.scenes import Shot, detect_shots
 from .reframe.webcam import Rect, WebcamReport, WebcamTrack, detect_webcam
 from .transcript import Transcript
 
@@ -103,9 +114,10 @@ STAGE_WEIGHTS: dict[Stage, float] = {
     Stage.PREPARE: 0.05,
     Stage.TRANSCRIBE: 0.35,
     Stage.HIGHLIGHTS: 0.15,
+    Stage.CREATIVE: 0.05,
     Stage.REFRAME: 0.20,
     Stage.CAPTIONS: 0.02,
-    Stage.EXPORT: 0.23,
+    Stage.EXPORT: 0.18,
 }
 
 
@@ -143,6 +155,18 @@ class ClipComposition:
 
     crop_path: CropPath
     layout: LayoutPath | None = None
+
+
+@dataclass
+class CreativeResult:
+    """What the creative stage decided.
+
+    The plan is the model's structured answer, already checked. The music
+    is one selection per clip — ``None`` where the clip has no bed.
+    """
+
+    plan: creative.CreativePlan
+    music: dict[str, music_selection.MusicSelection | None] = field(default_factory=dict)
 
 
 def _crop_aspect(layout: LayoutPath | None, ratio: str) -> tuple[int, int]:
@@ -222,6 +246,16 @@ class JobWorkspace:
 
     def layout(self, clip_id: str) -> Path:
         return self.root / "layouts" / f"{clip_id}.json"
+
+    @property
+    def shots(self) -> Path:
+        """The shot list for the source video.
+
+        Detected once for the whole source, the same way the webcam
+        detector does it: a shot boundary is a property of the video, not
+        of a clip.
+        """
+        return self.root / "shots.json"
 
     @property
     def webcam_report(self) -> Path:
@@ -337,9 +371,10 @@ class PipelineRunner:
             transcript = self._stage_transcribe(audio)
             silences = self._load_or_detect_silences(audio)
             clips = await self._stage_highlights(transcript, silences)
-            crop_paths = self._stage_reframe(clips, transcript)
+            creative_result = await self._stage_creative(clips)
+            crop_paths = self._stage_reframe(clips, transcript, creative_result)
             self._stage_captions(clips, transcript)
-            self._stage_export(clips, transcript, crop_paths)
+            self._stage_export(clips, transcript, crop_paths, creative_result)
         except JobCancelled:
             store.update_job(self.job.id, status="cancelled", finished_at=utcnow(), progress=0.0)
             self._record_usage()
@@ -636,9 +671,256 @@ class PipelineRunner:
                 "video were not analysed.",
             )
 
+        clips = self._apply_story_balance(clips)
+
         store.replace_clips(self.job.id, clips)
         self._finish_stage(stage)
         return clips
+
+    def _apply_story_balance(self, clips: list[Clip]) -> list[Clip]:
+        """Tilt the ranking towards the story or the action, as configured.
+
+        The tilt is measured, not guessed: story is the speech density
+        from the shared timeline, action is the rate of scene changes
+        from the shot list. The model's own score is kept — it judges
+        the hook and the payoff, which no signal can — and the tilt is
+        a small, bounded adjustment on top of it.
+
+        With the default setting the adjustment is exactly zero, so
+        nothing changes for a user who never touches it.
+        """
+        settings = self.settings.clips
+        if settings.highlight_style == "auto" and abs(settings.story_density - 0.5) < 1e-9:
+            return clips
+
+        timeline = self._load_speech_timeline()
+        shots = self._load_or_detect_shots()
+        cut_counts: dict[str, int] = {}
+        for clip in clips:
+            cut_counts[clip.id] = sum(
+                1 for shot in shots if clip.start_s < shot.start_s < clip.end_s
+            )
+
+        for clip in clips:
+            duration = max(0.001, clip.end_s - clip.start_s)
+            speech = music_selection.speech_density(timeline, clip.start_s, clip.end_s)
+            cuts_per_minute = cut_counts.get(clip.id, 0) / duration * 60.0
+
+            adjusted, character = intent.adjust_score(
+                clip.score,
+                speech_density=speech,
+                cuts_per_minute=cuts_per_minute,
+                story_density=settings.story_density,
+                highlight_style=settings.highlight_style,
+            )
+            if adjusted != clip.score:
+                log.info(
+                    "Clip %s: score %d -> %d (story %.2f, action %.2f).",
+                    clip.id,
+                    clip.score,
+                    adjusted,
+                    character.story,
+                    character.action,
+                )
+                clip.score = adjusted
+
+        # The balance changes the order the clips are in, so they are
+        # re-ranked and the clip count is re-applied.
+        clips.sort(key=lambda c: c.score, reverse=True)
+        clips = clips[: settings.max_clips]
+        for rank, clip in enumerate(clips, start=1):
+            clip.rank = rank
+        return clips
+
+    async def _stage_creative(self, clips: list[Clip]) -> CreativeResult:
+        """Decide the creative plan and the music for each clip.
+
+        Two things happen here, and both are bounded by the job's AI budget:
+
+        * **One planning call** (and one repair retry) produce a structured
+          plan — a layout, a crop, a caption strategy, a music track and a
+          ducking depth for every clip. Everything in it is checked before
+          it is used; anything that does not check out is rejected, and the
+          deterministic plan is used instead.
+        * **One music call per clip**, at most, and only for the clips that
+          do not already have the user's own choice.
+
+        The budget is loaded from the database, so a retried job does not
+        get a fresh allowance.
+        """
+        stage = Stage.CREATIVE
+        self._check_cancelled()
+
+        budget = budget_for(self.job.id, max_clips=self.settings.clips.max_clips)
+
+        provider: LLMProvider | None = None
+        provider_name = self.job.provider or self.settings.active_provider
+        try:
+            provider = build_provider(provider_name, self.settings)
+        except Exception as exc:  # noqa: BLE001 - no provider means the fallback
+            log.warning("No provider is available for the creative plan: %s", exc)
+            provider = None
+
+        timeline = self._load_speech_timeline()
+        scene_changes = self._scene_changes(clips)
+
+        self._emit(stage, 0.05, "Planning the edit")
+        try:
+            plan = await creative.plan_creative(
+                provider,
+                budget,
+                clips=clips,
+                tracks=self._music_candidates(),
+                detected_layout=self._detected_layout_name(),
+                layout_confidence=self._detected_layout_confidence(),
+                speech_density={
+                    clip.id: music_selection.speech_density(timeline, clip.start_s, clip.end_s)
+                    for clip in clips
+                },
+                scene_changes=scene_changes,
+                default_ratio=self.settings.export.ratio,
+            )
+        except ProviderConsentRequired:
+            # The user withdrew consent for AI creative planning. That is an
+            # answer, not a failure: the deterministic plan is used and the
+            # clips are still exported. No other provider is tried.
+            log.info(
+                "The AI creative planning was refused by the privacy settings; "
+                "the automatic choices were made instead."
+            )
+            plan = creative.fallback_plan(
+                clips,
+                default_ratio=self.settings.export.ratio,
+                reason="AI creative planning is switched off in the privacy settings",
+            )
+
+        self._emit(stage, 0.4, "Choosing the music")
+        selections = await music_selection.select_for_clips(
+            clips,
+            provider=provider,
+            budget=budget,
+            timeline=timeline,
+            scene_changes=scene_changes,
+            source_id=self.source.id,
+        )
+
+        for clip in clips:
+            selection = selections.get(clip.id)
+            store.update_clip(
+                clip.id,
+                music_track_id=selection.track_id if selection else "",
+                music_source=selection.source if selection else "",
+                music_reason=selection.reason if selection else "",
+            )
+
+        try:
+            plan_store.save(self.job.id, plan)
+        except Exception:  # noqa: BLE001 - a plan that cannot be saved is not fatal
+            log.warning("Could not save the creative plan.", exc_info=True)
+
+        try:
+            budget.save()
+        except Exception:  # noqa: BLE001
+            log.warning("Could not save the AI budget.", exc_info=True)
+
+        if plan.source == "fallback" and plan.problems:
+            self._set_notice(
+                stage,
+                "The AI plan could not be used, so the automatic choices were made instead.",
+            )
+
+        self._finish_stage(stage)
+        return CreativeResult(plan=plan, music=selections)
+
+    def _music_candidates(self) -> list[dict[str, Any]]:
+        """The tracks the model may choose from, as measurements.
+
+        Only the tracks that may legally be exported are offered, and only
+        their metadata goes out — never the audio, never a file path.
+        """
+        from ..music import selection as music_selection_module
+
+        candidates: list[dict[str, Any]] = []
+        for track in music_selection_module.store.list_tracks():
+            if track.excluded:
+                continue
+            candidates.append(
+                {
+                    "id": track.id,
+                    "name": track.name,
+                    "title": track.title,
+                    "artist": track.artist,
+                    "tags": track.tag_list,
+                    "duration_s": round(track.analysis.duration_s or track.duration_s, 2),
+                    "bpm": track.analysis.bpm,
+                    "bpm_confidence": track.analysis.bpm_confidence,
+                    "energy": track.analysis.energy,
+                    "mood": track.analysis.mood,
+                    "beat_regularity": track.analysis.beat_regularity,
+                    "groove_strength": track.analysis.groove_strength,
+                    "loudness_lufs": track.analysis.loudness_lufs,
+                }
+            )
+        return candidates
+
+    def _detected_layout_name(self) -> str:
+        """The layout the detector found, or an empty string."""
+        stored = layout_store.get_source_layout(self.source.id)
+        if stored is None or not stored.has_detection:
+            return ""
+        return "auto"
+
+    def _detected_layout_confidence(self) -> float:
+        """How sure the detector was about the region."""
+        stored = layout_store.get_source_layout(self.source.id)
+        if stored is None:
+            return 0.0
+        return stored.detected_confidence
+
+    def _scene_changes(self, clips: list[Clip]) -> dict[str, int]:
+        """How many scene changes each clip contains.
+
+        Counted from the shot list, which is detected once for the whole
+        source — a shot boundary is a property of the video, not of a
+        clip. The number is measured, not guessed.
+        """
+        shots = self._load_or_detect_shots()
+        counts: dict[str, int] = {}
+        for clip in clips:
+            if not shots:
+                counts[clip.id] = 0
+                continue
+            boundaries = [
+                shot.start_s for shot in shots if clip.start_s < shot.start_s < clip.end_s
+            ]
+            counts[clip.id] = len(boundaries)
+        return counts
+
+    def _load_or_detect_shots(self) -> list[Shot]:
+        """The source's shot list, detected once and cached."""
+        cached = self.workspace.shots
+        if cached.exists():
+            try:
+                raw = json.loads(cached.read_text(encoding="utf-8"))
+                return [Shot(float(item["start_s"]), float(item["end_s"])) for item in raw]
+            except Exception:  # noqa: BLE001 - a broken artifact is re-detected
+                log.warning("Could not read the shot list; detecting it again.", exc_info=True)
+
+        if not self.source.has_video:
+            return []
+
+        try:
+            shots = detect_shots(Path(self.source.path))
+        except Exception:  # noqa: BLE001 - detection must not fail a job
+            log.warning("Could not detect the shots.", exc_info=True)
+            return []
+
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        cached.write_text(
+            json.dumps([{"start_s": shot.start_s, "end_s": shot.end_s} for shot in shots]),
+            encoding="utf-8",
+        )
+        return shots
 
     def _ollama_fallback(
         self, provider_name: str, error: BaseException
@@ -696,7 +978,10 @@ class PipelineRunner:
             return False
 
     def _stage_reframe(
-        self, clips: list[Clip], transcript: Transcript
+        self,
+        clips: list[Clip],
+        transcript: Transcript,
+        creative_result: CreativeResult | None = None,
     ) -> dict[str, ClipComposition]:
         stage = Stage.REFRAME
         self._check_cancelled()
@@ -728,7 +1013,14 @@ class PipelineRunner:
                 f"Reframing clip {index + 1}/{len(clips)}",
             )
 
-            layout = self._plan_layout(report, clip, timeline, out_w=out_w, out_h=out_h)
+            layout = self._plan_layout(
+                report,
+                clip,
+                timeline,
+                out_w=out_w,
+                out_h=out_h,
+                creative_result=creative_result,
+            )
 
             # The gameplay area decides the crop path's aspect ratio: a
             # stacked layout leaves the bottom sixty per cent for gameplay,
@@ -805,6 +1097,27 @@ class PipelineRunner:
             )
         return report
 
+    def _recommended_layout(
+        self, clip: Clip, creative_result: CreativeResult | None
+    ) -> LayoutVariant | None:
+        """The layout the creative plan recommended for a clip.
+
+        The recommendation is honoured only when it is one AutoClip knows
+        how to build, and only when the user has not already made a
+        choice — a manual choice is the user's, and it wins.
+        """
+        if creative_result is None:
+            return None
+        direction = creative_result.plan.direction_for(clip.id)
+        if direction is None:
+            return None
+        if direction.layout in ("", "auto"):
+            return None
+        try:
+            return LayoutVariant(direction.layout)
+        except ValueError:
+            return None
+
     def _plan_layout(
         self,
         report: WebcamReport,
@@ -813,12 +1126,14 @@ class PipelineRunner:
         *,
         out_w: int,
         out_h: int,
+        creative_result: CreativeResult | None = None,
     ) -> LayoutPath | None:
         """Plan the composition for one clip.
 
         The order is the same as the planner's own: what the user asked for
-        first, then what was detected, then the geometry. A manual choice
-        for this source beats every automatic decision.
+        first, then what the creative plan recommended, then what was
+        detected, then the geometry. A manual choice for this source beats
+        every automatic decision.
         """
         settings = self.settings.export
         if settings.layout == "gameplay_only":
@@ -830,6 +1145,17 @@ class PipelineRunner:
             track = track.slice(clip.start_s, clip.end_s)
 
         manual = self._manual_layout(track)
+        if manual is None:
+            recommended = self._recommended_layout(clip, creative_result)
+            if recommended is not None:
+                if track is None:
+                    return None
+                manual = ManualLayout(
+                    variant=recommended,
+                    rect=track.rect,
+                    position=settings.webcam_position,
+                )
+
         if manual is None and settings.layout in ("above", "corner"):
             # The user chose a layout in the settings rather than for this
             # source. It still needs a region to show.
@@ -907,6 +1233,40 @@ class PipelineRunner:
             position=override.position or "top-right",
         )
 
+    def _export_settings_for(
+        self,
+        clip: Clip,
+        export_settings: Any,
+        creative_result: CreativeResult | None,
+    ) -> Any:
+        """The export settings for one clip, including its music.
+
+        The music track comes from the creative stage's selection — which
+        is the user's own choice, the model's proposal, or the
+        deterministic scorer's answer. The user's global setting is still
+        the fallback, so an existing install that configured a bed keeps
+        it.
+        """
+        track_setting = export_settings.music_track
+        selection = creative_result.music.get(clip.id) if creative_result is not None else None
+
+        if selection is not None:
+            from ..music import store as music_store
+
+            track = music_store.get_track(selection.track_id)
+            if track is not None:
+                track_setting = track.path or track.name
+            else:
+                # The track was removed from the library between the
+                # selection and the export. The global setting is a better
+                # answer than a path that no longer exists.
+                log.warning("The track chosen for clip %s is no longer in the library.", clip.id)
+        elif selection is None and creative_result is not None and clip.id in creative_result.music:
+            # The selection is explicitly "no music for this clip".
+            return export_settings.model_copy(update={"music_track": ""})
+
+        return export_settings.model_copy(update={"music_track": track_setting})
+
     def _stage_captions(self, clips: list[Clip], transcript: Transcript) -> None:
         stage = Stage.CAPTIONS
         self._check_cancelled()
@@ -921,6 +1281,7 @@ class PipelineRunner:
         clips: list[Clip],
         transcript: Transcript,
         compositions: dict[str, ClipComposition],
+        creative_result: CreativeResult | None = None,
     ) -> None:
         stage = Stage.EXPORT
         self._check_cancelled()
@@ -948,6 +1309,26 @@ class PipelineRunner:
                 clip.title or f"clip-{clip.rank}", ratio
             )
 
+            # The export settings for this clip. The creative plan may
+            # recommend a caption style and a ducking depth; the rest comes
+            # from the user's settings.
+            export_settings = self.settings.export
+            clip_style = style
+            direction = (
+                creative_result.plan.direction_for(clip.id) if creative_result is not None else None
+            )
+            if direction is not None:
+                if direction.caption_strategy:
+                    # An unknown style keeps the default rather than
+                    # failing the export: the plan was already checked, so
+                    # this is belt and braces.
+                    with contextlib.suppress(Exception):
+                        clip_style = captions.get_style(direction.caption_strategy)
+                if direction.ducking_db:
+                    export_settings = export_settings.model_copy(
+                        update={"ducking_amount_db": direction.ducking_db}
+                    )
+
             request = export.ExportRequest(
                 source=source_path,
                 destination=destination,
@@ -955,7 +1336,7 @@ class PipelineRunner:
                 end_s=clip.end_s,
                 crop_path=crop_path,
                 words=words,
-                style=style,
+                style=clip_style,
                 ratio=ratio,
                 speech_intervals=(
                     timeline.relative_slice(clip.start_s, clip.end_s)
@@ -971,7 +1352,7 @@ class PipelineRunner:
             export.export_clip(
                 request,
                 work_dir=self.workspace.captions_dir,
-                settings=self.settings.export,
+                settings=self._export_settings_for(clip, export_settings, creative_result),
                 on_progress=clip_progress,
                 cancelled=self._is_cancelled,
                 threads=self.settings.resources.ffmpeg_threads,
@@ -1023,6 +1404,18 @@ class PipelineRunner:
                     "; ".join(f"{c.name}: {c.detail}" for c in failed),
                 )
 
+            # The objective quality measurements. These are kept apart
+            # from the validation report on purpose: validation is the
+            # pass/fail gate before publishing, and the diagnostics are
+            # the evidence a person reads to decide what to change.
+            self._record_diagnostics(
+                clip,
+                destination,
+                words=words,
+                compositions=compositions,
+                ratio=ratio,
+            )
+
             record = Export(
                 id=new_id(),
                 clip_id=clip.id,
@@ -1036,6 +1429,73 @@ class PipelineRunner:
                 _maybe_enqueue_upload(record.id, self.settings)
 
         self._finish_stage(stage)
+
+    def _record_diagnostics(
+        self,
+        clip: Clip,
+        destination: Path,
+        *,
+        words: list[Any],
+        compositions: dict[str, ClipComposition],
+        ratio: str,
+    ) -> None:
+        """Measure the finished clip and keep the measurements.
+
+        Nothing here can fail an export: a measurement that cannot be
+        made is reported as unavailable and the rest are still made. The
+        report holds measurements, not a score — there is no honest way
+        to fold ten different measurements into one number, and a number
+        that looked like a verdict would be a lie.
+        """
+        composition = compositions.get(clip.id)
+        crop_path = composition.crop_path if composition else None
+
+        face_rect: tuple[float, float, float, float] | None = None
+        try:
+            stored = layout_store.get_source_layout(self.source.id)
+        except Exception:  # noqa: BLE001 - a missing record is not a failure
+            stored = None
+        if stored is not None and stored.has_detection:
+            face_rect = (
+                stored.detected_x,
+                stored.detected_y,
+                stored.detected_width,
+                stored.detected_height,
+            )
+
+        try:
+            report = diagnostics.diagnose_clip(
+                destination,
+                clip_id=clip.id,
+                clips=store.list_clips(self.job.id),
+                words=words,
+                start_s=clip.start_s,
+                end_s=clip.end_s,
+                expected_size=export.ratio_dimensions(ratio),
+                source_size=(
+                    (self.source.width, self.source.height)
+                    if self.source.width and self.source.height
+                    else None
+                ),
+                crop_path=crop_path,
+                face_rect=face_rect,
+                require_audio=self.source.has_audio,
+                duration_tolerance_s=validate.DURATION_TOLERANCE_S,
+            )
+        except Exception:  # noqa: BLE001 - diagnostics never fail an export
+            log.warning("Could not measure clip %s.", clip.id, exc_info=True)
+            return
+
+        store.update_clip(clip.id, diagnostics=report.to_dict())
+
+        failures = report.failures()
+        if failures:
+            log.info(
+                "Clip %s: %d diagnostic(s) to look at — %s",
+                clip.id,
+                len(failures),
+                "; ".join(f"{d.title}: {d.detail}" for d in failures),
+            )
 
     def _maybe_narrate(
         self, destination: Path, clip: Clip, index: int, total: int, stage: Stage

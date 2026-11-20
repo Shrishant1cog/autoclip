@@ -20,7 +20,9 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 
+from ..music import formats as music_formats_module
 from ..music import library as music_library
+from ..music import preferences as music_preferences_module
 from ..music import store as music_store
 from ..music.licensing import USER_SETTABLE_STATES, LicenseRecord, LicenseState
 from ..pipeline import music
@@ -91,6 +93,9 @@ async def library_listing(
     mood: str = "",
     min_bpm: float | None = None,
     max_bpm: float | None = None,
+    min_energy: float | None = None,
+    max_energy: float | None = None,
+    format: str = "",
     licence: str = "",
     favourite: bool = False,
     tag: str = "",
@@ -102,11 +107,33 @@ async def library_listing(
         mood=mood,
         min_bpm=min_bpm,
         max_bpm=max_bpm,
+        min_energy=min_energy,
+        max_energy=max_energy,
+        music_format=format,
         licence_state=licence,
         favourite_only=favourite,
         tag=tag,
     )
     return [entry.to_dict() for entry in entries]
+
+
+@router.get("/formats")
+async def music_formats() -> list[dict]:
+    """The formats a track can be filtered by.
+
+    Each one says what it is and which measurement it comes from, so the
+    screen can tell the user what the word means instead of making them
+    guess.
+    """
+    return [
+        {
+            "value": fmt.value,
+            "title": fmt.title,
+            "description": fmt.description,
+            "measured": fmt.measured,
+        }
+        for fmt in music_formats_module.FORMATS
+    ]
 
 
 @router.get("/folders")
@@ -244,6 +271,106 @@ async def get_licence(track_id: str) -> dict:
 
 
 # --------------------------------------------------------------------------
+# The preferences
+# --------------------------------------------------------------------------
+
+
+@router.get("/preferences")
+async def music_preferences(clip_id: str = "", source_id: str = "") -> dict:
+    """The music choice that applies, and where it came from.
+
+    The scopes are separate: a clip's choice survives the source's choice
+    being changed, and clearing one scope does not clear another. The most
+    specific scope wins.
+    """
+    resolved, scope = music_preferences_module.resolve_preference(
+        clip_id=clip_id,
+        source_id=source_id,
+    )
+    return {
+        "clip_id": clip_id,
+        "source_id": source_id,
+        "track_id": "" if resolved == music_preferences_module.NO_MUSIC else resolved,
+        "none": resolved == music_preferences_module.NO_MUSIC,
+        "scope": scope,
+        "global": _preference_dict(music_preferences_module.SCOPE_GLOBAL, ""),
+        "source": _preference_dict(music_preferences_module.SCOPE_SOURCE, source_id),
+        "clip": _preference_dict(music_preferences_module.SCOPE_CLIP, clip_id),
+    }
+
+
+@router.put("/preferences")
+async def set_music_preference(payload: dict) -> dict:
+    """Record the user's music choice at one scope.
+
+    An empty track id clears the scope. The sentinel ``none`` means "no
+    music at all", which is a different answer from "no preference here".
+    """
+    scope = str(payload.get("scope", "")).strip()
+    if scope not in (
+        music_preferences_module.SCOPE_GLOBAL,
+        music_preferences_module.SCOPE_SOURCE,
+        music_preferences_module.SCOPE_CLIP,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Unknown preference scope {scope!r}. Use 'global', 'source' or 'clip'."),
+        )
+
+    scope_id = str(payload.get("scope_id", "")).strip()
+    if scope == music_preferences_module.SCOPE_GLOBAL:
+        scope_id = ""
+    if scope == music_preferences_module.SCOPE_SOURCE and not scope_id:
+        raise HTTPException(status_code=400, detail="A source preference needs a source_id.")
+    if scope == music_preferences_module.SCOPE_CLIP and not scope_id:
+        raise HTTPException(status_code=400, detail="A clip preference needs a clip_id.")
+
+    track_id = str(payload.get("track_id", "")).strip()
+    if (
+        track_id
+        and track_id != music_preferences_module.NO_MUSIC
+        and music_store.get_track(track_id) is None
+    ):
+        raise HTTPException(status_code=404, detail="Track not found.")
+
+    music_preferences_module.set_preference(scope, scope_id, track_id)
+    return _preference_dict(scope, scope_id)
+
+
+@router.delete("/preferences")
+async def clear_music_preference(scope: str, scope_id: str = "") -> dict:
+    """Forget one scope's preference. The other scopes are untouched."""
+    if scope not in (
+        music_preferences_module.SCOPE_GLOBAL,
+        music_preferences_module.SCOPE_SOURCE,
+        music_preferences_module.SCOPE_CLIP,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Unknown preference scope {scope!r}. Use 'global', 'source' or 'clip'."),
+        )
+    if scope == music_preferences_module.SCOPE_GLOBAL:
+        scope_id = ""
+
+    music_preferences_module.clear_preference(scope, scope_id)
+    return _preference_dict(scope, scope_id)
+
+
+def _preference_dict(scope: str, scope_id: str) -> dict:
+    """One scope's stored preference, or an empty answer."""
+    stored = music_preferences_module.get_preference(scope, scope_id)
+    if stored is None:
+        return {
+            "scope": scope,
+            "scope_id": scope_id,
+            "track_id": "",
+            "none": False,
+            "updated_at": "",
+        }
+    return stored.to_dict()
+
+
+# --------------------------------------------------------------------------
 # Preview
 # --------------------------------------------------------------------------
 
@@ -319,6 +446,12 @@ async def envelope(job_id: str = "", start_s: float = 0.0, end_s: float = 0.0) -
 
     This is what the Settings screen draws: where the bed drops, by how much,
     and when it comes back up.
+
+    A job that has not been transcribed yet has no timeline, and that is a
+    normal state rather than a missing resource — so the answer is an
+    empty envelope that says so, not a 404. The distinction matters to
+    the browser: a 404 is logged as a failed request, and a job waiting
+    to be processed is not a failure.
     """
     from ..config import load as load_settings
     from ..db import store
@@ -332,16 +465,23 @@ async def envelope(job_id: str = "", start_s: float = 0.0, end_s: float = 0.0) -
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found.")
 
-    timeline_path = job_work_dir(job_id) / "speech_timeline.json"
-    if not timeline_path.is_file():
-        raise HTTPException(
-            status_code=404,
-            detail="This job has no speech timeline yet. Process the video first.",
-        )
-    timeline = SpeechTimeline.load(timeline_path)
-
     settings = load_settings()
     export_settings = settings.export
+
+    timeline_path = job_work_dir(job_id) / "speech_timeline.json"
+    if not timeline_path.is_file():
+        return {
+            "job_id": job_id,
+            "start_s": start_s,
+            "end_s": end_s,
+            "duck_db": export_settings.ducking_amount_db,
+            "points": [],
+            "intervals": [],
+            "state": "not measured yet",
+        }
+
+    timeline = SpeechTimeline.load(timeline_path)
+
     if end_s <= start_s:
         end_s = timeline.duration_s
 
@@ -360,4 +500,5 @@ async def envelope(job_id: str = "", start_s: float = 0.0, end_s: float = 0.0) -
         "duck_db": export_settings.ducking_amount_db,
         "points": [{"t": t, "gain": gain} for t, gain in points],
         "intervals": [interval.to_dict() for interval in timeline.slice(start_s, end_s)],
+        "state": "measured",
     }

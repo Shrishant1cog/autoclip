@@ -174,3 +174,61 @@ async def job_clips(job_id: str):
     from .clips import list_clips_for_job
 
     return await list_clips_for_job(job_id)
+
+
+@router.get("/{job_id}/budget")
+async def job_budget(job_id: str) -> dict:
+    """What the job's AI allowance was, and what it spent.
+
+    The three allowances are reported separately, because they are spent
+    for different reasons: a plan call and its repair happen once, while
+    the music calls happen once per clip.
+
+    A job that has never run reports the allowance it *would* have had,
+    so the screen can say "twelve calls, none spent" rather than
+    pretending the job does not exist.
+    """
+    from ..budget import budget_for
+    from ..db import budget_store
+
+    job = store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    settings = load_settings()
+    existing = budget_store.load(job_id)
+    if existing is not None:
+        return existing.to_dict()
+
+    budget = budget_for(job_id, max_clips=settings.clips.max_clips)
+    payload = budget.to_dict()
+    payload["state"] = "not started"
+    return payload
+
+
+@router.get("/{job_id}/plan")
+async def job_plan(job_id: str) -> dict:
+    """The creative plan for a job, and why any of it was rejected.
+
+    A plan that silently fell back to the deterministic one would read
+    exactly like a plan the model agreed with, so the fallback and the
+    problems are part of the answer.
+    """
+    from ..db import plan_store
+
+    job = store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    payload = plan_store.load(job_id)
+    if payload is None:
+        return {
+            "job_id": job_id,
+            "source": "",
+            "clips": [],
+            "notes": [],
+            "problems": [],
+            "state": "not planned yet",
+        }
+    payload["state"] = "planned"
+    return payload

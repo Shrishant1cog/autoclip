@@ -314,18 +314,27 @@ def test_job_runner_records_a_notification(
         store.replace_clips(job.id, [clip])
         return [clip]
 
-    def fake_reframe(self, clips, transcript):
+    def fake_reframe(self, clips, transcript, creative_result=None):
         return {}
+
+    async def fake_creative(self, clips):
+        from autoclip.pipeline import creative as creative_module
+
+        return runner_module.CreativeResult(
+            plan=creative_module.fallback_plan(clips, reason="test double"),
+            music={},
+        )
 
     monkeypatch.setattr(runner_module.PipelineRunner, "_stage_highlights", fake_highlights)
     monkeypatch.setattr(runner_module.PipelineRunner, "_stage_reframe", fake_reframe)
+    monkeypatch.setattr(runner_module.PipelineRunner, "_stage_creative", fake_creative)
     monkeypatch.setattr(
         runner_module.PipelineRunner, "_stage_captions", lambda self, clips, transcript: None
     )
     monkeypatch.setattr(
         runner_module.PipelineRunner,
         "_stage_export",
-        lambda self, clips, transcript, crop_paths: None,
+        lambda self, clips, transcript, crop_paths, creative_result=None: None,
     )
 
     import asyncio

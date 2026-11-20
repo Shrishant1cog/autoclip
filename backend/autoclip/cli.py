@@ -499,7 +499,10 @@ def clip(
     # --- report ---------------------------------------------------------
     table = Table(title=f"{len(clips)} clips", header_style="bold", title_justify="left")
     table.add_column("#", width=3)
-    table.add_column("Score", width=5)
+    # The score is the model's suggestion about how strong a moment is.
+    # The column says so, because a bare number reads as a measurement
+    # and it is not one.
+    table.add_column("Suggestion", width=9)
     table.add_column("Length", width=7)
     table.add_column("Title")
 
@@ -508,6 +511,10 @@ def clip(
 
     console.print()
     console.print(table)
+    console.print(
+        "\n[dim]The score is the model's suggestion for how strong the moment is. "
+        "It is a creative judgement, not a measured quality number.[/dim]"
+    )
     console.print(f"\n[green]Exported to[/green] {paths.exports_dir() / job.id}")
 
 

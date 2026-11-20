@@ -191,6 +191,11 @@ class DetectionConfig:
     #: vendor has its own default and they differ; one explicit number makes
     #: the cost of a job predictable.
     max_output_tokens: int = 4096
+    #: Which kind of moment to look for, and how much the story is
+    #: favoured over the action. Empty means "no preference" — the
+    #: default, which changes nothing.
+    highlight_style: str = "auto"
+    story_density: float = 0.5
 
 
 @dataclass
@@ -486,10 +491,23 @@ def render_window_prompt(window: TranscriptWindow, config: DetectionConfig) -> s
             f"({', '.join(window.speakers)}); speaker labels are shown inline.\n"
         )
 
+    # The story/action preference, said in words. The model sees the
+    # transcript, not the signals, so the balance has to be named.
+    style_note = ""
+    if config.highlight_style or config.story_density != 0.5:
+        from ..pipeline.intent import style_instruction
+
+        instruction = style_instruction(
+            story_density=config.story_density,
+            highlight_style=config.highlight_style,
+        )
+        if instruction:
+            style_note = f"\n{instruction}\n"
+
     return (
         f"Transcript section, words {window.first_word} to {window.last_word}.\n"
         f"Each word is tagged with its index as [index]word.\n"
-        f"{speaker_note}\n"
+        f"{speaker_note}{style_note}\n"
         f"Clip length must be between {config.min_duration_s:.0f} and "
         f"{config.max_duration_s:.0f} seconds.\n"
         f"Return at most {config.max_clips} clips.\n\n"

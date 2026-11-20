@@ -101,6 +101,18 @@ class ClipSettings(BaseModel):
     min_duration_s: float = 20.0
     max_duration_s: float = 90.0
     max_clips: int = 10
+    #: How much the clips should favour the story over the action, from 0
+    #: (pure action) to 1 (pure story).
+    #:
+    #: This is a **bias in the ranking**, not a quota. Nothing requires
+    #: half the clips to be story and half to be action: a video with no
+    #: action in it produces no action clips. At the default of 0.5 the
+    #: setting changes nothing at all.
+    story_density: float = Field(default=0.5, ge=0.0, le=1.0)
+    #: A coarse switch that overrides ``story_density`` when it is not
+    #: "auto": "story" or "action" is a deliberate statement about which
+    #: kind of moment to look for.
+    highlight_style: Literal["auto", "story", "action"] = "auto"
 
 
 class IngestSettings(BaseModel):

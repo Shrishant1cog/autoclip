@@ -14,6 +14,7 @@ from ..config import load as load_settings
 from ..db import store
 from ..db.models import Export, new_id
 from ..pipeline import captions as captions_module
+from ..pipeline import diagnostics
 from ..pipeline import export as export_module
 from ..pipeline import validate as validate_module
 from ..pipeline.reframe.croppath import CropPath, centre_crop
@@ -360,6 +361,85 @@ async def validate_clip(clip_id: str) -> dict:
         validation=result,
     )
     return {"clip_id": clip_id, "export_id": latest.id, **result}
+
+
+@router.get("/clips/{clip_id}/diagnostics")
+async def clip_diagnostics(clip_id: str) -> dict:
+    """The objective quality measurements for a clip.
+
+    These are measurements, not a score. Each one says what was
+    measured, what the measurement came out as, and — when something is
+    wrong — what to do about it. There is no single quality number,
+    because there is no honest way to fold ten different measurements
+    into one, and a number that looked like a verdict would be a lie.
+    """
+    clip = await asyncio.to_thread(store.get_clip, clip_id)
+    if clip is None:
+        raise HTTPException(status_code=404, detail="Clip not found.")
+
+    if clip.diagnostics:
+        return {"clip_id": clip_id, **clip.diagnostics}
+
+    # The clip has not been measured yet. Measure it now, against its
+    # newest export, so the answer is never "we did not look".
+    exports = await asyncio.to_thread(store.list_exports, clip_id)
+    if not exports:
+        return {
+            "clip_id": clip_id,
+            "ok": False,
+            "state": "not measured yet",
+            "diagnostics": [],
+        }
+
+    latest = exports[-1]
+    job = await asyncio.to_thread(store.get_job, clip.job_id)
+    source = await asyncio.to_thread(store.get_source, job.source_id) if job else None
+
+    # The same inputs the export-time report uses, so a clip measured on
+    # demand is measured exactly as thoroughly as one measured during the
+    # export: the caption words, and the crop the renderer used.
+    words = [
+        Word(text=word.text, start=word.start, end=word.end, speaker=word.speaker)
+        for word in await clip_words(clip_id)
+    ]
+
+    crop_path = await asyncio.to_thread(_crop_path_for_review, clip.job_id, clip.id)
+
+    report = await asyncio.to_thread(
+        diagnostics.diagnose_clip,
+        Path(latest.path),
+        clip_id=clip.id,
+        clips=await asyncio.to_thread(store.list_clips, clip.job_id),
+        words=words,
+        start_s=clip.start_s,
+        end_s=clip.end_s,
+        expected_size=export_module.ratio_dimensions(latest.ratio),
+        source_size=(
+            (source.width, source.height)
+            if source is not None and source.width and source.height
+            else None
+        ),
+        crop_path=crop_path,
+        require_audio=bool(source.has_audio) if source else True,
+    )
+    result = report.to_dict()
+    await asyncio.to_thread(store.update_clip, clip_id, diagnostics=result)
+    return {"clip_id": clip_id, "state": "measured", **result}
+
+
+def _crop_path_for_review(job_id: str, clip_id: str) -> CropPath | None:
+    """The cached crop path for a clip, when the job has one.
+
+    A job that has not reframed yet legitimately has none, and the
+    measurement says so rather than pretending the crop was checked.
+    """
+    cached = JobWorkspace(job_id).crop_path(clip_id)
+    if not cached.exists():
+        return None
+    try:
+        return CropPath.load(cached)
+    except Exception:  # noqa: BLE001 - an unreadable cache is not a failure
+        return None
 
 
 @router.get("/exports/{export_id}/download")

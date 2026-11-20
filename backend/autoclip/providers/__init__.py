@@ -91,4 +91,6 @@ def detection_config(settings: Settings | None = None) -> DetectionConfig:
         max_clips=settings.clips.max_clips,
         language=settings.whisper.language,
         max_output_tokens=settings.resources.max_output_tokens,
+        highlight_style=settings.clips.highlight_style,
+        story_density=settings.clips.story_density,
     )

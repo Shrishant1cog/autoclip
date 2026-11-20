@@ -8,7 +8,7 @@ import pytest
 from autoclip.config import Settings
 from autoclip.db.models import Job, Source
 from autoclip.pipeline import Stage
-from autoclip.pipeline.runner import PipelineRunner, looks_like_auth_failure
+from autoclip.pipeline.runner import STAGE_WEIGHTS, PipelineRunner, looks_like_auth_failure
 
 
 def _runner(settings: Settings) -> PipelineRunner:
@@ -155,7 +155,7 @@ def test_progress_never_goes_backwards(autoclip_home: Path) -> None:
 
     assert overall == sorted(overall)
     # No stage has finished yet, so the bar is this stage's own weight only.
-    assert overall[-1] == pytest.approx(0.23 * 0.7)
+    assert overall[-1] == pytest.approx(STAGE_WEIGHTS[Stage.EXPORT] * 0.7)
 
 
 def test_progress_does_not_exceed_one(autoclip_home: Path) -> None:
@@ -165,6 +165,14 @@ def test_progress_does_not_exceed_one(autoclip_home: Path) -> None:
     runner = _runner(Settings())
     events = []
     runner.on_progress = events.append
+
+    # The export is the last stage, so every stage before it has finished by
+    # the time it runs. The weights are read from the runner rather than
+    # written out here, so a new stage does not silently invalidate the
+    # arithmetic.
+    for stage in Stage:
+        if stage is not Stage.EXPORT:
+            runner._finish_stage(stage)
 
     runner._emit(Stage.EXPORT, 5.0)
 

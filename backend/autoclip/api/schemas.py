@@ -225,6 +225,11 @@ class ClipOut(BaseModel):
     end_word: int
     title: str
     hook: str
+    #: The model's suggestion for how strong the moment is, 0–100.
+    #:
+    #: This is a **creative judgement, not a measured quality number**. It
+    #: is what the clips are ordered by. The measurements live in
+    #: ``diagnostics``, and there is no single quality score anywhere.
     score: int
     reason: str
     status: str
@@ -232,6 +237,15 @@ class ClipOut(BaseModel):
     validation: dict | None = None
     caption_style: str = "bold_pop"
     ratio: str = "9:16"
+    #: The music this clip ended up with. Empty when it has none.
+    music_track_id: str = ""
+    #: Whose choice it was: "user", "ai" or "deterministic".
+    music_source: str = ""
+    #: Why that track was chosen, in plain words.
+    music_reason: str = ""
+    #: The objective quality measurements. These are measurements, not a
+    #: score — there is no single quality number.
+    diagnostics: dict | None = None
     exports: list[ExportOut] = Field(default_factory=list)
 
     @classmethod
@@ -262,6 +276,10 @@ class ClipOut(BaseModel):
             validation=clip.validation,
             caption_style=edit.caption_style if edit else "bold_pop",
             ratio=edit.ratio if edit else "9:16",
+            music_track_id=clip.music_track_id,
+            music_source=clip.music_source,
+            music_reason=clip.music_reason,
+            diagnostics=clip.diagnostics,
             exports=[ExportOut.of(e, uploads=uploads.get(e.id, [])) for e in (exports or [])],
         )
 

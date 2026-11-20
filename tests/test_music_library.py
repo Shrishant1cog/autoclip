@@ -534,6 +534,7 @@ def test_the_envelope_route_draws_the_timeline(tmp_path: Path, initialised_db: i
     assert response.status_code == 200
     body = response.json()
     assert body["job_id"] == job_id
+    assert body["state"] == "measured"
     assert len(body["intervals"]) == 1
     assert body["intervals"][0]["start_ms"] == 1000
     assert body["points"]
@@ -551,7 +552,12 @@ def test_the_envelope_route_needs_a_job(tmp_path: Path, initialised_db: int):
 
 
 def test_the_envelope_route_says_when_there_is_no_timeline(tmp_path: Path, initialised_db: int):
-    """A job that has not been processed yet has nothing to draw."""
+    """A job that has not been processed yet has nothing to draw.
+
+    That is a normal state, not a missing resource, so the answer is a
+    200 with an empty envelope that says why. A browser logs a 404 as a
+    failed request, and a job waiting to be transcribed is not a failure.
+    """
     from autoclip.app import create_app
     from autoclip.db import store
     from autoclip.db.models import Job, Source, new_id
@@ -564,8 +570,12 @@ def test_the_envelope_route_says_when_there_is_no_timeline(tmp_path: Path, initi
     with TestClient(create_app()) as client:
         response = client.get(f"/api/music/envelope?job_id={job_id}")
 
-    assert response.status_code == 404
-    assert "speech timeline" in response.json()["detail"].lower()
+    assert response.status_code == 200
+    body = response.json()
+    assert body["state"] == "not measured yet"
+    assert body["points"] == []
+    assert body["intervals"] == []
+    assert body["job_id"] == job_id
 
 
 # --------------------------------------------------------------------------
