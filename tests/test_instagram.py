@@ -1929,7 +1929,7 @@ def test_the_settings_report_the_app_secret_without_its_value(
     assert "the-secret" not in client.get("/api/settings").text
 
 
-def test_the_app_secret_can_be_stored(client: TestClient) -> None:
+def test_the_app_secret_can_be_stored(client: TestClient, fake_keyring: Any) -> None:
     response = client.put(
         "/api/settings/secrets",
         json={"key": config.INSTAGRAM_APP_SECRET_KEY, "value": "the-secret"},
