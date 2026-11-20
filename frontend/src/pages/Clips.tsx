@@ -223,6 +223,7 @@ function ClipLibraryRow({
       style={{ animationDelay: `${Math.min(index, 12) * 30}ms` }}
     >
       <span
+        title="The model's suggestion for how strong this moment is. A creative judgement, not a measured quality score."
         className={[
           'numeric self-start font-display text-2xl leading-none',
           clip.score >= 85 ? 'text-sodium-500' : 'text-ink-500',

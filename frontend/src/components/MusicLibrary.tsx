@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import {
   api,
+  ApiError,
   type LicenseState,
   type MusicEnvelope,
   type MusicFolder,
+  type MusicFormat,
   type MusicLibraryTrack,
   type MusicScanReport,
 } from '../api'
@@ -54,13 +56,17 @@ const MOODS = ['', 'calm', 'mellow', 'warm', 'driving', 'energetic', 'uplifting'
 export function MusicLibrary({ onError }: { onError: (error: Error) => void }) {
   const [tracks, setTracks] = useState<MusicLibraryTrack[]>([])
   const [folders, setFolders] = useState<MusicFolder[]>([])
+  const [formats, setFormats] = useState<MusicFormat[]>([])
   const [report, setReport] = useState<MusicScanReport | null>(null)
   const [query, setQuery] = useState('')
   const [mood, setMood] = useState('')
   const [licence, setLicence] = useState('')
+  const [format, setFormat] = useState('')
   const [favouriteOnly, setFavouriteOnly] = useState(false)
   const [minBpm, setMinBpm] = useState('')
   const [maxBpm, setMaxBpm] = useState('')
+  const [minEnergy, setMinEnergy] = useState('')
+  const [maxEnergy, setMaxEnergy] = useState('')
   const [newFolder, setNewFolder] = useState('')
   const [busy, setBusy] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -79,10 +85,22 @@ export function MusicLibrary({ onError }: { onError: (error: Error) => void }) {
     void reload()
   }, [reload])
 
+  useEffect(() => {
+    // The formats are the measured descriptions of the shapes a track
+    // can have. A server older than M3 does not have them, and the
+    // filter simply stays hidden.
+    api
+      .musicFormats()
+      .then(setFormats)
+      .catch(() => setFormats([]))
+  }, [])
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
     const min = minBpm ? Number(minBpm) : undefined
     const max = maxBpm ? Number(maxBpm) : undefined
+    const lowEnergy = minEnergy ? Number(minEnergy) : undefined
+    const highEnergy = maxEnergy ? Number(maxEnergy) : undefined
 
     return tracks.filter((track) => {
       if (needle) {
@@ -102,9 +120,23 @@ export function MusicLibrary({ onError }: { onError: (error: Error) => void }) {
       if (favouriteOnly && !track.favourite) return false
       if (min !== undefined && track.analysis.bpm && track.analysis.bpm < min) return false
       if (max !== undefined && track.analysis.bpm && track.analysis.bpm > max) return false
+      if (lowEnergy !== undefined && track.analysis.energy < lowEnergy) return false
+      if (highEnergy !== undefined && track.analysis.energy > highEnergy) return false
+      if (format && !(track.formats ?? []).includes(format)) return false
       return true
     })
-  }, [tracks, query, mood, licence, favouriteOnly, minBpm, maxBpm])
+  }, [
+    tracks,
+    query,
+    mood,
+    licence,
+    favouriteOnly,
+    minBpm,
+    maxBpm,
+    minEnergy,
+    maxEnergy,
+    format,
+  ])
 
   const run = async (key: string, action: () => Promise<unknown>) => {
     setBusy(key)
@@ -135,6 +167,7 @@ export function MusicLibrary({ onError }: { onError: (error: Error) => void }) {
   const blockedCount = tracks.filter(
     (track) => track.license.state === 'incompatible' || track.license.state === 'expired',
   ).length
+  const chosenFormat = formats.find((entry) => entry.value === format) ?? null
 
   return (
     <div className="space-y-6">
@@ -256,6 +289,31 @@ export function MusicLibrary({ onError }: { onError: (error: Error) => void }) {
           </select>
         </label>
 
+        {formats.length > 0 && (
+          <label className="block">
+            <span className="eyebrow">Shape</span>
+            <select
+              className="field mt-1 cursor-pointer text-sm"
+              value={format}
+              onChange={(e) => setFormat(e.target.value)}
+            >
+              <option value="" className="bg-ink-850">
+                Any
+              </option>
+              {formats.map((entry) => (
+                <option key={entry.value} value={entry.value} className="bg-ink-850">
+                  {entry.title}
+                </option>
+              ))}
+            </select>
+            {chosenFormat && (
+              <span className="mt-1.5 block text-xs leading-snug text-ink-500">
+                {chosenFormat.description} Measured as {chosenFormat.measured}.
+              </span>
+            )}
+          </label>
+        )}
+
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
             <span className="eyebrow">BPM from</span>
@@ -275,6 +333,35 @@ export function MusicLibrary({ onError }: { onError: (error: Error) => void }) {
               value={maxBpm}
               placeholder="180"
               onChange={(e) => setMaxBpm(e.target.value)}
+            />
+          </label>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="eyebrow">Energy from</span>
+            <input
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              className="field numeric mt-1 text-sm"
+              value={minEnergy}
+              placeholder="0.00"
+              onChange={(e) => setMinEnergy(e.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="eyebrow">Energy to</span>
+            <input
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              className="field numeric mt-1 text-sm"
+              value={maxEnergy}
+              placeholder="1.00"
+              onChange={(e) => setMaxEnergy(e.target.value)}
             />
           </label>
         </div>
@@ -347,6 +434,14 @@ export function MusicLibrary({ onError }: { onError: (error: Error) => void }) {
                 <p className="mt-3 text-xs text-ink-600">Not measured yet.</p>
               )}
 
+              {(track.formats ?? []).length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {(track.formats ?? []).map((value) => (
+                    <FormatChip key={value} value={value} formats={formats} />
+                  ))}
+                </div>
+              )}
+
               <div className="mt-3 flex flex-wrap items-center gap-3">
                 <button
                   onClick={() =>
@@ -409,6 +504,21 @@ export function MusicLibrary({ onError }: { onError: (error: Error) => void }) {
 
       <DuckingPreview onError={onError} />
     </div>
+  )
+}
+
+function FormatChip({ value, formats }: { value: string; formats: MusicFormat[] }) {
+  const entry = formats.find((format) => format.value === value)
+  // The chip says what the shape is, and the tooltip says what was
+  // measured — because a name on its own is a claim, and the number
+  // behind it is the fact.
+  return (
+    <span
+      title={entry ? `${entry.description} Measured as ${entry.measured}.` : value}
+      className="border border-ink-700 px-1.5 py-0.5 text-[0.6875rem] text-ink-400"
+    >
+      {entry?.title ?? value}
+    </span>
   )
 }
 
@@ -581,6 +691,12 @@ function DuckingPreview({ onError }: { onError: (error: Error) => void }) {
       .then(setEnvelope)
       .catch((err) => {
         setEnvelope(null)
+        // A job that has not been transcribed yet is a normal state, not
+        // a failure. It gets a sentence, not an error banner.
+        if (err instanceof ApiError && err.status === 404) {
+          setNote('This job has no speech timeline yet. Process the video first.')
+          return
+        }
         setNote((err as Error).message)
         onError(err as Error)
       })
@@ -599,7 +715,11 @@ function DuckingPreview({ onError }: { onError: (error: Error) => void }) {
 
   const width = 640
   const height = 90
-  const points = envelope?.points ?? []
+  // The server answers a job with no timeline with an empty envelope that
+  // says so. That is a normal state — nothing to draw yet — and it gets
+  // a sentence rather than a graph with no line on it.
+  const measured = envelope !== null && envelope.state !== 'not measured yet'
+  const points = measured ? (envelope?.points ?? []) : []
   const span = envelope ? Math.max(0.001, envelope.end_s - envelope.start_s) : 1
 
   const path = points
@@ -629,7 +749,7 @@ function DuckingPreview({ onError }: { onError: (error: Error) => void }) {
         </select>
       </div>
 
-      {envelope ? (
+      {measured && envelope ? (
         <>
           <svg
             viewBox={`0 0 ${width} ${height}`}
@@ -661,7 +781,10 @@ function DuckingPreview({ onError }: { onError: (error: Error) => void }) {
         </>
       ) : (
         <p className="mt-3 text-xs text-ink-500">
-          {note || 'No speech timeline for this video yet.'}
+          {note ||
+            (envelope?.state === 'not measured yet'
+              ? 'This job has no speech timeline yet. Process the video first.'
+              : 'No speech timeline for this video yet.')}
         </p>
       )}
     </div>

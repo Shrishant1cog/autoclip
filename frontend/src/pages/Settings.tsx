@@ -12,6 +12,7 @@ import {
 } from '../api'
 import { ErrorNote } from '../components/ErrorNote'
 import { MusicLibrary } from '../components/MusicLibrary'
+import { MusicPreference } from '../components/MusicPreference'
 import { LayoutSettings } from '../components/LayoutSettings'
 
 const SECRET_LABELS: Record<string, string> = {
@@ -293,6 +294,49 @@ export function Settings() {
             onCommit={(value) => patch({ clips: { ...settings.clips, max_clips: value } })}
           />
         </div>
+
+        <div className="mt-8 border-t border-ink-800 pt-6">
+          <h3 className="text-sm text-ink-100">Story and gameplay</h3>
+          <p className="mt-1 max-w-prose text-xs leading-relaxed text-ink-500">
+            A bias in the ranking, not a quota. Nothing requires half the clips to be story and
+            half to be action: a video with no action in it produces no action clips. At the
+            middle setting nothing changes at all.
+          </p>
+
+          <div className="mt-4 grid gap-5 sm:grid-cols-2">
+            <Select
+              label="Highlight style"
+              hint="A deliberate choice about which kind of moment to look for."
+              value={settings.clips.highlight_style ?? 'auto'}
+              onChange={(value) =>
+                patch({
+                  clips: {
+                    ...settings.clips,
+                    highlight_style: value as 'auto' | 'story' | 'action',
+                  },
+                })
+              }
+              options={['auto', 'story', 'action']}
+              labels={{
+                auto: 'Automatic (use the balance below)',
+                story: 'Story — the moment that explains something',
+                action: 'Action — the moment something happens',
+              }}
+            />
+            <NumberField
+              label="Story balance (0 action – 1 story)"
+              value={settings.clips.story_density ?? 0.5}
+              onCommit={(value) =>
+                patch({
+                  clips: {
+                    ...settings.clips,
+                    story_density: Math.max(0, Math.min(1, value)),
+                  },
+                })
+              }
+            />
+          </div>
+        </div>
       </Section>
 
       <Section
@@ -558,6 +602,13 @@ export function Settings() {
         title="Music library"
         note="Your music, indexed where it already is — never copied, moved or deleted."
       >
+        <div className="mb-8 max-w-prose border-l-2 border-ink-700 pl-4">
+          <MusicPreference scope="global" onError={setError} />
+          <p className="mt-2 text-xs leading-relaxed text-ink-500">
+            The default for every clip. A clip can override it, and a single video can override
+            the default for all of its clips, without disturbing either.
+          </p>
+        </div>
         <MusicLibrary onError={setError} />
       </Section>
 

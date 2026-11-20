@@ -12,8 +12,11 @@ import {
   type Word,
 } from '../api'
 import { CaptionEditor } from '../components/CaptionEditor'
+import { ClipDiagnosticsPanel } from '../components/ClipDiagnosticsPanel'
 import { ClipPlayer } from '../components/ClipPlayer'
 import { ErrorNote } from '../components/ErrorNote'
+import { JobPlanPanel } from '../components/JobPlanPanel'
+import { MusicPreference } from '../components/MusicPreference'
 import { TrimBar } from '../components/TrimBar'
 
 const RATIOS = ['9:16', '1:1', '16:9'] as const
@@ -29,6 +32,7 @@ export function Review() {
   const [wordsDirty, setWordsDirty] = useState(false)
   const [savingWords, setSavingWords] = useState(false)
   const [exporting, setExporting] = useState<Set<string>>(new Set())
+  const [showPlan, setShowPlan] = useState(false)
   const [error, setError] = useState<Error | null>(null)
 
   useEffect(() => {
@@ -177,6 +181,22 @@ export function Review() {
         </div>
       )}
 
+      {jobId && (
+        <div className="mt-6">
+          <button
+            onClick={() => setShowPlan((current) => !current)}
+            className="btn btn-quiet text-xs"
+          >
+            {showPlan ? 'Hide the plan and the call budget' : 'Show the plan and the call budget'}
+          </button>
+          {showPlan && (
+            <div className="mt-4 max-w-3xl border border-ink-800 p-5">
+              <JobPlanPanel jobId={jobId} />
+            </div>
+          )}
+        </div>
+      )}
+
       {clips.length === 0 ? (
         <EmptyState />
       ) : (
@@ -184,7 +204,12 @@ export function Review() {
           {/* Ranked list */}
           <section className="lg:max-h-[76vh] lg:overflow-y-auto lg:pr-1">
             <p className="eyebrow border-b border-ink-800 pb-2">Ranked</p>
-            <ul>
+            <p className="mt-2 text-xs leading-snug text-ink-500">
+              The number is the model&rsquo;s suggestion for how strong the moment is. It is a
+              creative judgement, not a measured quality score — the measurements are on the
+              right, under Measurements.
+            </p>
+            <ul className="mt-2">
               {clips.map((clip, index) => (
                 <li key={clip.id}>
                   <ClipRow
@@ -298,6 +323,40 @@ export function Review() {
                 </div>
 
                 <div className="border-t border-ink-800 pt-6">
+                  <p className="eyebrow border-b border-ink-800 pb-2">Music</p>
+                  {selected.music_track_id ? (
+                    <p className="mt-2 text-xs leading-relaxed text-ink-400">
+                      <span className="text-ink-200">
+                        {selected.music_source === 'user'
+                          ? 'Your choice'
+                          : selected.music_source === 'ai'
+                            ? 'The model’s choice'
+                            : 'Chosen from the measurements'}
+                      </span>
+                      {selected.music_reason ? ` — ${selected.music_reason}` : ''}
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-xs leading-relaxed text-ink-500">
+                      No music on this clip.
+                    </p>
+                  )}
+                  <div className="mt-4">
+                    <MusicPreference scope="clip" scopeId={selected.id} onError={setError} />
+                  </div>
+                </div>
+
+                <div className="border-t border-ink-800 pt-6">
+                  <p className="eyebrow border-b border-ink-800 pb-2">Measurements</p>
+                  <p className="mt-2 text-xs leading-relaxed text-ink-500">
+                    What was measured on the rendered file. There is no single quality number,
+                    because there is no honest way to fold ten different measurements into one.
+                  </p>
+                  <div className="mt-3">
+                    <ClipDiagnosticsPanel clipId={selected.id} />
+                  </div>
+                </div>
+
+                <div className="border-t border-ink-800 pt-6">
                   <button
                     onClick={() => exportClip(selected)}
                     disabled={exporting.has(selected.id)}
@@ -367,8 +426,11 @@ function ClipRow({
         if (e.key === 'Enter') onSelect()
       }}
     >
-      {/* The score is the thing you scan by, so it gets the display face. */}
+      {/* The score is the thing you scan by, so it gets the display face.
+          It is the model's suggestion, not a measured quality number, and
+          the tooltip says so — a bare number invites the wrong reading. */}
       <span
+        title="The model's suggestion for how strong this moment is. A creative judgement, not a measured quality score."
         className={[
           'numeric self-start font-display text-2xl leading-none',
           clip.score >= 85 ? 'text-sodium-500' : selected ? 'text-ink-200' : 'text-ink-500',

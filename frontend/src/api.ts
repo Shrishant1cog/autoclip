@@ -86,11 +86,49 @@ export interface Clip {
   user_trimmed: boolean
   caption_style: string
   ratio: string
+  /** The music this clip ended up with. Empty when it has none. */
+  music_track_id: string
+  /** Whose choice it was: "user", "ai" or "deterministic". */
+  music_source: string
+  /** Why that track was chosen, in plain words. */
+  music_reason: string
+  /**
+   * The objective quality measurements.
+   *
+   * These are measurements, not a score: there is no single quality
+   * number, because there is no honest way to fold ten different
+   * measurements into one.
+   */
+  diagnostics: ClipDiagnostics | null
   exports: ExportRecord[]
   validation: {
     ok: boolean
     checks: { name: string; ok: boolean; detail: string }[]
   } | null
+}
+
+/** One measurement from the objective quality report. */
+export interface ClipDiagnostic {
+  name: string
+  title: string
+  ok: boolean
+  /** What was measured, in words or as a number. */
+  measured: string
+  /** The problem, in a sentence. Empty when the measurement is fine. */
+  detail: string
+  /**
+   * False when the measurement could not be made. An unmeasurable thing
+   * is not the same as a correct one, and the two are never conflated.
+   */
+  available: boolean
+}
+
+/** The objective quality report for one clip. */
+export interface ClipDiagnostics {
+  ok: boolean
+  diagnostics: ClipDiagnostic[]
+  /** Present when the report was made on demand rather than at export. */
+  state?: string
 }
 
 /** A clip in the cross-job library, with the context needed to group it. */
@@ -169,7 +207,14 @@ export interface Settings {
     voiceover: 'off' | 'muxed'
     voice_id: string
   }
-  clips: { min_duration_s: number; max_duration_s: number; max_clips: number }
+  clips: {
+    min_duration_s: number
+    max_duration_s: number
+    max_clips: number
+    /** Absent on a server older than M3. */
+    story_density?: number
+    highlight_style?: 'auto' | 'story' | 'action'
+  }
   ingest: {
     ytdlp_format: string
     cookies_from_browser: string
@@ -563,6 +608,13 @@ export interface MusicLibraryTrack {
   license_allowed: boolean
   license_reason: string
   license_warnings: string[]
+  /**
+   * The shapes this track has, derived from the measurements.
+   *
+   * A track carries more than one: a short, sparse, steady loop is
+   * three things at once. Absent on a server older than M3.
+   */
+  formats?: string[]
 }
 
 export interface MusicFolder {
@@ -592,6 +644,8 @@ export interface MusicEnvelope {
     source: string
     speaker: string | null
   }[]
+  /** "not measured yet" when the job has no speech timeline. */
+  state?: string
 }
 
 /** The filters the library can be narrowed by. */
@@ -600,9 +654,126 @@ export interface MusicFilters {
   mood?: string
   min_bpm?: number
   max_bpm?: number
+  /** Absent on a server older than M3. */
+  min_energy?: number
+  max_energy?: number
+  format?: string
   licence?: string
   favourite?: boolean
   tag?: string
+}
+
+// -- Creative intelligence (M3) ------------------------------------------------
+
+/**
+ * A shape a track can have, derived from the measurements.
+ *
+ * The name is a measurement, not a mood: "steady" means the beat
+ * regularity is at least 0.55, and the `measured` line says so.
+ */
+export interface MusicFormat {
+  value: string
+  title: string
+  description: string
+  /** The measurement the name comes from, in plain words. */
+  measured: string
+}
+
+/** One stored music choice, at one scope. */
+export interface MusicPreference {
+  scope: 'global' | 'source' | 'clip'
+  scope_id: string
+  /** The chosen track. Empty when nothing is chosen here. */
+  track_id: string
+  /** True when this scope says "no music at all". */
+  none: boolean
+  updated_at: string
+}
+
+/**
+ * The music choice that applies, and where it came from.
+ *
+ * The scopes are separate: a clip's choice survives the source's choice
+ * being changed, and clearing one scope does not clear another. The most
+ * specific scope wins.
+ */
+export interface MusicPreferences {
+  clip_id: string
+  source_id: string
+  /** The effective choice. Empty when the automatic selection applies. */
+  track_id: string
+  /** True when the effective choice is "no music at all". */
+  none: boolean
+  /** Which scope the effective choice came from. Empty when none applies. */
+  scope: string
+  global: MusicPreference
+  source: MusicPreference
+  clip: MusicPreference
+}
+
+/** One allowance and what it spent. */
+export interface BudgetAllowance {
+  max_calls: number
+  used: number
+  remaining: number
+  /** The reasons a call was refused, in the order they happened. */
+  overruns: string[]
+}
+
+/**
+ * What a job's AI allowance was, and what it spent.
+ *
+ * The three allowances are reported separately because they are spent
+ * for different reasons: a plan call and its repair happen once, while
+ * the music calls happen once per clip.
+ */
+export interface JobBudget {
+  job_id: string
+  plan: BudgetAllowance
+  repair: BudgetAllowance
+  music: BudgetAllowance
+  total_limit: number
+  total_used: number
+  remaining: number
+  /** The refusals, each with the allowance it belongs to. */
+  overruns: { category: string; reason: string }[]
+  user_approved_overrides: boolean
+  updated_at: string
+  /** "not started" when the job has never run. */
+  state?: string
+}
+
+/** What the plan says about one clip. */
+export interface PlanDirection {
+  clip_id: string
+  layout: string
+  crop: string
+  caption_strategy: string
+  music_track_id: string
+  ducking_db: number
+  transition: string
+  reason: string
+}
+
+/**
+ * The creative plan for a job.
+ *
+ * `source` is "ai" when the model's answer validated and "fallback"
+ * when the deterministic plan was used instead. The fallback and the
+ * problems are part of the answer: a plan that silently fell back would
+ * read exactly like a plan the model agreed with.
+ */
+export interface JobPlan {
+  job_id: string
+  source: string
+  clips: PlanDirection[]
+  export_ratio: string
+  export_settings: Record<string, unknown>
+  notes: string[]
+  problems: string[]
+  music_verified: boolean
+  /** "not planned yet" when the job has no plan. */
+  state?: string
 }
 
 // -- Webcam layouts (M2) ------------------------------------------------------
@@ -1031,6 +1202,9 @@ export const api = {
     if (filters.mood) query.set('mood', filters.mood)
     if (filters.min_bpm !== undefined) query.set('min_bpm', String(filters.min_bpm))
     if (filters.max_bpm !== undefined) query.set('max_bpm', String(filters.max_bpm))
+    if (filters.min_energy !== undefined) query.set('min_energy', String(filters.min_energy))
+    if (filters.max_energy !== undefined) query.set('max_energy', String(filters.max_energy))
+    if (filters.format) query.set('format', filters.format)
     if (filters.licence) query.set('licence', filters.licence)
     if (filters.favourite) query.set('favourite', 'true')
     if (filters.tag) query.set('tag', filters.tag)
@@ -1086,6 +1260,56 @@ export const api = {
     request<MusicEnvelope>(
       `/api/music/envelope?job_id=${encodeURIComponent(jobId)}&start_s=${startS}&end_s=${endS}`,
     ),
+
+  // -- Creative intelligence (M3) ---------------------------------------------
+
+  /** The shapes a track can be filtered by, with the measurement behind each. */
+  musicFormats: () => request<MusicFormat[]>('/api/music/formats'),
+
+  /** The music choice that applies, and where it came from. */
+  musicPreferences: (clipId = '', sourceId = '') => {
+    const query = new URLSearchParams()
+    if (clipId) query.set('clip_id', clipId)
+    if (sourceId) query.set('source_id', sourceId)
+    const suffix = query.toString()
+    return request<MusicPreferences>(`/api/music/preferences${suffix ? `?${suffix}` : ''}`)
+  },
+
+  /**
+   * Record the music choice at one scope.
+   *
+   * An empty track id clears the scope. The sentinel `__none__` means
+   * "no music at all", which is a different answer from "no preference
+   * here".
+   */
+  putMusicPreference: (
+    scope: 'global' | 'source' | 'clip',
+    scopeId: string,
+    trackId: string,
+  ) =>
+    request<MusicPreference>('/api/music/preferences', {
+      method: 'PUT',
+      body: JSON.stringify({ scope, scope_id: scopeId, track_id: trackId }),
+    }),
+
+  /** Forget one scope's preference. The other scopes are untouched. */
+  clearMusicPreference: (scope: 'global' | 'source' | 'clip', scopeId = '') => {
+    const query = new URLSearchParams({ scope })
+    if (scopeId) query.set('scope_id', scopeId)
+    return request<MusicPreference>(`/api/music/preferences?${query.toString()}`, {
+      method: 'DELETE',
+    })
+  },
+
+  /** What a job's AI allowance was, and what it spent. */
+  jobBudget: (jobId: string) => request<JobBudget>(`/api/jobs/${encodeURIComponent(jobId)}/budget`),
+
+  /** The creative plan for a job, and why any of it was rejected. */
+  jobPlan: (jobId: string) => request<JobPlan>(`/api/jobs/${encodeURIComponent(jobId)}/plan`),
+
+  /** The objective quality measurements for a clip. */
+  clipDiagnostics: (clipId: string) =>
+    request<ClipDiagnostics>(`/api/clips/${encodeURIComponent(clipId)}/diagnostics`),
 
   // -- External processing (M0.5) ---------------------------------------------
   listConsents: () => request<PrivacyOperation[]>('/api/privacy/consents'),
