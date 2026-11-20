@@ -56,19 +56,28 @@ jobs:
         # "libass": not every build prints its configure line, and Homebrew's
         # does not. The filter is what the export stage actually calls.
         #
-        # The output is captured into a variable rather than piped, because
-        # `grep -q` exits on its first match and SIGPIPEs ffmpeg — and GitHub
-        # runs these steps with `set -o pipefail`, which turns that into a
-        # failed step even when the filter is present.
+        # The output is captured into a variable and matched by bash itself,
+        # rather than piped into `grep -q`. A `producer | grep -q` pipeline
+        # is a trap: grep exits the moment it finds a match, the producer
+        # then gets SIGPIPE, and GitHub runs these steps with
+        # `set -o pipefail`, which turns that broken pipe into a failed
+        # step.
+        #
+        # That is not hypothetical. The ffmpeg 8 build on the Ubuntu runner
+        # has a filter list large enough to fill the pipe, so `printf` was
+        # still writing when `grep -q` exited — and CI reported that an
+        # ffmpeg with the `ass` filter did not have one. The check itself
+        # is unchanged; only the way the answer is read is.
         run: |
-          ffmpeg -hide_banner -version | head -n 1
+          version="$(ffmpeg -hide_banner -version 2>&1 || true)"
+          echo "${version%%$'\n'*}"
           filters="$(ffmpeg -hide_banner -filters 2>/dev/null || true)"
-          if printf '%s\n' "$filters" | grep -qE '[[:space:]]ass[[:space:]]'; then
+          if [[ "$filters" =~ (^|[[:space:]])ass([[:space:]]|$) ]]; then
             echo "ass filter present"
           else
             echo "::error::This ffmpeg has no 'ass' filter; captions cannot be burned in."
             echo "--- subtitle-related filters this build does have ---"
-            printf '%s\n' "$filters" | grep -iE 'subtitle|ass|text' || echo "(none)"
+            grep -iE 'subtitle|ass|text' <<< "$filters" || echo "(none)"
             exit 1
           fi
 
