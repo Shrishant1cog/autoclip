@@ -17,6 +17,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .. import paths, resources
 from ..config import Settings
@@ -28,7 +29,18 @@ from ..providers import LLMProvider, build_provider, detection_config
 from ..providers.base import looks_like_auth_failure, looks_like_transient_failure
 from ..speech import LocalWhisperSTT
 from ..speech import base as speech
-from . import Stage, captions, export, ffmpeg, highlights, ingest, prepare, transcribe, validate
+from . import (
+    Stage,
+    captions,
+    export,
+    ffmpeg,
+    highlights,
+    ingest,
+    prepare,
+    speech_timeline,
+    transcribe,
+    validate,
+)
 from .prepare import Silence
 from .reframe import ReframeConfig, build_crop_path
 from .reframe.croppath import CropPath
@@ -132,6 +144,15 @@ class JobWorkspace:
     @property
     def silences(self) -> Path:
         return self.root / "silences.json"
+
+    @property
+    def speech_timeline(self) -> Path:
+        """The shared speech timeline for this source video.
+
+        Built once, after the transcript exists, and reused by every
+        downstream stage that needs to know when someone is speaking.
+        """
+        return self.root / "speech_timeline.json"
 
     @property
     def thumbnails(self) -> Path:
@@ -440,8 +461,40 @@ class PipelineRunner:
             )
         )
 
+        # The shared speech timeline is built once here, from the transcript
+        # and the prepared audio, and every later stage reads it. Two stages
+        # asking "is someone speaking?" must get the same answer, so there is
+        # one detector and one artifact.
+        self._build_speech_timeline(audio, transcript)
+
         self._finish_stage(stage)
         return transcript
+
+    def _build_speech_timeline(self, audio: Path, transcript: Transcript) -> None:
+        """Measure when speech happens, once per job."""
+        if self.workspace.speech_timeline.exists():
+            return
+        try:
+            timeline = speech_timeline.build_timeline(audio, transcript)
+        except Exception:  # noqa: BLE001 - a missing timeline must not fail a job
+            log.warning("Could not build the speech timeline.", exc_info=True)
+            return
+        timeline.save(self.workspace.speech_timeline)
+        log.info(
+            "Speech timeline: %d interval(s) over %.1fs.",
+            len(timeline.intervals),
+            timeline.duration_s,
+        )
+
+    def _load_speech_timeline(self) -> speech_timeline.SpeechTimeline | None:
+        """The shared speech timeline, when it was built."""
+        if not self.workspace.speech_timeline.exists():
+            return None
+        try:
+            return speech_timeline.SpeechTimeline.load(self.workspace.speech_timeline)
+        except Exception:  # noqa: BLE001 - a broken artifact is not fatal
+            log.warning("Could not read the speech timeline.", exc_info=True)
+            return None
 
     def _load_or_detect_silences(self, audio: Path) -> list[Silence]:
         if self.workspace.silences.exists():
@@ -637,6 +690,11 @@ class PipelineRunner:
         destination_dir = paths.exports_dir() / self.job.id
         destination_dir.mkdir(parents=True, exist_ok=True)
 
+        # The shared speech timeline, sliced per clip. The music ducking and
+        # the webcam layout both read this, so they agree on when the
+        # speaker is talking.
+        timeline = self._load_speech_timeline()
+
         for index, clip in enumerate(clips):
             self._check_cancelled()
 
@@ -655,6 +713,9 @@ class PipelineRunner:
                 words=words,
                 style=style,
                 ratio=ratio,
+                speech_intervals=(
+                    timeline.slice(clip.start_s, clip.end_s) if timeline is not None else []
+                ),
             )
 
             def clip_progress(fraction: float, i: int = index) -> None:
@@ -690,22 +751,29 @@ class PipelineRunner:
                 min_duration_s=self.settings.clips.min_duration_s,
                 max_duration_s=self.settings.clips.max_duration_s,
             )
-            combined = report.to_dict()
-            combined["checks"] = combined["checks"] + [
-                {"name": c.name, "ok": c.ok, "detail": c.detail} for c in bounds
-            ]
-            combined["ok"] = report.ok and all(c.ok for c in bounds)
+            # The clip's own checks and the boundary checks, in one report.
+            # The shape is the same as ValidationReport.to_dict(), with the
+            # boundary checks appended.
+            all_checks = [*report.checks, *bounds]
+            combined: dict[str, Any] = {
+                "ok": report.ok and all(c.ok for c in bounds),
+                "checks": [{"name": c.name, "ok": c.ok, "detail": c.detail} for c in all_checks],
+                "duration_s": report.duration_s,
+                "width": report.width,
+                "height": report.height,
+            }
             store.update_clip(
                 clip.id,
                 status="exported" if combined["ok"] else "invalid",
                 validation=combined,
             )
             if not combined["ok"]:
+                failed = [c for c in all_checks if not c.ok]
                 log.warning(
                     "Clip %s failed validation for job %s: %s",
                     clip.id,
                     self.job.id,
-                    "; ".join(c["name"] for c in combined["checks"] if not c["ok"]),
+                    "; ".join(f"{c.name}: {c.detail}" for c in failed),
                 )
 
             record = Export(

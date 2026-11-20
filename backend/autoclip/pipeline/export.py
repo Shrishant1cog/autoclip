@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import resources
@@ -21,6 +21,7 @@ from . import captions as captions_module
 from . import ffmpeg
 from .captions import CaptionStyle
 from .reframe.croppath import CropPath, segment_crop_filter
+from .speech_timeline import SpeechInterval
 from .transcript import Word
 
 log = logging.getLogger(__name__)
@@ -57,6 +58,11 @@ class ExportRequest:
     style: CaptionStyle
     ratio: str = "9:16"
     burn_captions: bool = True
+    #: The speech intervals inside this clip, in clip-relative milliseconds.
+    #: They come from the shared speech timeline, so the music ducking and the
+    #: webcam layout agree on when someone is speaking. Empty means "no
+    #: timeline", and the ducking falls back to keying on the audio itself.
+    speech_intervals: list[SpeechInterval] = field(default_factory=list)
 
     @property
     def duration_s(self) -> float:
@@ -181,22 +187,120 @@ def build_audio_filtergraph(settings: ExportSettings) -> str:
     return f"loudnorm=I={settings.loudness_lufs}:TP={LOUDNESS_TRUE_PEAK}:LRA={LOUDNESS_RANGE}"
 
 
+def _ducking_expression(
+    start_s: float, end_s: float, floor: float, attack_s: float, release_s: float
+) -> str:
+    """An FFmpeg expression for the ducking gain over one speech interval.
+
+    The shape is a smooth attack, a hold at the ducked level, and a smooth
+    recovery that finishes *at* the end of the interval. A merged interval
+    therefore recovers exactly once, no matter how many words it contains,
+    and the gain is back at 1.0 by the time the filter is switched off — so
+    there is no click at the boundary.
+
+    An interval shorter than the attack and the release together gets a
+    triangle: down over the first half, up over the second. It still starts
+    and ends at 1.0.
+    """
+    total = max(1e-6, end_s - start_s)
+    half = total / 2.0
+    attack_end = start_s + min(attack_s, half)
+    release_start = max(attack_end, end_s - min(release_s, half))
+    # The recovery completes exactly at the interval's end.
+    span = max(1e-6, end_s - release_start)
+
+    if release_start <= attack_end + 1e-6:
+        # The interval is shorter than the attack and the release together:
+        # a single triangle is the honest shape.
+        return (
+            f"if(lt(t,{attack_end:.4f}),"
+            f"1+({floor:.6f}-1)*(t-{start_s:.4f})/{max(1e-6, attack_end - start_s):.4f},"
+            f"{floor:.6f}+(1-{floor:.6f})*(t-{release_start:.4f})/{span:.4f})"
+        )
+
+    return (
+        f"if(lt(t,{attack_end:.4f}),"
+        f"1+({floor:.6f}-1)*(t-{start_s:.4f})/{attack_s:.4f},"
+        f"if(lt(t,{release_start:.4f}),"
+        f"{floor:.6f},"
+        f"{floor:.6f}+(1-{floor:.6f})*(t-{release_start:.4f})/{span:.4f}))"
+    )
+
+
+def build_ducking_filters(
+    intervals: list[SpeechInterval],
+    *,
+    duck_db: float,
+    attack_ms: int,
+    release_ms: int,
+) -> list[str]:
+    """One ``volume`` filter per speech interval, chained onto the bed.
+
+    Each filter is enabled only inside its own interval, so the filters do
+    not interfere with each other and the chain stays flat - no nesting, no
+    expression parser depth to worry about.
+    """
+    floor = 10 ** (duck_db / 20.0)
+    attack_s = max(0.001, attack_ms / 1000.0)
+    release_s = max(0.001, release_ms / 1000.0)
+
+    filters: list[str] = []
+    for interval in intervals:
+        start_s = interval.start_ms / 1000.0
+        end_s = interval.end_ms / 1000.0
+        if end_s <= start_s:
+            continue
+        expression = _ducking_expression(start_s, end_s, floor, attack_s, release_s)
+        filters.append(
+            f"volume=volume='{expression}':eval=frame:enable='between(t,{start_s:.4f},{end_s:.4f})'"
+        )
+    return filters
+
+
+@dataclass
+class MixedAudio:
+    """The pieces of the mixed-audio graph.
+
+    A typed result rather than a dict, so the caller cannot pick up a value
+    of the wrong shape without the type checker noticing.
+    """
+
+    #: The ``filter_complex`` string for the ffmpeg invocation.
+    filter_complex: str
+    #: The audio output label to map.
+    map: str
+    #: Extra input arguments for the music file.
+    input_args: list[str]
+
+
 def build_mixed_audio_filtergraph(
-    settings: ExportSettings, music_path: Path, duration_s: float
-) -> dict[str, object]:
+    settings: ExportSettings,
+    music_path: Path,
+    duration_s: float,
+    speech_intervals: list[SpeechInterval] | None = None,
+) -> MixedAudio:
     """Filter graph mixing a music bed under the speech, with optional ducking.
 
-    Returns the pieces the ffmpeg invocation needs: ``filter_complex`` string,
-    the audio output label to map, and extra input arguments. Speech drives a
-    sidechain compressor over the bed when ducking is on — the classic
-    "background drops when someone talks" behaviour. Loudness normalisation
-    applies to the speech chain before the mix; the bed sits at
+    Returns the pieces the ffmpeg invocation needs: the ``filter_complex``
+    string, the audio output label to map, and extra input arguments. Speech
+    drives a sidechain compressor over the bed when ducking is on — the
+    classic "background drops when someone talks" behaviour. Loudness
+    normalisation applies to the speech chain before the mix; the bed sits at
     ``music_volume`` of full scale, dropping by ``ducking_amount_db`` while
     speech is detected.
 
-    Input layout: ``[0:a]`` is the speech (the source clip) and ``[1:a]`` is the
-    music. The music is opened with ``-stream_loop -1`` so it covers clips
+    Input layout: ``[0:a]`` is the speech (the source clip) and ``[1:a]`` is
+    the music. The music is opened with ``-stream_loop -1`` so it covers clips
     longer than the track, then trimmed to the clip duration.
+
+    When a **shared speech timeline** is supplied, the ducking follows it
+    instead of keying on the audio: the bed's volume is shaped by an explicit
+    envelope built from the same intervals the webcam layout uses. That is
+    what keeps the two in agreement, and it is what stops the bed recovering
+    between two words the transcript considers one stretch of speech.
+
+    Only the bed is ever touched. The original voice and game audio go
+    through the same chain whether or not there is music.
     """
     vol = min(max(settings.music_volume, 0.0), 1.0)
     duck_db = max(min(settings.ducking_amount_db, 0.0), -60.0)
@@ -214,17 +318,40 @@ def build_mixed_audio_filtergraph(
         f"volume={vol:.3f},aformat=sample_rates={AUDIO_SAMPLE_RATE}:channel_layouts=stereo[bed]"
     )
 
+    music_args = ["-stream_loop", "-1", "-i", str(music_path)]
+
     if not settings.music_ducking:
         complex_filter = (
             f"{speech};{bed};"
             f"[sp][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]"
         )
-        return {
-            "filter_complex": complex_filter,
-            "map": "[aout]",
-            "input_args": ["-stream_loop", "-1", "-i", str(music_path)],
-        }
+        return MixedAudio(
+            filter_complex=complex_filter,
+            map="[aout]",
+            input_args=music_args,
+        )
 
+    if speech_intervals:
+        # The timeline drives the ducking: an explicit envelope on the bed.
+        filters = build_ducking_filters(
+            speech_intervals,
+            duck_db=duck_db,
+            attack_ms=settings.ducking_attack_ms,
+            release_ms=settings.ducking_release_ms,
+        )
+        if filters:
+            bed_chain = ",".join([bed, *filters]) + "[bed]"
+            complex_filter = (
+                f"{speech};{bed_chain};"
+                f"[sp][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]"
+            )
+            return MixedAudio(
+                filter_complex=complex_filter,
+                map="[aout]",
+                input_args=music_args,
+            )
+
+    # No timeline: fall back to keying the ducking on the audio itself.
     complex_filter = (
         f"{speech};{bed};"
         # Bed ducks while speech plays; attack/release keep it musical.
@@ -232,11 +359,11 @@ def build_mixed_audio_filtergraph(
         f"attack=120:release=600:makeup=1[ducked];"
         f"[sp][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]"
     )
-    return {
-        "filter_complex": complex_filter,
-        "map": "[aout]",
-        "input_args": ["-stream_loop", "-1", "-i", str(music_path)],
-    }
+    return MixedAudio(
+        filter_complex=complex_filter,
+        map="[aout]",
+        input_args=music_args,
+    )
 
 
 def _source_has_audio(path: Path) -> bool:
@@ -355,14 +482,26 @@ def export_clip(
     music_map = "0:a?"
     audio_filter_args: list[str] = ["-af", build_audio_filtergraph(settings)]
     if settings.music_track and _source_has_audio(request.source):
+        from ..music import library as music_library
         from . import music as music_module
 
         track = music_module.resolve_track(settings.music_track)
         if track is not None:
-            mixed = build_mixed_audio_filtergraph(settings, track, request.duration_s)
-            filtergraph = f"{filtergraph};{mixed['filter_complex']}"
-            music_input_args = mixed["input_args"]
-            music_map = mixed["map"]
+            # The licence gate: a track whose rights are unknown, incompatible
+            # or expired is not mixed in. The export stops with an
+            # explanation rather than shipping a clip the user may not have
+            # the right to publish.
+            music_library.check_export_allowed_for_path(track)
+
+            mixed = build_mixed_audio_filtergraph(
+                settings,
+                track,
+                request.duration_s,
+                request.speech_intervals,
+            )
+            filtergraph = f"{filtergraph};{mixed.filter_complex}"
+            music_input_args = mixed.input_args
+            music_map = mixed.map
             audio_filter_args = []
             log.info(
                 "Mixing music bed %s (volume=%.2f, ducking=%s)",
