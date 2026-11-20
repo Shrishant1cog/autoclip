@@ -173,8 +173,8 @@ Rows marked ⚠ are gaps this upgrade must close.
 | GOV-17 | yt-dlp network restriction | `pipeline/ingest.py` classifies the URL before the fetch and refuses private destinations; `yt_dlp_hardening_args()` disables proxies; FFmpeg runs with `-protocol_whitelist file,pipe` | Partial — the secondary-request surface inside yt-dlp remains a documented residual, needing a Lane B controlled test | M0.5 |
 | GOV-18 | Updated SECURITY.md with enforcement detail | `SECURITY.md` — consent model table, URL and subprocess policy | Implemented | M0.5 |
 | GOV-19 | Security test evidence (SSRF suite flipped from xfail) | `tests/test_url_policy.py` (26 ordinary passing tests, zero `xfail` markers) + `tests/test_egress.py` (23 tests) | Implemented | M0.5 |
-| GOV-20 | Final upgrade report | — | Missing | M5 |
-| GOV-21 | Independent audit + release package | — | Missing | M5 |
+| GOV-20 | Final upgrade report | `docs/FINAL_UPGRADE_REPORT.md` | Implemented — the report is written, every acceptance item carries a status, and each of the 10 deliverables it lists points at a file that exists. The three conditions attached to the verdict (the external integrations unverified, the reframe golden set unverified, the original requirements missing) are stated in the report rather than omitted | M5 |
+| GOV-21 | Independent audit + release package | `docs/upgrade-audit.md` §13 (through M5) · `docs/UPGRADE-LEDGER.md` (the M5 section) · `docs/M5-APPLICATION-TESTING.md` · `docs/M5-REGRESSION-REPORT.md` · `docs/M5-SECURITY-REVIEW.md` · `docs/M5-PERFORMANCE-REPORT.md` · `docs/M5-INSTALLATION.md` · `docs/BENCHMARK-M5.json` | Implemented — the audit runs through M5, the ledger records the milestone, and the application-testing evidence was gathered against the real UI on real media. **Three defects were found by that testing and fixed**, each with a test that fails without the fix | M5 |
 
 ---
 
@@ -198,9 +198,8 @@ Rows marked ⚠ are gaps this upgrade must close.
 
 | Status | Count |
 |---|---|
-| Implemented | 107 |
+| Implemented | 109 |
 | Partial | 10 |
-| Missing | 2 |
 | Blocked — source missing | 1 |
 | NOT APPLICABLE | 9 |
 | **Total rows** | **129** |

@@ -20,7 +20,7 @@ milestone `In progress` and is reported as such.
 | M3 — Creative intelligence | **Complete** | 11/11 gate items done; 126 tests across the M3 area passing; two named residuals recorded (not claimed as verified) |
 | M4a — YouTube hardening | **Complete** | 14/15 gate items done; 1149 tests passing; the live YouTube path is **Unverified (external)** — no authorised Google credentials were supplied |
 | M4b — Instagram | **Complete** | 14/15 gate items done; 126 tests across the M4b area passing; the live Instagram path is **Unverified (external)** — no authorised Meta credentials were supplied |
-| M5 — Audit and release | Not started | — |
+| M5 — Audit and release | **Complete** | 10/10 gate items done; **1,300 tests** passing; the application exercised through its real UI on real media; **3 product defects and 1 CI defect found and fixed**; the live external paths remain **Unverified (external)** |
 
 ---
 
@@ -400,7 +400,57 @@ authorised Meta credentials were supplied — and that is recorded rather than g
 
 ## M5 — Audit and release
 
-Not started. Sequence and ordering constraints are in `docs/upgrade-audit.md` §19.
+**Status: Complete.** All ten deliverables exist and each is a file, not a promise. The milestone
+also **found and fixed three defects** that no unit test had caught, and a fourth in the CI
+workflow itself — all four were found by running the application or its gates, and each is now
+guarded by a test that fails without the fix.
+
+The live external integrations remain **Unverified (external)**: no authorised ElevenLabs,
+hosted-LLM, Google or Meta credential was supplied for any part of this upgrade. That is recorded
+as a condition of the release, not quietly upgraded.
+
+| # | Gate item | State | Evidence |
+|---|---|---|---|
+| 1 | **Complete regression report** | Done | `docs/M5-REGRESSION-REPORT.md` — 9 gates, the full suite green, and the CI run history with each failure diagnosed rather than summarised |
+| 2 | **Security review** | Done | `docs/M5-SECURITY-REVIEW.md` — S1–S7 re-verified on evidence, 2 new findings raised and closed, 4 residual risks documented, and **5 things explicitly not checked** |
+| 3 | **Performance report** | Done | `docs/M5-PERFORMANCE-REPORT.md` — M0 against M5, plus a like-for-like control run on the base commit so the comparison is not a measurement of a different machine |
+| 4 | **Feature acceptance matrix** | Done | `docs/feature-coverage-matrix.md` — 129 rows, recounted by `scripts/verify_matrix_counts.py`, **0 Missing** |
+| 5 | **Real-application testing evidence** | Done | `docs/M5-APPLICATION-TESTING.md` — PART 12's format, journeys A–D against the real UI, on real media, with the ducking measured on the rendered file rather than asserted |
+| 6 | **Build artifacts** | Done | `docs/BENCHMARK-M5.json`, `docs/BENCHMARK-BASELINE.json` (untouched), and the CI artifacts for the release commits |
+| 7 | **Installation and upgrade instructions** | Done | `docs/M5-INSTALLATION.md` — including what the upgrade changes about behaviour, and what to back up first |
+| 8 | **Known limitations** | Done | `docs/FINAL_UPGRADE_REPORT.md` §6 — 10 product, 5 engineering and 6 owner-controlled limitations, each named |
+| 9 | **Release readiness assessment** | Done | `docs/FINAL_UPGRADE_REPORT.md` §1 — *"Ship it, with the external integrations marked unverified"*, with the three conditions attached to that verdict |
+| 10 | **The final report** | Done | `docs/FINAL_UPGRADE_REPORT.md` |
+
+### Decisions taken in M5
+
+| Decision | Why | Where recorded |
+|---|---|---|
+| **The owner's OS keyring is isolated for every test, not per test** | The first fix covered one test that had been noticed. The audit then found **549** AutoClip entries in the owner's credential store, **535** of them test values. The fix has to be a class fix, so `tests/conftest.py` grew an **autouse** fixture: a test that forgets to ask for isolation still cannot reach the owner's machine | `tests/conftest.py`, `docs/M5-SECURITY-REVIEW.md` M5-02 |
+| The credential store was cleaned **by value**, never by name | A name-based sweep would have taken the owner's own credentials with it. Only entries whose stored secret exactly equalled a test literal were deleted; the 14 real ones were kept and confirmed afterwards | `docs/M5-SECURITY-REVIEW.md` M5-02 |
+| **The CI's ffmpeg check was corrected, not removed** | It reported an ffmpeg **with** the `ass` filter as not having one. The cause was a `producer \| grep -q` pipeline: `grep -q` exits at the match, the producer gets SIGPIPE, and `set -o pipefail` turns that into a failed step. The check now matches with bash's own pattern matching and never pipes — and a build genuinely without the filter still fails it | `.github/workflows/ci.yml` |
+| **A filtergraph is checked structurally, not only by rendering it** | Two of the three export defects were invisible to the filter-level tests because those tests only asserted that certain strings were present. One of them rendered on ffmpeg 9 and failed on ffmpeg 7. The graph is now checked for shape — no output consumed twice, no filter after an output label — so the defect is caught on **every** ffmpeg, not only the one that rejects it | `tests/test_music.py`, `tests/test_export_render.py` |
+| The **ducking was measured by differencing two renders** | The bed and the speech share a file, so a level measurement alone cannot tell the bed from the voice. Subtracting a render with the bed from a render without it leaves the bed, and its RMS in the timeline's own speech windows and speech gaps is the ducking, as a number | `docs/M5-APPLICATION-TESTING.md` AT-A-08 |
+| The **re-export's missing webcam composition** is recorded as a limitation, not fixed | Rebuilding the per-clip `LayoutPath` is new scope. The framing is right — the cached crop path is reused — so the honest entry is a named limitation, not a pass and not a silent omission | `docs/M5-APPLICATION-TESTING.md` AT-B-05, `docs/FINAL_UPGRADE_REPORT.md` §6.1 |
+| The **local model stand-in** is used and labelled everywhere | With no authorised hosted-model credential, the application was pointed at a local service speaking Ollama's API. It exercises the real adapter, gateway, consent checks, budget and prompt assembly; it does not reason. Every plan and answer it produced says so in its own text | `docs/M5-APPLICATION-TESTING.md` §0 |
+| The **Linux leg was reproduced locally** before the release commits were pushed | The sidechain defect rendered on the Windows ffmpeg and failed on the Linux one. It was found by running the Linux leg on ffmpeg 7.0.2 rather than by assuming the two platforms agreed | `docs/M5-APPLICATION-TESTING.md` §"The three defects" |
+
+### Residuals carried out of M5
+
+| Residual | Status | Action |
+|---|---|---|
+| The **live ElevenLabs path** | Unverified — no authorised credential was supplied for a consent-granted run | Lane B |
+| The **live hosted-LLM path** (detection, planning, music selection) | Unverified — same | Lane B |
+| The **live YouTube path** | Unverified — no authorised Google credential was supplied | Lane B |
+| The **live Instagram path** | Unverified — no authorised Meta app, token or professional account was supplied | Lane B, after App Review and Business Verification |
+| The **reframe golden set** — jitter, cut-off faces, the speaker on screen ≥95% of speaking time | Unverified — no fixed three-video set has been checked, before this upgrade or by it. **This is the gate for tagging v0.1.0** | Owner — supply the set and run the measurement |
+| The **original requirements and the 7 visual references** | Blocked — they are not on this machine, and they were not reconstructed | Owner — supply them |
+| The **re-export does not rebuild the webcam composition** | Partial — the per-clip `LayoutPath` is not persisted, so a re-export reuses the cached crop path | Next release |
+| The **eight-scenario ducking matrix** is asserted at the filter and timeline level | Partial — the three end-to-end render scenarios added at M5 cover the timeline path, the measured duck and the sidechain fallback; the full eight-case matrix is still not eight end-to-end renders | Next release |
+| The **multi-speaker path** was not exercised on real material | Partial — diarization was not enabled in the application run | Lane C, with diarized footage |
+| **Docker** was not built or scanned locally | Partial — Docker is not installed on this machine; the CI `docker` job builds the image and smoke-tests `GET /api/health` | CI covers it |
+| **No dependency audit, no fuzzing, no SAST scanner** | Gap — stated as gaps in `docs/M5-SECURITY-REVIEW.md` §7 rather than implied to be covered | Next release |
+| **mypy is at 10 errors in 8 files** | Partial — down from the 14-error baseline, unchanged since M1, in modules the upgrade did not touch. CI tolerates mypy with `continue-on-error` | Next release |
 
 ---
 
@@ -449,3 +499,8 @@ Not started. Sequence and ordering constraints are in `docs/upgrade-audit.md` §
 | 2026-11-20 | `6318655` | M4b — a NAT64 address is classified by the address it wraps |
 | 2026-11-20 | `2cfeb65` | M4b — the Instagram screen: the connection, the eligibility report and the clip-list badge |
 | 2026-11-20 | `521cec5` | M4b — a post that may have succeeded is never sent twice; the owner confirms it with Instagram |
+| 2026-11-20 | `0ef1548` | M5 — the Instagram secret test writes to the fake keyring, not the owner's real one |
+| 2026-11-20 | `4cf309b` | M5 — the formatter is pinned at 0.17.5, so the format gate is a property of the repository |
+| 2026-11-20 | `94c6d9c` | M5 — no test may touch the owner's real OS keyring: an autouse fixture isolates it for every test in the suite |
+| 2026-11-21 | `69498e3` | M5 — the CI's ffmpeg subtitle check no longer pipes into `grep -q`: the broken pipe was making CI report that an ffmpeg *with* the `ass` filter did not have one |
+| 2026-11-21 | `bcdfc47` | M5 — the export honours the user's music choice and the speech timeline, and the two malformed ducking filtergraphs are fixed; guarded by 7 API tests, 3 real-render tests and a version-independent structural graph check |

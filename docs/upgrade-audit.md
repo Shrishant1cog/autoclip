@@ -141,7 +141,7 @@ Full detail in `docs/SECURITY-AUDIT.md`. Summary of findings by severity:
 | S4 | Medium | Provider `base_url` is user-configurable and never classified (loopback/private/public) before use | `config.py`, `providers/*` |
 | S5 | Medium | MediaPipe model is downloaded from `storage.googleapis.com` on first use - an undocumented outbound request | `models.py:37` (`ensure` at `:64`), called from `reframe/faces.py:113` |
 | S6 | Low | Legacy global OAuth token remains valid alongside per-account tokens | `youtube/oauth.py`, `accounts.py:claim_legacy_token` |
-| S7 | Low | `ruff` unpinned (`>=0.7`) means the format gate can change under CI | `pyproject.toml:85` |
+| S7 | Low | ~~`ruff` unpinned (`>=0.7`) means the format gate can change under CI~~ — **CLOSED at M5**, pinned at `0.17.5` | `pyproject.toml:89` |
 
 Positive findings: CORS is restricted; keyring is used for all secrets; no secret is returned by any API route (keys are reported by label only); SQLite is accessed with parameterised statements throughout.
 
@@ -377,14 +377,62 @@ would have failed the format step before reaching the tests — which is consist
   independently, and "multiple accounts" currently means "one token displayed twice".
 - **D15 — the formatter gate is broken on a clean checkout** (above).
 
-**Since the baseline (through M4b).** The table above is the *M0 baseline* and is deliberately left
+**Since the baseline (through M5).** The table above is the *M0 baseline* and is deliberately left
 as it was measured. The current state is recorded per milestone in `docs/UPGRADE-LEDGER.md`; at
-the end of M4b it is: **1,279 passed** in the local unit suite (excluding the e2e collection),
-**0 xfailed** — the 26 SSRF xfails registered at M0 became ordinary passing tests and the marker
-was deleted at M0.5 — `ruff check` clean, `ruff format --check` clean, the frontend build green,
-and mypy at **10 errors in 8 files** (down from the 14-error baseline; the four that were fixed
-were in the modules M1 touched). The `ruff` version is still unpinned (`>=0.7`); pinning it is
-deferred to M5.
+the end of M5 it is:
+
+| Gate | At M0 (baseline) | At M5 (release) |
+|---|---|---|
+| Unit selection — `-m "not slow and not golden and not e2e"` | 672 passed | **1,263 passed**, 61 deselected |
+| Render selection — `-m "slow and not golden and not e2e"` | (included above) | **37 passed**, 1,287 deselected |
+| **Total in the two CI selections** | **672** | **1,300** |
+| Local full suite (Windows, excluding the e2e collection) | — | **1,300 passed** |
+| `xfail` markers | 26 (the SSRF suite) | **0** — the 26 became ordinary passing tests at M0.5 and the marker was deleted |
+| `ruff check .` | clean | **clean** |
+| `ruff format --check .` | **FAILED** — 38 of 147 files unformatted | **clean** — 226 files already formatted |
+| `ruff` version | unpinned (`>=0.7`) | **pinned at `0.17.5`** (`pyproject.toml:89`) — committed as `4cf309b`, which closes **D15** and **T2** |
+| mypy | 14 errors in 10 files | **10 errors in 8 files** (tolerated by `continue-on-error`) |
+| Frontend `tsc -b && vite build` | not run locally at audit time | **green**, run locally and in CI |
+| Docker build + health smoke | not run locally at audit time | **not run locally** — Docker is not installed on this machine; the CI `docker` job builds the image and smoke-tests `GET /api/health` |
+
+**The ruff pin is the point of this row.** The baseline's format failure was not a style
+preference: with no version pinned, the gate was evaluated against whatever ruff CI happened to
+install, and the shipped tree did not satisfy it. Pinning the version makes the gate a
+**property of the repository** rather than of the day it ran.
+
+### 13.1 The CI runs on this branch, and what each failure was
+
+The branch's CI history is part of the release evidence, because two of the three failures were
+**real defects** rather than flakes, and the third was a defect in the CI itself. Each is
+recorded with its cause and its fix.
+
+| Run | Commit | Result | What happened | Cause | Fix |
+|---|---|---|---|---|---|
+| 4–17 | the M0–M4b commits | **success** | green | — | — |
+| 18 | `5fc04cc` | **cancelled** | superseded by the next push | — | — |
+| **19** | `4cf309b` | **failure** | the Ubuntu legs failed in **Unit tests**; Windows and macOS passed the same tests | **A test wrote to the owner's real OS keyring.** `tests/test_instagram.py::test_the_unified_setup_does_not_refuse_a_local_file` called `accounts_store.store_token(...)` without the keyring fixture. On Linux there is no OS keyring backend, so the token was never stored and the assertion that depended on it could not hold. The test passed on Windows and macOS **because those machines have a real keyring to write to** — the failure was a symptom, not the defect | `94c6d9c` — an **autouse** `isolated_keyring` fixture in `tests/conftest.py`, so no test in the suite can reach the owner's credential store |
+| **20** | `94c6d9c` | **failure** | the Ubuntu **py3.12** leg failed at step 7, *"Verify ffmpeg can burn subtitles"*. Ubuntu py3.11, macOS, Windows and Docker all passed | **The check itself was wrong.** It piped the ffmpeg filter list into `grep -q`. `grep -q` exits at the first match, the producer then gets **SIGPIPE**, and GitHub runs bash steps with `set -o pipefail`, which turns that broken pipe into a failed step. The Ubuntu runner's ffmpeg 8 has a filter list large enough to fill the pipe, so CI reported that an ffmpeg **with** the `ass` filter did not have one — the job log shows `printf: Broken pipe` and then the `ass` filter listed on the very next line | the check now matches the list with bash's own pattern matching and never pipes. **The check was corrected, not removed**: a build genuinely without the `ass` filter still fails it |
+
+**Both failures were reproduced before they were fixed.** Run 19 was reproduced on a Linux
+environment with no keyring backend, and run 20 was reproduced with a 320 KB filter list — the
+old body fails it, the new body passes it, and a build without the `ass` filter still fails the
+new body. A failure that is only fixed in CI is a failure that comes back.
+
+### 13.2 Three product defects, found by running the application
+
+The full-suite gates were green while the application was broken. These three defects were found
+by **running the application and its gates**, not by reading the code, and each is now guarded by
+a test that fails without the fix.
+
+| # | Defect | Found by | Guard |
+|---|---|---|---|
+| 1 | The API export path ignored the user's music preference and passed no speech intervals, so the re-exported clip had neither the chosen track nor any ducking | clicking *Export this clip* on a clip with a track chosen | 7 regression tests in `tests/test_api.py::TestClipExportHonoursTheUsersMusic`; **6 of the 7 fail without the fix** |
+| 2 | The timeline-driven ducking filtergraph was malformed — an output label in the middle of the bed's chain — and ffmpeg refused the whole graph | the export failing, with ffmpeg's own stderr in the response | 3 real-render tests in `tests/test_export_render.py::TestMusicBedRender`; **2 of the 3 fail without the fix** |
+| 3 | The sidechain fallback consumed one filter output twice, which **ffmpeg 9 accepts and ffmpeg 7 refuses** | the Linux CI leg, reproduced locally on ffmpeg 7.0.2 | the same 3 render tests, plus a **structural** check in `tests/test_music.py` that no filter output is consumed twice and no filter follows an output label — version-independent, so it catches the defect on any ffmpeg |
+
+**Defect 3 is the one that would have shipped.** It rendered on the machine the code was written
+on and would have failed on the CI runners and on every user with an ffmpeg older than 9. It was
+caught by reproducing the Linux leg locally rather than assuming the two platforms agreed.
 
 ---
 
@@ -436,7 +484,7 @@ They are untracked and must stay untracked (`git ls-files` confirms no media is 
 | # | Debt | Impact |
 |---|---|---|
 | T1 | mypy has 14 errors in 10 files (e.g. `pipeline/runner.py:699`, `cli.py:231`) and CI ignores them | types drift; new code can hide real bugs |
-| T2 | `ruff` unpinned at `>=0.7` (`pyproject.toml:85`) | the format gate can change under CI (D15) |
+| T2 | ~~`ruff` unpinned at `>=0.7`~~ — **CLOSED at M5**, pinned at `0.17.5` (`pyproject.toml:89`, commit `4cf309b`) | the format gate can no longer change under CI (D15) |
 | T3 | Single asyncio worker | one job at a time; a blocked upload delays rendering (D10) |
 | T4 | Workflow runs inside the HTTP handler | a long workflow blocks the event loop (D1) |
 | T5 | Provider capability metadata is per-preset, not per-model | a model can be selected for a task it cannot do |

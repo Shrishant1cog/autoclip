@@ -1,6 +1,6 @@
 # AutoClip
 
-**Open-source, local-first AI video clipper.** Long video in → ranked, caption-burned, speaker-tracked 9:16 clips out — and, if you connect one, straight onto YouTube.
+**Open-source, local-first AI video clipper.** Long video in → ranked, caption-burned, speaker-tracked 9:16 clips out — and, if you connect one, straight onto YouTube or Instagram.
 
 [![CI](https://github.com/Shrishant1cog/autoclip/actions/workflows/ci.yml/badge.svg)](https://github.com/Shrishant1cog/autoclip/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -8,7 +8,7 @@
 
 Paste a YouTube link or drop a file. AutoClip transcribes it, asks a language model where the moments worth clipping are, reframes them to vertical while tracking whoever is speaking, burns in animated captions, validates the render, and publishes it.
 
-No AutoClip account, no sign-up, no watermarks, no subscription. Your source video never goes to an AI provider — only the transcript *text* does. The one exception is YouTube publishing, which is opt-in: AutoClip talks to YouTube using *your* Google account, and only when you connect it.
+No AutoClip account, no sign-up, no watermarks, no subscription. Your source video never goes to an AI provider — only the transcript *text* does. Audio goes to ElevenLabs only if you turn external transcription on **and** grant the consent it asks for. Publishing is opt-in: AutoClip talks to YouTube or Instagram using *your* own credentials, and only when you connect them.
 
 ---
 
@@ -22,11 +22,11 @@ Three ways to run it:
 - **Bring your own key** — 16 providers, with multi-key pools and automatic fallback between them.
 - **External speech** — an ElevenLabs key (Settings → Keys) switches transcription to Scribe: a 4-hour video transcribes in minutes instead of hours. The `auto` engine prefers it and falls back to local Whisper on any failure. Optional ElevenLabs voiceover can narrate clips.
 
-Only transcript *text* is ever sent to a text provider — never video or audio. Audio is sent to ElevenLabs only when its transcription (or voiceover) is enabled; with `engine: local` and voiceover off, nothing is sent at all.
+Only transcript *text* is ever sent to a text provider — never video or audio. Audio is sent to ElevenLabs only when its transcription (or voiceover) is enabled **and** you have granted the external-processing consent for it; with `engine: local` and voiceover off, nothing is sent at all. Every external transfer AutoClip makes is listed in *Settings → External processing*, with its destination class and its outcome.
 
 ## Status
 
-Working end to end: ingest, transcription, highlight detection across 16 providers with fallback chains, speaker-tracked reframing, four caption styles, export at three aspect ratios, duplicate-safe YouTube publishing, and thirteen screens in the UI.
+Working end to end: ingest, transcription, highlight detection across 16 providers with fallback chains, speaker-tracked reframing, four caption styles, export at three aspect ratios, duplicate-safe YouTube and Instagram publishing, speech-aware music ducking, automatic webcam layouts, and thirteen screens in the UI.
 
 Verified against real footage and a real channel — see [what "verified" means](#what-has-and-hasnt-been-verified) and [`.planning/VALIDATION-REPORT.md`](.planning/VALIDATION-REPORT.md).
 
@@ -188,7 +188,7 @@ Everything the UI does is also on the CLI:
 | **Assistant** | A chat that sees your clips, jobs, failures, channels and settings — and nothing else. |
 | **Trends** | Real YouTube signal, not a generated trend line. |
 | **Recovery** | What failed, why, and what will fix it. |
-| **Settings** | Providers, keys, transcription, export, resources, YouTube. |
+| **Settings** | Providers, keys, transcription, export, resources, music library, webcam layout, external processing, YouTube, Instagram. |
 
 ### Duplicate upload protection
 
@@ -250,11 +250,36 @@ environment variable.
 
 Settings live in `config.json` and are editable from **Settings** in the UI or
 by hand. The sections are `active_provider`, `providers`, `whisper`,
-`transcription`, `clips`, `ingest`, `export`, `resources` and `youtube`.
+`transcription`, `clips`, `ingest`, `export`, `resources`, `youtube` and `instagram`.
 
 ```bash
 autoclip config show    # print the whole thing as JSON, secrets excluded
 ```
+
+### Music, licensing and ducking
+
+*Settings → Music library* indexes the music files you point it at. It is an **index**: AutoClip
+never copies, moves or deletes your files.
+
+Every track carries a licence state, and the export is **blocked** while a track is `unknown`,
+`incompatible` or `expired`. You can say *you confirmed* a track is yours to use; you cannot say
+*verified*, because independent verification is not something a user can assert. The difference is
+shown in the UI rather than blurred.
+
+When a clip is exported with music, the music is ducked under speech automatically. The ducking is
+driven by the **same** speech timeline the layout and the captions use — there is no second speech
+detector — so the music and the talking never disagree about who is speaking.
+
+### Webcam layouts
+
+If the source has a webcam, AutoClip finds the face region, tracks it as a stable cluster across
+cuts, and composes a vertical layout that keeps the gameplay visible. The split is a preference,
+not a rule, and the minimum dwell time for any layout is 1.5 s, so the frame never flickers
+between layouts.
+
+Your choice always wins: pick a layout per source and the detector will not overwrite it. If no
+webcam is found with enough confidence, the output is gameplay-only — the same as before the
+feature existed.
 
 The `resources` section is worth knowing about, because it is what keeps an
 unattended install from filling a disk:
@@ -282,6 +307,26 @@ token in your OS keyring. It will not silently widen a token's permissions.
 Each channel has its own publishing policy: privacy, YouTube category, title
 suffix, whether it publishes automatically, and whether it is the default. A
 channel with automatic publishing **off** is never published to by a fan-out.
+
+Two things are decided by you and are never guessed:
+
+- **The audience.** `madeForKids` is a legal declaration with three states — *undecided*, *no*,
+  *yes*. An undecided channel **refuses the upload** until you choose. AutoClip will not make that
+  statement for you.
+- **The privacy.** What was asked for is recorded, and what YouTube actually did is read back
+  afterwards. If YouTube forced the video private, the clip list says *"uploaded, private"* rather
+  than *"on YouTube"*.
+
+### Publishing to Instagram
+
+*Settings → Instagram* connects an Instagram account through the official **Instagram Platform
+Content Publishing API** using your own Meta app. AutoClip supports all three of Meta's setups and
+tells you which one you are on and what it can do — two of them can upload a local file and one
+cannot, and AutoClip refuses a local file on that setup rather than sending it somewhere else.
+
+Publishing is explicit: you choose the account, you write the caption, and you decide whether the
+media is AI-generated. AutoClip reads Meta's own publishing allowance rather than hardcoding a
+number, because Meta's own documentation disagrees with itself about it.
 
 ## Troubleshooting
 
@@ -335,10 +380,15 @@ Also unverified: whether the clip *picks* are good. That's a judgement call abou
 
 Deliberate, not oversights:
 
-- **No direct posting** to TikTok/Instagram. Their APIs are approval-gated; AutoClip exports files for those. YouTube is the exception: AutoClip can publish to a channel you connect, with duplicate protection enabled by default.
+- **No direct posting** to TikTok. Its API is not in scope for this project. Instagram *is*
+  supported, through Meta's official publishing API; YouTube is supported through Google's, with
+  duplicate protection enabled by default.
 - **No cloud version, no AutoClip account, no telemetry.**
 - **No timeline editor** beyond trim handles and caption edits.
 - **No DRM circumvention**, ever.
+- **No analytics collection.** AutoClip does not read your YouTube Analytics, does not research
+  trending topics to sell you clips, and does not learn from your feedback to change what it
+  picks. The features that already existed for those are preserved and not extended.
 
 ## Contributing
 
