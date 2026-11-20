@@ -49,7 +49,13 @@ BACKGROUND_BLUR = 24
 LOUDNESS_TRUE_PEAK = -1.5
 LOUDNESS_RANGE = 11.0
 
-AUDIO_BITRATE = "192k"
+#: The audio bitrate of the exported file.
+#:
+#: 128 kbps is the documented maximum for an Instagram Reel and the
+#: recommended minimum for a YouTube upload, so one value serves both.
+#: FFmpeg's AAC encoder lands just under the target — around 127 kbps
+#: measured — which leaves the file inside the limit.
+AUDIO_BITRATE = "128k"
 AUDIO_SAMPLE_RATE = 48_000
 
 
@@ -796,6 +802,12 @@ def export_clip(
             str(AUDIO_SAMPLE_RATE),
             "-movflags",
             "+faststart",
+            # Meta documents that a Reel must carry no edit lists, and
+            # ffmpeg's MP4 muxer writes one by default. Turning it off
+            # costs nothing and makes the exported file acceptable to
+            # Instagram without a second encode.
+            "-use_editlist",
+            "0",
             str(request.destination),
         ]
     )

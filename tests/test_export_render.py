@@ -600,6 +600,64 @@ class TestEncoding:
         assert all(0.0 <= value <= 1.0 for value in seen)
 
 
+class TestInstagramCompatibility:
+    """The exported file has to satisfy Meta's documented Reel rules.
+
+    Two of them are not visible in a normal ``ffprobe`` report: the
+    ``moov`` atom has to be at the front of the file, and there must be
+    no edit list. FFmpeg writes an edit list by default, so the export
+    turns it off — this class is the guard that it stays off.
+    """
+
+    def test_the_exported_file_meets_instagrams_reel_requirements(
+        self, source_video, words, tmp_path
+    ) -> None:
+        from autoclip.instagram import media as ig_media
+
+        destination = tmp_path / "out.mp4"
+
+        export.export_clip(
+            make_request(source_video, destination, centre_crop(SOURCE_W, SOURCE_H, 5.0), words),
+            work_dir=tmp_path / "work",
+        )
+
+        report = ig_media.validate_reel(destination)
+
+        assert report.ok is True, report.problems
+        assert report.facts["moov_at_front"] is True
+
+    def test_the_exported_file_carries_no_edit_list(self, source_video, words, tmp_path) -> None:
+        from autoclip.instagram import media as ig_media
+
+        destination = tmp_path / "out.mp4"
+
+        export.export_clip(
+            make_request(source_video, destination, centre_crop(SOURCE_W, SOURCE_H, 5.0), words),
+            work_dir=tmp_path / "work",
+        )
+
+        boxes = ig_media.scan_boxes(destination)
+
+        assert boxes["has_edit_list"] is False
+
+    def test_removing_the_edit_list_does_not_change_the_duration(
+        self, source_video, words, tmp_path
+    ) -> None:
+        """An edit list is how a player skips the encoder's priming
+        samples. Removing it must not shorten the clip."""
+        destination = tmp_path / "out.mp4"
+
+        export.export_clip(
+            make_request(source_video, destination, centre_crop(SOURCE_W, SOURCE_H, 5.0), words),
+            work_dir=tmp_path / "work",
+        )
+
+        info = ffmpeg.probe(destination)
+
+        assert info.duration_s == pytest.approx(5.0, abs=0.35)
+        assert info.has_audio
+
+
 class TestPathsWithSpecialCharacters:
     def test_directory_with_spaces_and_punctuation(self, source_video, words, tmp_path) -> None:
         """The escaping test that actually matters on Windows.
