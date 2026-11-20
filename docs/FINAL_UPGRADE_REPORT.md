@@ -31,7 +31,7 @@ double stands in for the same code path the real service would take — but "the
 | **New runtime dependencies** | **Zero.** The whole upgrade was built on the dependency set the project already had. |
 | **Schema** | v14 → **v27**, 19 → **32 live tables**, thirteen migrations, no user data destroyed |
 | **API surface** | 18 routers / 108 routes → **21 routers / 162 routes** |
-| **CI** | 19 runs on this branch: **13 success**, **4 cancelled** (each superseded by a newer push), **2 failure** — and **both failures were real defects**, diagnosed and fixed rather than explained away. The release run is green on all six jobs, on all four platforms. See §4.1. |
+| **CI** | **Every run on this branch since the two failures was green.** Two of the runs failed — both were real defects, diagnosed and fixed rather than explained away — and four were cancelled by a newer push. The release run is green on all six jobs, on all four platforms. See §4.1. |
 | **Defects found by running the application** | **3 product defects** and **1 defect in the CI workflow itself**, all fixed, all guarded by tests that fail without the fix. See §4.2. |
 | **Open security findings** | **0** high, **0** medium, **0** low. 4 residual risks documented, 5 things not checked — all in §6. |
 
@@ -189,14 +189,14 @@ missing or wrong.
 
 ### 4.1 The CI runs on this branch
 
-The run history is release evidence, not noise. Two of the nineteen runs failed, and **both
-failures were real defects** — one in the product, one in the CI itself. Neither was a flake, and
-neither was explained away.
+The run history is release evidence, not noise. **Every run on this branch since the two failures
+was green.** The two that failed were **real defects** — one in the product, one in the CI itself.
+Neither was a flake, and neither was explained away. Four runs were cancelled by a newer push.
 
 | Runs | Result | What happened |
 |---|---|---|
-| 4, 5, 7–13, 15–17, **22** (13 runs) | **success** | green |
-| 6, 14, 18, **21** (4 runs) | **cancelled** | each superseded by a newer push — the concurrency group cancelled the older run |
+| 4, 5, 7–13, 15–17, **22**, **23** | **success** | green |
+| 6, 14, 18, **21** | **cancelled** | each superseded by a newer push — the concurrency group cancelled the older run |
 | **19** (`4cf309b`) | **failure** | the Ubuntu legs failed in **Unit tests**; Windows and macOS passed the same tests. A test wrote to the owner's real OS keyring. On Linux there is no keyring backend, so the token was never stored and the assertion could not hold — the test passed on Windows and macOS *because those machines had a real keyring to write to*. Fixed by `94c6d9c`, an **autouse** isolation fixture so no test can reach the owner's credential store |
 | **20** (`94c6d9c`) | **failure** | the Ubuntu py3.12 leg failed at *"Verify ffmpeg can burn subtitles"*. The check piped the ffmpeg filter list into `grep -q`; `grep -q` exits at the match, the producer gets **SIGPIPE**, and GitHub's `set -o pipefail` turns that into a failed step. The runner's ffmpeg 8 has a filter list large enough to fill the pipe, so CI reported that an ffmpeg **with** the `ass` filter did not have one — the job log shows `printf: Broken pipe` and then the `ass` filter listed on the very next line. **Corrected, not removed**: the check now matches with bash's own pattern matching and never pipes, and a build genuinely without the filter still fails it |
 

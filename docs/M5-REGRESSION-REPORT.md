@@ -153,8 +153,11 @@ rather than failed.
 | 20 | `94c6d9c` | M5: no test may touch the owner's real OS keyring | **failure** — the Ubuntu py3.12 leg failed at *"Verify ffmpeg can burn subtitles"*. The check piped the filter list into `grep -q`; `grep -q` exits at the match, the producer gets **SIGPIPE**, and `set -o pipefail` turns that into a failed step. Fixed in `.github/workflows/ci.yml` — the check was **corrected, not removed** |
 | 21 | `64d253d` | M5: the release package | **cancelled** — superseded by run 22 |
 | 22 | `cbcbe1c` | docs: record the M5 release commit in the ledger and the commit trail | **success** — all six jobs green: the four backend legs, the frontend build, and the Docker image with its health smoke test |
+| 23 | `ab9052e` | docs: the release run is green, and the Journey D records are complete | **success** — all six jobs green again, including the Ubuntu py3.12 leg that had failed twice |
 
-**Thirteen of the nineteen runs are green; four were cancelled by a newer push, and two failed.**
+**Every run on this branch since the two failures was green.** Two of the runs failed, and **both
+failures were real defects** — not flakes, and neither was explained away. Four runs were cancelled
+by a newer push.
 **Both failures were real defects**, not flakes, and neither was explained away:
 
 * **Run 19** was a **product** defect — a test that wrote to the owner's real OS credential store.

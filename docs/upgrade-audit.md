@@ -402,9 +402,9 @@ install, and the shipped tree did not satisfy it. Pinning the version makes the 
 
 ### 13.1 The CI runs on this branch, and what each failure was
 
-The branch's CI history is part of the release evidence, because two of the three failures were
-**real defects** rather than flakes, and the third was a defect in the CI itself. Each is
-recorded with its cause and its fix.
+The branch's CI history is part of the release evidence, because **both of its failures were real
+defects** rather than flakes — one in the product, one in the CI itself. Each is recorded with its
+cause and its fix.
 
 | Run | Commit | Result | What happened | Cause | Fix |
 |---|---|---|---|---|---|
@@ -412,11 +412,15 @@ recorded with its cause and its fix.
 | 18 | `5fc04cc` | **cancelled** | superseded by the next push | — | — |
 | **19** | `4cf309b` | **failure** | the Ubuntu legs failed in **Unit tests**; Windows and macOS passed the same tests | **A test wrote to the owner's real OS keyring.** `tests/test_instagram.py::test_the_unified_setup_does_not_refuse_a_local_file` called `accounts_store.store_token(...)` without the keyring fixture. On Linux there is no OS keyring backend, so the token was never stored and the assertion that depended on it could not hold. The test passed on Windows and macOS **because those machines have a real keyring to write to** — the failure was a symptom, not the defect | `94c6d9c` — an **autouse** `isolated_keyring` fixture in `tests/conftest.py`, so no test in the suite can reach the owner's credential store |
 | **20** | `94c6d9c` | **failure** | the Ubuntu **py3.12** leg failed at step 7, *"Verify ffmpeg can burn subtitles"*. Ubuntu py3.11, macOS, Windows and Docker all passed | **The check itself was wrong.** It piped the ffmpeg filter list into `grep -q`. `grep -q` exits at the first match, the producer then gets **SIGPIPE**, and GitHub runs bash steps with `set -o pipefail`, which turns that broken pipe into a failed step. The Ubuntu runner's ffmpeg 8 has a filter list large enough to fill the pipe, so CI reported that an ffmpeg **with** the `ass` filter did not have one — the job log shows `printf: Broken pipe` and then the `ass` filter listed on the very next line | the check now matches the list with bash's own pattern matching and never pipes. **The check was corrected, not removed**: a build genuinely without the `ass` filter still fails it |
+| 21 | `64d253d` | **cancelled** | superseded by run 22 | — | — |
+| 22, 23 | `cbcbe1c`, `ab9052e` | **success** | green on all six jobs — the four backend legs, the frontend build, and the Docker image with its health smoke test | — | — |
 
 **Both failures were reproduced before they were fixed.** Run 19 was reproduced on a Linux
 environment with no keyring backend, and run 20 was reproduced with a 320 KB filter list — the
 old body fails it, the new body passes it, and a build without the `ass` filter still fails the
 new body. A failure that is only fixed in CI is a failure that comes back.
+
+**Every run on this branch since those two failures was green.**
 
 ### 13.2 Three product defects, found by running the application
 
