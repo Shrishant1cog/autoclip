@@ -486,6 +486,120 @@ export interface MusicTrack {
   path: string
 }
 
+// -- Music library (M1) -------------------------------------------------------
+
+/**
+ * The licence states. `verified` is deliberately absent: independent
+ * verification is not something a user can assert about their own files.
+ */
+export type LicenseState = 'unknown' | 'user_confirmed' | 'incompatible' | 'expired'
+
+export interface MusicLicense {
+  track_id: string
+  state: LicenseState
+  source: string
+  evidence: string
+  attribution: string
+  commercial_use: boolean
+  non_commercial: boolean
+  derivative: boolean
+  share_alike: boolean
+  expires_at: string
+  verified_by: string
+  verified_at: string
+  updated_at: string
+}
+
+/** What the local measurement found. Every number is measured, not guessed. */
+export interface MusicAnalysis {
+  duration_s: number
+  sample_rate: number
+  channels: number
+  bpm: number
+  bpm_confidence: number
+  energy: number
+  rms_dbfs: number
+  peak_dbfs: number
+  loudness_lufs: number
+  mood: string
+  mood_scores: Record<string, number>
+  beat_regularity: number
+  groove_strength: number
+  spectral_centroid_hz: number
+  spectral_rolloff_hz: number
+  percussive_ratio: number
+  harmonic_ratio: number
+  stereo_width: number
+  clipping_ratio: number
+  dc_offset: number
+  noise_floor_dbfs: number
+  dynamic_range_db: number
+}
+
+export interface MusicLibraryTrack {
+  id: string
+  path: string
+  folder_id: string
+  name: string
+  title: string
+  artist: string
+  tags: string[]
+  format: string
+  size_bytes: number
+  mtime: number
+  duration_s: number
+  analysis_at: string
+  analysis: MusicAnalysis
+  excluded: boolean
+  favourite: boolean
+  created_at: string
+  updated_at: string
+  license: MusicLicense
+  license_allowed: boolean
+  license_reason: string
+  license_warnings: string[]
+}
+
+export interface MusicFolder {
+  id: string
+  path: string
+  added_at: string
+}
+
+export interface MusicScanReport {
+  folders: number
+  found: number
+  added: number
+  skipped: number
+  errors: string[]
+}
+
+export interface MusicEnvelope {
+  job_id: string
+  start_s: number
+  end_s: number
+  duck_db: number
+  points: { t: number; gain: number }[]
+  intervals: {
+    start_ms: number
+    end_ms: number
+    confidence: number
+    source: string
+    speaker: string | null
+  }[]
+}
+
+/** The filters the library can be narrowed by. */
+export interface MusicFilters {
+  q?: string
+  mood?: string
+  min_bpm?: number
+  max_bpm?: number
+  licence?: string
+  favourite?: boolean
+  tag?: string
+}
+
 // -- External processing (M0.5) -----------------------------------------------
 
 /** One stored answer to "may this operation reach this class of host?". */
@@ -836,6 +950,69 @@ export const api = {
   },
   deleteMusicTrack: (name: string) =>
     request<void>(`/api/music/tracks/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+
+  // -- Music library (M1) ----------------------------------------------------
+  listMusicLibrary: (filters: MusicFilters = {}) => {
+    const query = new URLSearchParams()
+    if (filters.q) query.set('q', filters.q)
+    if (filters.mood) query.set('mood', filters.mood)
+    if (filters.min_bpm !== undefined) query.set('min_bpm', String(filters.min_bpm))
+    if (filters.max_bpm !== undefined) query.set('max_bpm', String(filters.max_bpm))
+    if (filters.licence) query.set('licence', filters.licence)
+    if (filters.favourite) query.set('favourite', 'true')
+    if (filters.tag) query.set('tag', filters.tag)
+    const suffix = query.toString()
+    return request<MusicLibraryTrack[]>(`/api/music/library${suffix ? `?${suffix}` : ''}`)
+  },
+  listMusicFolders: () => request<MusicFolder[]>('/api/music/folders'),
+  addMusicFolder: (path: string) =>
+    request<{ folder: MusicFolder; scan: MusicScanReport }>('/api/music/folders', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }),
+  removeMusicFolder: (id: string) =>
+    request<void>(`/api/music/folders/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  scanMusicLibrary: () => request<MusicScanReport>('/api/music/scan', { method: 'POST' }),
+  removeMusicLibraryTrack: (id: string) =>
+    request<void>(`/api/music/library/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  setMusicFlags: (
+    id: string,
+    flags: { favourite?: boolean; excluded?: boolean; tags?: string; title?: string; artist?: string },
+  ) =>
+    request<MusicLibraryTrack>(`/api/music/library/${encodeURIComponent(id)}/flags`, {
+      method: 'POST',
+      body: JSON.stringify(flags),
+    }),
+  analyseMusicTrack: (id: string, force = false) =>
+    request<MusicLibraryTrack>(
+      `/api/music/library/${encodeURIComponent(id)}/analyse?force=${force}`,
+      { method: 'POST' },
+    ),
+  getMusicLicence: (id: string) =>
+    request<MusicLicense>(`/api/music/library/${encodeURIComponent(id)}/licence`),
+  putMusicLicence: (
+    id: string,
+    licence: {
+      state: LicenseState
+      source?: string
+      evidence?: string
+      attribution?: string
+      commercial_use?: boolean
+      non_commercial?: boolean
+      derivative?: boolean
+      share_alike?: boolean
+      expires_at?: string
+    },
+  ) =>
+    request<MusicLicense>(`/api/music/library/${encodeURIComponent(id)}/licence`, {
+      method: 'PUT',
+      body: JSON.stringify(licence),
+    }),
+  musicPreviewUrl: (id: string) => `/api/music/library/${encodeURIComponent(id)}/audio`,
+  musicEnvelope: (jobId: string, startS = 0, endS = 0) =>
+    request<MusicEnvelope>(
+      `/api/music/envelope?job_id=${encodeURIComponent(jobId)}&start_s=${startS}&end_s=${endS}`,
+    ),
 
   // -- External processing (M0.5) ---------------------------------------------
   listConsents: () => request<PrivacyOperation[]>('/api/privacy/consents'),

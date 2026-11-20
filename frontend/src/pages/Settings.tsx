@@ -11,6 +11,7 @@ import {
   type YouTubeStatus,
 } from '../api'
 import { ErrorNote } from '../components/ErrorNote'
+import { MusicLibrary } from '../components/MusicLibrary'
 
 const SECRET_LABELS: Record<string, string> = {
   anthropic: 'Anthropic API key',
@@ -500,6 +501,13 @@ export function Settings() {
             </ul>
           )}
         </div>
+      </Section>
+
+      <Section
+        title="Music library"
+        note="Your music, indexed where it already is — never copied, moved or deleted."
+      >
+        <MusicLibrary onError={setError} />
       </Section>
 
       <Section
