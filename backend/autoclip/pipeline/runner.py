@@ -42,8 +42,16 @@ from . import (
     validate,
 )
 from .prepare import Silence
-from .reframe import ReframeConfig, build_crop_path
+from .reframe import ReframeConfig, build_crop_path, layout_store
 from .reframe.croppath import CropPath
+from .reframe.layout import (
+    LayoutConfig,
+    LayoutPath,
+    LayoutVariant,
+    ManualLayout,
+    plan_layout,
+)
+from .reframe.webcam import Rect, WebcamReport, WebcamTrack, detect_webcam
 from .transcript import Transcript
 
 log = logging.getLogger(__name__)
@@ -123,6 +131,57 @@ class ProgressEvent:
     message: str = ""
 
 
+@dataclass
+class ClipComposition:
+    """How one clip is put together.
+
+    The crop path says which part of the source the gameplay comes from.
+    The layout says where the gameplay sits in the output and whether a
+    webcam is drawn over it. They are planned together because the crop
+    path's aspect ratio has to match the gameplay's slot.
+    """
+
+    crop_path: CropPath
+    layout: LayoutPath | None = None
+
+
+def _crop_aspect(layout: LayoutPath | None, ratio: str) -> tuple[int, int]:
+    """The aspect ratio the crop path should be built for.
+
+    A stacked layout leaves the bottom of the frame for gameplay, and that
+    area is not the full 9:16. The crop path has to match it, or the
+    gameplay would be stretched when it was scaled into the slot.
+    """
+    base = {
+        "9:16": (9, 16),
+        "1:1": (1, 1),
+        "16:9": (16, 9),
+    }.get(ratio, (9, 16))
+
+    if layout is None:
+        return base
+
+    slot = layout.segments[0].gameplay_slot if layout.segments else None
+    if slot is None or slot.width <= 0 or slot.height <= 0:
+        return base
+
+    # Reduce the slot's aspect to the smallest whole-number ratio that
+    # describes it. A 1080x1152 slot is 15:16, not 0.9375:1.
+    from math import gcd
+
+    divisor = gcd(slot.width, slot.height)
+    width = slot.width // divisor
+    height = slot.height // divisor
+    if width <= 0 or height <= 0 or width > 64 or height > 64:
+        return base
+    return (width, height)
+
+
+def _source_size(report: WebcamReport) -> tuple[int, int]:
+    """The frame size the report was made against."""
+    return (report.source_width, report.source_height)
+
+
 ProgressHandler = Callable[[ProgressEvent], None]
 
 
@@ -160,6 +219,19 @@ class JobWorkspace:
 
     def crop_path(self, clip_id: str) -> Path:
         return self.root / "crops" / f"{clip_id}.json"
+
+    def layout(self, clip_id: str) -> Path:
+        return self.root / "layouts" / f"{clip_id}.json"
+
+    @property
+    def webcam_report(self) -> Path:
+        """The webcam detection report for this source video.
+
+        Detection runs once for the whole source, because a webcam overlay
+        is in the same place in every shot. Slicing that one track per clip
+        is faster than detecting again, and steadier.
+        """
+        return self.root / "webcam_report.json"
 
     @property
     def captions_dir(self) -> Path:
@@ -623,25 +695,30 @@ class PipelineRunner:
         except Exception:  # pragma: no cover - defensive
             return False
 
-    def _stage_reframe(self, clips: list[Clip], transcript: Transcript) -> dict[str, CropPath]:
+    def _stage_reframe(
+        self, clips: list[Clip], transcript: Transcript
+    ) -> dict[str, ClipComposition]:
         stage = Stage.REFRAME
         self._check_cancelled()
         source_path = Path(self.source.path)
 
-        crop_paths: dict[str, CropPath] = {}
+        compositions: dict[str, ClipComposition] = {}
 
         if not self.source.has_video:
             # Audio-only sources render as captions on a solid background, so
             # there is nothing to reframe.
             self._finish_stage(stage)
-            return crop_paths
+            return compositions
 
-        config = ReframeConfig(
-            aspect_w=9 if self.settings.export.ratio == "9:16" else 1,
-            aspect_h=16 if self.settings.export.ratio == "9:16" else 1,
-        )
-        if self.settings.export.ratio == "16:9":
-            config = ReframeConfig(aspect_w=16, aspect_h=9)
+        ratio = self.settings.export.ratio
+        out_w, out_h = export.ratio_dimensions(ratio)
+        timeline = self._load_speech_timeline()
+
+        # The webcam is detected once for the whole source. A webcam overlay
+        # is persistent — it is in the same place in every shot — so one
+        # detection sliced per clip is both faster and steadier than
+        # detecting again for every clip.
+        report = self._detect_webcam(source_path)
 
         for index, clip in enumerate(clips):
             self._check_cancelled()
@@ -650,21 +727,185 @@ class PipelineRunner:
                 index / len(clips),
                 f"Reframing clip {index + 1}/{len(clips)}",
             )
+
+            layout = self._plan_layout(report, clip, timeline, out_w=out_w, out_h=out_h)
+
+            # The gameplay area decides the crop path's aspect ratio: a
+            # stacked layout leaves the bottom sixty per cent for gameplay,
+            # and the crop has to match that or the two would not line up.
+            aspect_w, aspect_h = _crop_aspect(layout, ratio)
+            config = ReframeConfig(aspect_w=aspect_w, aspect_h=aspect_h)
+
             cached = self.workspace.crop_path(clip.id)
             if cached.exists():
-                crop_paths[clip.id] = CropPath.load(cached)
+                crop_path = CropPath.load(cached)
             else:
-                crop_paths[clip.id] = build_crop_path(
+                crop_path = build_crop_path(
                     source_path,
                     start_s=clip.start_s,
                     end_s=clip.end_s,
                     transcript=transcript,
                     config=config,
                 )
-                crop_paths[clip.id].save(cached)
+                crop_path.save(cached)
+
+            compositions[clip.id] = ClipComposition(crop_path=crop_path, layout=layout)
 
         self._finish_stage(stage)
-        return crop_paths
+        return compositions
+
+    def _detect_webcam(self, source_path: Path) -> WebcamReport:
+        """Find the webcam region in the source, once.
+
+        The result is cached in the job's workspace so a retry does not pay
+        for detection again, and so the run record keeps the reasoning: the
+        sampling rate, the confidence, and why the region was or was not
+        used.
+        """
+        cached = self.workspace.webcam_report
+        if cached.exists():
+            report = WebcamReport.load(cached)
+            if report.track is not None or report.unavailable_reason:
+                return report
+
+        info = ffmpeg.probe(source_path)
+        if not info.has_video or not info.width or not info.height:
+            report = WebcamReport(unavailable_reason="the source has no video stream")
+        else:
+            report = detect_webcam(
+                source_path,
+                width=info.width,
+                height=info.height,
+            )
+            report.save(cached)
+
+        if report.track is not None:
+            log.info(
+                "Webcam found in %s at %s with %.0f%% confidence (%s).",
+                source_path.name,
+                report.track.rect.to_dict(),
+                report.track.confidence * 100,
+                report.sampling_reason,
+            )
+            try:
+                layout_store.record_detection(
+                    self.source.id,
+                    rect=report.track.rect.to_dict(),
+                    confidence=report.track.confidence,
+                    face_width=report.track.face_width,
+                    reason=report.track.reason or report.sampling_reason,
+                )
+            except Exception as exc:  # noqa: BLE001 - a record is not worth failing a render for
+                log.warning("Could not record the webcam detection: %s", exc)
+        else:
+            log.info(
+                "No webcam found in %s (%s); the clips will be gameplay only.",
+                source_path.name,
+                report.unavailable_reason or "no candidate was confident enough",
+            )
+        return report
+
+    def _plan_layout(
+        self,
+        report: WebcamReport,
+        clip: Clip,
+        timeline: speech_timeline.SpeechTimeline | None,
+        *,
+        out_w: int,
+        out_h: int,
+    ) -> LayoutPath | None:
+        """Plan the composition for one clip.
+
+        The order is the same as the planner's own: what the user asked for
+        first, then what was detected, then the geometry. A manual choice
+        for this source beats every automatic decision.
+        """
+        settings = self.settings.export
+        if settings.layout == "gameplay_only":
+            # The user turned the webcam off. Nothing to plan.
+            return None
+
+        track: WebcamTrack | None = report.track
+        if track is not None:
+            track = track.slice(clip.start_s, clip.end_s)
+
+        manual = self._manual_layout(track)
+        if manual is None and settings.layout in ("above", "corner"):
+            # The user chose a layout in the settings rather than for this
+            # source. It still needs a region to show.
+            if track is None:
+                return None
+            variant = LayoutVariant.ABOVE if settings.layout == "above" else LayoutVariant.CORNER
+            manual = ManualLayout(
+                variant=variant,
+                rect=track.rect,
+                position=settings.webcam_position,
+            )
+
+        if track is None and manual is None:
+            return None
+
+        source_width, source_height = _source_size(report)
+        if source_width <= 0 or source_height <= 0:
+            return None
+
+        # The speech intervals come from the shared timeline, so the webcam
+        # emphasis and the music ducking agree about when somebody is
+        # talking. There is no second detector here.
+        spans: list[tuple[float, float]] = []
+        if timeline is not None:
+            for interval in timeline.relative_slice(clip.start_s, clip.end_s):
+                spans.append((interval.start_ms / 1000.0, interval.end_ms / 1000.0))
+
+        config = LayoutConfig(
+            output_width=out_w,
+            output_height=out_h,
+            webcam_height_frac=settings.webcam_height_frac,
+            corner_width_frac=settings.webcam_corner_frac,
+        )
+
+        path = plan_layout(
+            source_width=source_width,
+            source_height=source_height,
+            config=config,
+            webcam=track,
+            manual=manual,
+            speech_spans=spans,
+            duration_s=clip.end_s - clip.start_s,
+        )
+        path_file = self.workspace.layout(clip.id)
+        path_file.parent.mkdir(parents=True, exist_ok=True)
+        path_file.write_text(json.dumps(path.to_dict(), indent=2), encoding="utf-8")
+        return path
+
+    def _manual_layout(self, track: WebcamTrack | None) -> ManualLayout | None:
+        """The user's own choice for this source, if there is one."""
+        override = layout_store.get_source_layout(self.source.id)
+        if override is None or not override.has_override:
+            return None
+
+        try:
+            variant = LayoutVariant(override.variant)
+        except ValueError:
+            return None
+
+        rect = None
+        if override.rect_width > 0 and override.rect_height > 0:
+            rect = Rect(
+                x=override.rect_x,
+                y=override.rect_y,
+                width=override.rect_width,
+                height=override.rect_height,
+            )
+        elif track is not None:
+            rect = track.rect
+
+        return ManualLayout(
+            variant=variant,
+            rect=rect,
+            scale=override.scale or None,
+            position=override.position or "top-right",
+        )
 
     def _stage_captions(self, clips: list[Clip], transcript: Transcript) -> None:
         stage = Stage.CAPTIONS
@@ -679,7 +920,7 @@ class PipelineRunner:
         self,
         clips: list[Clip],
         transcript: Transcript,
-        crop_paths: dict[str, CropPath],
+        compositions: dict[str, ClipComposition],
     ) -> None:
         stage = Stage.EXPORT
         self._check_cancelled()
@@ -698,7 +939,10 @@ class PipelineRunner:
         for index, clip in enumerate(clips):
             self._check_cancelled()
 
-            crop_path = crop_paths.get(clip.id) or self._fallback_crop_path(clip, ratio)
+            composition = compositions.get(clip.id)
+            crop_path = (
+                composition.crop_path if composition else self._fallback_crop_path(clip, ratio)
+            )
             words = transcript.slice(clip.start_word, clip.end_word)
             destination = destination_dir / export.output_filename(
                 clip.title or f"clip-{clip.rank}", ratio
@@ -718,6 +962,7 @@ class PipelineRunner:
                     if timeline is not None
                     else []
                 ),
+                layout=composition.layout if composition else None,
             )
 
             def clip_progress(fraction: float, i: int = index) -> None:

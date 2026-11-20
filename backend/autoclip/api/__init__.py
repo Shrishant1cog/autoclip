@@ -10,6 +10,7 @@ from . import (
     chat,
     clips,
     jobs,
+    layout,
     learning,
     music,
     notifications,
@@ -48,3 +49,4 @@ api_router.include_router(recovery.router)
 api_router.include_router(resources.router)
 api_router.include_router(restarts.router)
 api_router.include_router(privacy.router)
+api_router.include_router(layout.router)

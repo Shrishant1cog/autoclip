@@ -141,6 +141,21 @@ class ExportSettings(BaseModel):
     ducking_attack_ms: int = 120
     #: How quickly the bed comes back up when speech stops, in milliseconds.
     ducking_release_ms: int = 350
+    #: How the webcam and the gameplay sit together (M2).
+    #:
+    #: ``auto`` lets the planner decide from what it detects. ``above`` puts
+    #: the webcam in a strip over the gameplay, ``corner`` overlays it in a
+    #: corner, and ``gameplay_only`` never shows a webcam. A manual choice
+    #: made for one source beats this setting for that source.
+    layout: Literal["auto", "above", "corner", "gameplay_only"] = "auto"
+    #: The webcam's share of the output height in the stacked layout. 0.40 is
+    #: the preset — about forty per cent webcam, sixty per cent gameplay. It
+    #: is a preference, not a rule.
+    webcam_height_frac: float = Field(default=0.40, gt=0.0, le=0.85)
+    #: Which corner the webcam sits in when the layout is ``corner``.
+    webcam_position: Literal["top-left", "top-right", "bottom-left", "bottom-right"] = "top-right"
+    #: The webcam's share of the output width in the corner layout.
+    webcam_corner_frac: float = Field(default=0.38, gt=0.0, le=1.0)
 
 
 class ResourceSettings(BaseModel):

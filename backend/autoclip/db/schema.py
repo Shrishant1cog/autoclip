@@ -684,6 +684,48 @@ def _migration_v16(conn: sqlite3.Connection) -> None:
     conn.executescript(_V16)
 
 
+# --- v17: per-source layouts ------------------------------------------------
+
+_V17 = """
+-- One row per source video: what the detector found, and what the user chose.
+--
+-- The detected columns are a record of the last detection run. They are kept
+-- so the settings page can say what was found and why, and so a re-render
+-- does not have to run detection again to show the user the region.
+--
+-- The override columns are the user's own choice. An empty variant means
+-- 'no override': the automatic planner decides. A manual layout always
+-- wins over the automatic one, so it is stored separately rather than
+-- overwriting what the detector found.
+--
+-- Nothing here identifies anybody. The rectangle is a region of pixels and
+-- the confidence is a number; there is no face template and no name.
+CREATE TABLE IF NOT EXISTS source_layouts (
+    source_id           TEXT PRIMARY KEY,
+    variant             TEXT NOT NULL DEFAULT '',
+    rect_x              REAL NOT NULL DEFAULT 0,
+    rect_y              REAL NOT NULL DEFAULT 0,
+    rect_width          REAL NOT NULL DEFAULT 0,
+    rect_height         REAL NOT NULL DEFAULT 0,
+    position            TEXT NOT NULL DEFAULT '',
+    scale               REAL NOT NULL DEFAULT 0,
+    detected_x          REAL NOT NULL DEFAULT 0,
+    detected_y          REAL NOT NULL DEFAULT 0,
+    detected_width      REAL NOT NULL DEFAULT 0,
+    detected_height     REAL NOT NULL DEFAULT 0,
+    detected_confidence REAL NOT NULL DEFAULT 0,
+    detected_face_width REAL NOT NULL DEFAULT 0,
+    detected_reason     TEXT NOT NULL DEFAULT '',
+    detected_at         TEXT NOT NULL DEFAULT '',
+    updated_at          TEXT NOT NULL
+);
+"""
+
+
+def _migration_v17(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V17)
+
+
 #: Ordered migrations. Index + 1 is the resulting ``user_version``.
 #: Append only — never edit a migration that has shipped.
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
@@ -703,6 +745,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v14,
     _migration_v15,
     _migration_v16,
+    _migration_v17,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)
