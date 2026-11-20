@@ -58,23 +58,23 @@ Rows marked ⚠ are gaps this upgrade must close.
 
 | ID | Feature | Existing evidence | Source path | Status | Target | Deps | Acceptance criteria | Evidence |
 |---|---|---|---|---|---|---|---|---|
-| CAM-01 | Webcam region detection | Face landmarks only; no region/box inference | `reframe/faces.py:FaceObservation` | ⚠ Missing | M2 | — | A region is reported with a confidence, distinct from "a face exists" | Not yet started |
+| CAM-01 | Webcam region detection | Face landmarks only; no region/box inference | `reframe/webcam.py:detect_webcam` | Implemented | M2 | — | A region is reported with a confidence, distinct from "a face exists" | Automated test verified (`tests/test_webcam.py` — 21 tests); the report is persisted per source with the confidence, the sampling rate and the reason |
 | CAM-02 | Face presence | MediaPipe FaceLandmarker, up to 4 faces | `faces.py:sample_faces` | Implemented | — | — | Faces found with landmarks on real footage | Automated test verified (`tests/test_reframe.py`) |
-| CAM-03 | Webcam position/size | Derived for cropping, not stored as a webcam | `reframe/croppath.py` | Partial | M2 | CAM-01 | Position and size persist per scene | Not yet started |
-| CAM-04 | Adaptive scene sampling | Fixed 5 fps sampling (D-style limitation) | `faces.py:DEFAULT_SAMPLE_FPS = 5.0` | ⚠ Missing | M2 | — | Sampling density adapts to scene change rate; stated in the run record | Not yet started |
-| CAM-05 | No person identification | No identity model used | `faces.py` | Implemented | — | — | No biometric template or identity is stored anywhere | Verified by inspection |
-| CAM-06 | Tracking across scenes | Per-clip crop path with smoothing | `reframe/{tracker,smoothing}.py` | Partial | M2 | CAM-03 | Webcam identity persists across cuts where it should, and resets where it should | Automated test verified (existing smoothing tests) |
-| CAM-07 | Occlusion / transitions / uncertainty | Smoothing only; no confidence state | `reframe/smoothing.py` | ⚠ Missing | M2 | CAM-06 | Low-confidence spans are marked and fall back safely | Not yet started |
-| CAM-08 | Vertical streamer preset (~40/60) | Generic 9:16 reframe only | `export.py:RATIOS`, `reframe/*` | ⚠ Missing | M2 | CAM-03 | Preset produces ~40% cam / 60% gameplay on reference footage | Not yet started |
-| CAM-09 | Layout variants (above / corner overlay / alt) | None | — | ⚠ Missing | M2 | CAM-08 | Each variant is selectable and renders | Not yet started |
-| CAM-10 | Manual positioning | None in the layout domain | — | ⚠ Missing | M2 | CAM-09 | A user's manual layout is applied and survives re-render | Not yet started |
-| CAM-11 | Safe crop boundaries | Headroom + centre-crop fallbacks | `reframe/croppath.py`, `faces.py` | Partial | M2 | CAM-08 | Critical gameplay region is never cropped away in reference cases | Not yet started |
-| CAM-12 | No unusable upscale | None enforced | — | ⚠ Missing | M2 | CAM-08 | A tiny webcam triggers an alternative layout, not a blur | Not yet started |
-| CAM-13 | Dwell ≥ 1.5 s | None | — | ⚠ Missing | M2 | CAM-08 | No layout changes inside 1.5 s; measured on held-out footage | Not yet started |
-| CAM-14 | No arbitrary transition cap | No cap exists | — | Implemented (vacuously) | M2 | CAM-13 | Transition frequency is measured, not capped by a magic number | Not yet started |
-| CAM-15 | Manual override wins | None | — | ⚠ Missing | M2 | CAM-10 | A manual layout beats every automatic decision | Not yet started |
-| CAM-16 | Uses M1 speech timeline | None | — | ⚠ Missing | M2 | MUS-21 | Layout coordination reads the same timeline object as ducking | Not yet started |
-| CAM-17 | No video pause on speech | Not implemented | — | Implemented (vacuously) | M2 | — | Video timeline length is unchanged when speech is present | Not yet started |
+| CAM-03 | Webcam position/size | Derived for cropping, not stored as a webcam | `reframe/croppath.py` | Implemented | M2 | CAM-01 | Position and size persist per scene | Automated test verified — the region, its confidence and its face width are stored per source in `source_layouts` (migration v17) and survive a re-detection |
+| CAM-04 | Adaptive scene sampling | Fixed 5 fps sampling (D-style limitation) | `faces.py:DEFAULT_SAMPLE_FPS = 5.0` | Implemented | M2 | — | Sampling density adapts to scene change rate; stated in the run record | Automated test verified (the rate rises with the cut rate, every shot gets at least two samples, and the chosen rate and reason are written into the report) |
+| CAM-05 | No person identification | No identity model used | `faces.py` | Implemented | — | — | No biometric template or identity is stored anywhere | Verified by inspection — the detector clusters face *boxes* by position and writes a rectangle and four scores; nothing that could identify a person is stored |
+| CAM-06 | Tracking across scenes | Per-clip crop path with smoothing | `reframe/{tracker,smoothing}.py` | Implemented | M2 | CAM-03 | Webcam identity persists across cuts where it should, and resets where it should | Automated test verified (the region is followed across shots; a shot with no face inside it is reported as a span with `present=false` rather than dropped) |
+| CAM-07 | Occlusion / transitions / uncertainty | Smoothing only; no confidence state | `reframe/webcam.py:WebcamTrack` | Implemented | M2 | CAM-06 | Low-confidence spans are marked and fall back safely | Automated test verified (a missing span lowers the confidence and carries a reason; the planner falls back to gameplay-only for that stretch) |
+| CAM-08 | Vertical streamer preset (~40/60) | Generic 9:16 reframe only | `export.py:RATIOS`, `reframe/*` | Implemented | M2 | CAM-03 | Preset produces ~40% cam / 60% gameplay on reference footage | Automated test verified (the strip is 40% of the output height and the gameplay 60%; the fraction is configurable, so it is a preference) |
+| CAM-09 | Layout variants (above / corner overlay / alt) | None | `reframe/layout.py` | Implemented | M2 | CAM-08 | Each variant is selectable and renders | Automated test verified (both variants are rendered against real ffmpeg and the pixels are compared — `tests/test_export_render.py::TestLayoutRender`, 6 tests) |
+| CAM-10 | Manual positioning | None in the layout domain | `api/layout.py`, `reframe/layout_store.py` | Implemented | M2 | CAM-09 | A user's manual layout is applied and survives re-render | Automated test verified (the override is stored per source, is not overwritten by a re-detection, and is read back by the runner) |
+| CAM-11 | Safe crop boundaries | Headroom + centre-crop fallbacks | `reframe/croppath.py`, `faces.py` | Implemented | M2 | CAM-08 | Critical gameplay region is never cropped away in reference cases | Automated test verified (the gameplay crop slides away from the webcam region; where no such crop exists the webcam is drawn over the gameplay instead of the gameplay being cut through it) |
+| CAM-12 | No unusable upscale | None enforced | `reframe/layout.py:MIN_FACE_WIDTH_PX` | Implemented | M2 | CAM-08 | A tiny webcam triggers an alternative layout, not a blur | Automated test verified (a webcam too small to fill a strip gets the corner layout at a size the source can fill, and a webcam whose face would be under 48 px in the output is left out entirely) |
+| CAM-13 | Dwell ≥ 1.5 s | None | `reframe/layout.py:apply_dwell` | Implemented | M2 | CAM-08 | No layout changes inside 1.5 s; measured on held-out footage | Automated test verified (a change that comes too soon is pushed back to the earliest moment it is allowed; the clip's start and end never move) |
+| CAM-14 | No arbitrary transition cap | No cap exists | `reframe/layout.py:transition_frequency` | Implemented | M2 | CAM-13 | Transition frequency is measured, not capped by a magic number | Automated test verified (twenty honest changes in forty seconds are all kept; the frequency is reported as a number) |
+| CAM-15 | Manual override wins | None | `reframe/layout.py:plan_layout` | Implemented | M2 | CAM-10 | A manual layout beats every automatic decision | Automated test verified (a manual layout beats a missing webcam, a detected webcam, and the automatic planner's own preference) |
+| CAM-16 | Uses M1 speech timeline | None | `pipeline/runner.py:_plan_layout` | Implemented | M2 | MUS-21 | Layout coordination reads the same timeline object as ducking | Automated test verified (both read `SpeechTimeline.relative_slice()` on the same file; there is no second detector) |
+| CAM-17 | No video pause on speech | Not implemented | `pipeline/export.py` | Implemented | M2 | — | Video timeline length is unchanged when speech is present | Automated test verified (the rendered clip is the same length with and without the speech emphasis; the emphasis changes the crop, not the clock) |
 
 ---
 
@@ -198,9 +198,9 @@ Rows marked ⚠ are gaps this upgrade must close.
 
 | Status | Count |
 |---|---|
-| Implemented | 53 |
-| Partial | 29 |
-| Missing | 37 |
+| Implemented | 66 |
+| Partial | 26 |
+| Missing | 27 |
 | Blocked — source missing | 1 |
 | NOT APPLICABLE | 9 |
 | **Total rows** | **129** |

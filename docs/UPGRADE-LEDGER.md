@@ -16,7 +16,7 @@ milestone `In progress` and is reported as such.
 | M0 — Audit and baseline | **Complete** | 16/16 gate items done or explicitly blocked; independent review folded in |
 | M0.5 — Security and consent | **Complete** | 12/12 gate items done; 49 security tests passing; the residual yt-dlp secondary-request surface is documented, not claimed |
 | M1 — Music intelligence | **Complete** | 12/12 gate items done; 101 tests across the M1 area passing; four named residuals recorded (not claimed as verified) |
-| M2 — Webcam intelligence | Not started | — |
+| M2 — Webcam intelligence | **Complete** | 13/13 gate items done; 76 tests across the M2 area passing, including 6 real-ffmpeg render tests; three named residuals recorded (not claimed as verified) |
 | M3 — Creative intelligence | Not started | — |
 | M4a — YouTube hardening | Not started | — |
 | M4b — Instagram | Not started | — |
@@ -169,7 +169,61 @@ ducking matrix is asserted at the filter level rather than end-to-end.
 
 ---
 
-## M2–M5
+## M2 — Webcam detection and intelligent layouts
+
+**Status: Complete.** The milestone ships the region detector, the layout planner, the ffmpeg
+composition layer, the per-source record, the API and the Settings surface. Three residuals are
+named below rather than being written up as finished: the transition frequency has not been
+measured on held-out footage (there is none on this machine), the manual override sets the
+variant and the corner but not a free rectangle drawn by hand, and the face-legibility rule is
+asserted against synthetic geometry rather than against real streamer footage.
+
+| # | Gate item | State | Evidence |
+|---|---|---|---|
+| 1 | A **webcam region** with a confidence, distinct from "a face exists" | Done | `reframe/webcam.py` — the region is a persistent cluster of faces scored on support, stability, **cut stability** (an overlay does not move when the shot cuts; a person in the scene does) and persistence. `tests/test_webcam.py` — 21 tests |
+| 2 | Detection never raises; it returns a report | Done | An unreadable video, a missing model and a video with no faces all come back as `WebcamReport(unavailable_reason=…)`; `::test_a_clip_with_no_duration_is_a_report_not_a_crash` |
+| 3 | Adaptive scene sampling, not a flat 5 fps | Done | `webcam.py:adaptive_sample_fps` — `MIN_SAMPLE_FPS=2.0`, `BASE_SAMPLE_FPS=5.0`, `MAX_SAMPLE_FPS=15.0`, `MIN_SAMPLES_PER_SHOT=2`, density rising above `CUTS_PER_MINUTE_FOR_DENSITY=4.0`. The chosen rate **and the reason** are written into the report; `::TestAdaptiveSampleFps` |
+| 4 | Tracking across scenes, with uncertainty | Done | `webcam.py:track_webcam` — the region does not move; a stretch with no face inside it is reported as a span with `present=false` and a reason, and the confidence falls with the missing time. `::TestTrackWebcam` |
+| 5 | No person identification | Done | The detector clusters face *boxes* by position and writes a rectangle and four scores. There is no template, no embedding and no identity anywhere — `reframe/webcam.py` inspected end to end |
+| 6 | The vertical streamer preset, ~40% cam / 60% gameplay | Done | `reframe/layout.py` — the strip is `webcam_height_frac` of the output height (0.40 by default) and the gameplay the rest. The fraction is configurable, so it is a preference, not a rule; `tests/test_layout.py::TestTheStreamerPreset` |
+| 7 | Above, corner and gameplay-only variants, all rendering | Done | `pipeline/export.py` builds the composition; `tests/test_export_render.py::TestLayoutRender` renders both variants against **real ffmpeg** and compares the pixels — 6 tests |
+| 8 | Manual positioning, surviving a re-render | Done | `reframe/layout_store.py` + migration v17 (`source_layouts`) — the user's choice is stored per source and is never overwritten by a re-detection; `tests/test_layout_api.py` |
+| 9 | Safe crop boundaries | Done | The gameplay crop slides away from the webcam region; where no such crop exists the webcam is drawn over the gameplay rather than the gameplay being cut through it; `::test_the_gameplay_is_never_cropped_through_the_webcam` |
+| 10 | No unusable upscale | Done | The rule is **face legibility**, not a blind ratio: `MIN_FACE_WIDTH_PX=48` in the output and `MAX_FACE_SCALE=3.0`. A webcam too small for a strip gets the corner layout at a size the source can fill, and one whose face would be under 48 px is left out; `::TestTheSafeFallbacks` |
+| 11 | Dwell ≥ 1.5 s, no arbitrary transition cap | Done | `layout.py:apply_dwell` pushes a change that comes too soon to the earliest moment it is allowed; the clip's start and end never move. `transition_frequency` **measures** rather than caps; `::TestStability` |
+| 12 | The shared M1 speech timeline, no second detector | Done | `pipeline/runner.py:_plan_layout` reads `SpeechTimeline.relative_slice()` — the same object the ducking reads; `::test_the_speech_spans_are_the_shared_timeline` |
+| 13 | No video pause on speech | Done | The emphasis is a **time-varying crop of the webcam region before a constant scale**, so the overlay's size never changes and the clip's length never changes; `::test_the_clip_is_not_lengthened_by_the_layout` |
+
+### Decisions taken in M2
+
+| Decision | Why | Where recorded |
+|---|---|---|
+| A webcam is a **persistent cluster of faces**, scored on cut stability rather than on "a face is here" | A face says someone is on screen. A webcam says a particular rectangle keeps holding that person, in the same place, across cuts. The cut-stability measure is what separates the two | `reframe/webcam.py` |
+| Detection runs **once per source**, not once per clip | A webcam overlay is in the same place in every shot, so one detection sliced per clip is both faster and steadier than detecting again | `pipeline/runner.py:_detect_webcam` |
+| The **no-unusable-upscale rule is face legibility**, not a blind ratio | A hard 1.5× cap would reject a real 480 px face-cam blown to 1080 px, which is normal practice. What matters is whether the face can be read in the output | `reframe/layout.py:MIN_FACE_WIDTH_PX`, `MAX_FACE_SCALE` |
+| A manual layout beats the automatic one **on the variant only**; the legibility veto stays automatic | The user may insist on a layout AutoClip thinks is a poor fit — that is their call. But the universal scale cap still applies, because a blur is a bug, not a preference | `reframe/layout.py:plan_layout` |
+| The stacked layout is a **true split**: the gameplay is scaled to the gameplay slot and padded onto a blurred full-frame background | The alternative — gameplay full-frame with the webcam drawn over it — hides part of the game, which the specification explicitly forbids | `pipeline/export.py:_compose_with_webcam` |
+| The webcam's **presence** varies by time (`enable='between(t,…)'`) but the gameplay geometry does not | One filtergraph cannot change the crop path's scale mid-stream. The presence can change; the geometry cannot | `pipeline/export.py` |
+| The speech emphasis is a **time-varying crop before a constant scale** | The `crop` filter re-evaluates its expressions per frame natively; a changing overlay size would force ffmpeg to rebuild the overlay every time somebody started talking | `pipeline/export.py:_webcam_crop_filter` |
+| The **crop path's aspect follows the gameplay slot** (1080×1152 ⇒ 15:16) | A crop path built for the full 9:16 would be stretched into the slot, so the gameplay would come out distorted | `pipeline/runner.py:_crop_aspect` |
+| The user's choice is stored **separately** from what the detector found | Detection must never overwrite a choice, and changing your mind about the layout is not the same as changing your mind about the video | `reframe/layout_store.py`, migration v17 |
+| The **detected region is persisted with its confidence and its reason** | The settings screen has to say what it is working from. A picture of a face with no explanation is not an answer | `reframe/webcam.py:WebcamReport.save` |
+
+### Residuals carried into later milestones
+
+| Residual | Status | Action |
+|---|---|---|
+| The transition frequency has **not been measured on held-out footage** | Unverified — the rule is implemented and asserted against synthetic segments, but there is no held-out streamer footage on this machine | M5 — measure it on the Lane C material and record the number |
+| The manual override sets the **variant and the corner**, not a free rectangle drawn by hand | Partial — the rectangle is stored and honoured, but the UI offers variants rather than a drag-to-draw region | M5 — a drag-to-draw region on a source thumbnail |
+| The face-legibility rule is asserted against **synthetic geometry**, not real streamer footage | Partial — the rule is exact and tested, but no real webcam overlay was available to measure | M5 — Lane C acceptance on the downloaded material |
+| The AI music-selection module (`music/selection.py`) is built and tested but **not called from the pipeline** | Partial — carried from M1 | M3 |
+| The library filter has **no energy or format filter** | Partial — carried from M1 | M3 |
+| The music preference is still **one global setting** | Partial — carried from M1 | M3 |
+| The **eight-scenario ducking matrix** is asserted at the filter level, not as eight end-to-end renders | Partial — carried from M1 | M5 |
+
+---
+
+## M3–M5
 
 Not started. Sequence and ordering constraints are in `docs/upgrade-audit.md` §19.
 
@@ -191,3 +245,9 @@ Not started. Sequence and ordering constraints are in `docs/upgrade-audit.md` §
 | 2026-11-20 | `b390b65` | M1 — the music library, the local measurements, the licence gate, the shared speech timeline, migration v16 |
 | 2026-11-20 | `07a4424` | M1 — the ducking follows the shared timeline; the export refuses an unlicensed track |
 | 2026-11-20 | `9d5e90b` | M1 — Settings → Music library; the TypeScript build state is no longer tracked |
+| 2026-11-20 | `2266466` | M1 — the ledger, the matrix and the changelog updated with the M1 evidence |
+| 2026-11-20 | `17dfb30` | M1 fix — the ducking is measured from the clip, not from the source; `relative_slice()` rebases the timeline onto the clip |
+| 2026-11-20 | `37f0cdd` | M2 — the webcam detector: a persistent cluster of faces scored on cut stability, with adaptive sampling and a report that says how sure it is |
+| 2026-11-20 | `50f7180` | M2 — the layout planner and the ffmpeg composition layer: the 40/60 preset, the face-legibility fallback, the dwell rule, and six real-ffmpeg render tests |
+| 2026-11-20 | `1529b5b` | M2 — the layout wired into the runner, the per-source record (migration v17), and the `/api/layout` endpoints |
+| 2026-11-20 | `b5810a5` | M2 — Settings → Webcam layout |

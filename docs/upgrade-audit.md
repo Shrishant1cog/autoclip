@@ -274,6 +274,13 @@ interrupted-migration test, and no table for rights confirmation, consent decisi
 music licensing, upload attempts/idempotency, quota reservations, provider usage, or learning
 versions.
 
+**Since this audit (M0):** three migrations have closed part of that list — v15 added
+`egress_consents` and `egress_log`, v16 added `music_folders`, `music_tracks` and
+`music_licenses`, and v17 added `source_layouts`. The schema is now at v17 with 25 live tables.
+The gaps that remain — backup before migration, an interrupted-migration test, upload
+attempts/idempotency, quota reservations, provider usage and learning versions — are still
+open and are carried in the ledger.
+
 ---
 
 ## 11. Pipeline and queue behaviour
