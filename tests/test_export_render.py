@@ -21,12 +21,22 @@ from autoclip.pipeline.reframe.croppath import (
     Strategy,
     centre_crop,
 )
+from autoclip.pipeline.reframe.layout import (
+    LayoutPath,
+    LayoutSegment,
+    LayoutSlot,
+    LayoutVariant,
+)
+from autoclip.pipeline.reframe.webcam import Rect
 from autoclip.pipeline.transcript import Word
 
 pytestmark = pytest.mark.slow
 
 SOURCE_W, SOURCE_H = 1280, 720
 SOURCE_DURATION = 10.0
+
+#: Where the webcam region sits in the marked source below.
+CAM_X, CAM_Y, CAM_W, CAM_H = 900, 40, 340, 260
 
 
 @pytest.fixture(scope="module")
@@ -55,6 +65,45 @@ def source_video(tmp_path_factory) -> Path:
             "-c:a",
             "aac",
             "-shortest",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return path
+
+
+@pytest.fixture(scope="module")
+def marked_source(tmp_path_factory) -> Path:
+    """A still source with a red rectangle where the webcam would be.
+
+    Still, so the only thing that can change a pixel is the layout. Moving
+    is the one thing a test must not have.
+    """
+    path = tmp_path_factory.mktemp("media") / "marked.mp4"
+    subprocess.run(
+        [
+            ffmpeg.ffmpeg_path(),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=c=0x203040:s={SOURCE_W}x{SOURCE_H}:r=30:d={SOURCE_DURATION}",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=c=0xdd3311:s={CAM_W}x{CAM_H}:r=30:d={SOURCE_DURATION}",
+            "-filter_complex",
+            f"[0:v][1:v]overlay={CAM_X}:{CAM_Y}:shortest=1[v]",
+            "-map",
+            "[v]",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
             str(path),
         ],
         check=True,
@@ -300,6 +349,188 @@ class TestMultiSegmentRender:
         assert (info.width, info.height) == (1080, 1920)
 
 
+class TestLayoutRender:
+    """The layout has to survive contact with ffmpeg.
+
+    A filtergraph can parse and still produce the wrong thing, so these
+    tests look at the pixels rather than at the string.
+    """
+
+    def _stacked(self, *, speech_spans: list[tuple[float, float]] | None = None) -> LayoutPath:
+        strip = LayoutSlot(x=0, y=0, width=1080, height=768)
+        gameplay = LayoutSlot(x=0, y=768, width=1080, height=1152)
+        return LayoutPath(
+            source_width=SOURCE_W,
+            source_height=SOURCE_H,
+            output_width=1080,
+            output_height=1920,
+            segments=[
+                LayoutSegment(
+                    start_s=0.0,
+                    end_s=5.0,
+                    variant=LayoutVariant.ABOVE,
+                    gameplay_slot=gameplay,
+                    webcam_slot=strip,
+                    webcam_strip=strip,
+                    gameplay_source=Rect(x=134.0, y=0.0, width=1012.0, height=720.0),
+                    webcam_source=Rect(x=CAM_X, y=CAM_Y + 9, width=CAM_W, height=242),
+                    speech_spans=speech_spans or [],
+                )
+            ],
+        )
+
+    def _corner(self) -> LayoutPath:
+        slot = LayoutSlot(x=756, y=32, width=292, height=224)
+        return LayoutPath(
+            source_width=SOURCE_W,
+            source_height=SOURCE_H,
+            output_width=1080,
+            output_height=1920,
+            segments=[
+                LayoutSegment(
+                    start_s=0.0,
+                    end_s=5.0,
+                    variant=LayoutVariant.CORNER,
+                    gameplay_slot=LayoutSlot(x=0, y=0, width=1080, height=1920),
+                    webcam_slot=slot,
+                    webcam_strip=slot,
+                    gameplay_source=Rect(x=134.0, y=0.0, width=1012.0, height=720.0),
+                    webcam_source=Rect(x=CAM_X, y=CAM_Y, width=CAM_W, height=CAM_H),
+                )
+            ],
+        )
+
+    def test_the_stacked_layout_renders(self, marked_source, words, tmp_path) -> None:
+        destination = tmp_path / "stacked.mp4"
+        crop_path = centre_crop(SOURCE_W, SOURCE_H, 5.0, aspect_w=15, aspect_h=16)
+
+        export.export_clip(
+            make_request(
+                marked_source,
+                destination,
+                crop_path,
+                words,
+                layout=self._stacked(),
+            ),
+            work_dir=tmp_path / "work",
+        )
+
+        info = ffmpeg.probe(destination)
+        assert (info.width, info.height) == (1080, 1920)
+        assert info.duration_s == pytest.approx(5.0, abs=0.35)
+
+    def test_the_corner_layout_renders(self, marked_source, words, tmp_path) -> None:
+        destination = tmp_path / "corner.mp4"
+
+        export.export_clip(
+            make_request(
+                marked_source,
+                destination,
+                centre_crop(SOURCE_W, SOURCE_H, 5.0),
+                words,
+                layout=self._corner(),
+            ),
+            work_dir=tmp_path / "work",
+        )
+
+        info = ffmpeg.probe(destination)
+        assert (info.width, info.height) == (1080, 1920)
+
+    def test_the_webcam_is_actually_drawn(self, marked_source, words, tmp_path) -> None:
+        """The webcam has to be on the frame, not merely in the filtergraph."""
+        with_layout = tmp_path / "with.mp4"
+        without_layout = tmp_path / "without.mp4"
+
+        export.export_clip(
+            make_request(
+                marked_source,
+                with_layout,
+                centre_crop(SOURCE_W, SOURCE_H, 5.0, aspect_w=15, aspect_h=16),
+                words,
+                layout=self._stacked(),
+                burn_captions=False,
+            ),
+            work_dir=tmp_path / "work",
+        )
+        export.export_clip(
+            make_request(
+                marked_source,
+                without_layout,
+                centre_crop(SOURCE_W, SOURCE_H, 5.0, aspect_w=15, aspect_h=16),
+                words,
+                burn_captions=False,
+            ),
+            work_dir=tmp_path / "work",
+        )
+
+        # The top strip is where the webcam goes.
+        assert _region_signature(with_layout, 2.5, 0, 0, 1080, 768) != _region_signature(
+            without_layout, 2.5, 0, 0, 1080, 768
+        )
+
+    def test_the_gameplay_is_in_the_bottom_of_the_frame(
+        self, marked_source, words, tmp_path
+    ) -> None:
+        """The gameplay sits under the webcam, not behind it."""
+        destination = tmp_path / "split.mp4"
+
+        export.export_clip(
+            make_request(
+                marked_source,
+                destination,
+                centre_crop(SOURCE_W, SOURCE_H, 5.0, aspect_w=15, aspect_h=16),
+                words,
+                layout=self._stacked(),
+                burn_captions=False,
+            ),
+            work_dir=tmp_path / "work",
+        )
+
+        # The webcam's red rectangle reaches the bottom of the strip, so the
+        # strip is not plain background.
+        assert _region_signature(destination, 2.5, 0, 700, 1080, 68) != _region_signature(
+            destination, 2.5, 0, 1200, 1080, 68
+        )
+
+    def test_the_speech_emphasis_renders(self, marked_source, words, tmp_path) -> None:
+        """The emphasis changes the picture while someone is speaking."""
+        destination = tmp_path / "emphasis.mp4"
+
+        export.export_clip(
+            make_request(
+                marked_source,
+                destination,
+                centre_crop(SOURCE_W, SOURCE_H, 5.0, aspect_w=15, aspect_h=16),
+                words,
+                layout=self._stacked(speech_spans=[(1.0, 3.0)]),
+                burn_captions=False,
+            ),
+            work_dir=tmp_path / "work",
+        )
+
+        quiet = _region_signature(destination, 0.3, 0, 0, 1080, 768)
+        talking = _region_signature(destination, 2.0, 0, 0, 1080, 768)
+
+        assert quiet != talking
+
+    def test_the_clip_is_not_lengthened_by_the_layout(self, marked_source, words, tmp_path) -> None:
+        """Speech makes the webcam bigger. It does not make the clip longer."""
+        destination = tmp_path / "length.mp4"
+
+        export.export_clip(
+            make_request(
+                marked_source,
+                destination,
+                centre_crop(SOURCE_W, SOURCE_H, 5.0, aspect_w=15, aspect_h=16),
+                words,
+                layout=self._stacked(speech_spans=[(1.0, 3.0)]),
+            ),
+            work_dir=tmp_path / "work",
+        )
+
+        assert ffmpeg.probe(destination).duration_s == pytest.approx(5.0, abs=0.35)
+
+
 class TestEncoding:
     def test_software_encoder_path(self, source_video, words, tmp_path) -> None:
         settings = ExportSettings(prefer_hardware_encoder=False)
@@ -403,6 +634,35 @@ def _frame_signature(video: Path, timestamp: float) -> str:
             str(video),
             "-frames:v",
             "1",
+            "-f",
+            "hash",
+            "-hash",
+            "md5",
+            "-",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def _region_signature(video: Path, timestamp: float, x: int, y: int, w: int, h: int) -> str:
+    """Hash one rectangle of one frame, for comparing parts of a render."""
+    result = subprocess.run(
+        [
+            ffmpeg.ffmpeg_path(),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            str(timestamp),
+            "-i",
+            str(video),
+            "-frames:v",
+            "1",
+            "-vf",
+            f"crop={w}:{h}:{x}:{y}",
             "-f",
             "hash",
             "-hash",

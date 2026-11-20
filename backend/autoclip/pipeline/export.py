@@ -20,7 +20,9 @@ from ..system import report
 from . import captions as captions_module
 from . import ffmpeg
 from .captions import CaptionStyle
-from .reframe.croppath import CropPath, segment_crop_filter
+from .reframe.croppath import CropPath, CropSegment, segment_crop_filter
+from .reframe.layout import LayoutPath, LayoutSlot
+from .reframe.webcam import Rect
 from .speech_timeline import SpeechInterval
 from .transcript import Word
 
@@ -33,6 +35,14 @@ RATIOS: dict[str, tuple[int, int]] = {
     "1:1": (1080, 1080),
     "16:9": (1920, 1080),
 }
+
+#: The colour behind a layout that does not fill the frame. The same near-
+#: black the rest of the app uses, so a rendered clip sits on the page
+#: rather than in a letterbox of someone else's brand.
+CANVAS_COLOR = "0x101014"
+
+#: How much the blurred background is softened when a layout leaves a gap.
+BACKGROUND_BLUR = 24
 
 #: Loudness targets. -14 LUFS integrated with -1.5 dBTP is what every major
 #: platform normalises toward, so hitting it ourselves avoids their processing.
@@ -63,6 +73,9 @@ class ExportRequest:
     #: webcam layout agree on when someone is speaking. Empty means "no
     #: timeline", and the ducking falls back to keying on the audio itself.
     speech_intervals: list[SpeechInterval] = field(default_factory=list)
+    #: The planned composition. None means "no webcam layout", which is the
+    #: plain crop path this project has always used.
+    layout: LayoutPath | None = None
 
     @property
     def duration_s(self) -> float:
@@ -91,6 +104,63 @@ def output_filename(title: str, ratio: str) -> str:
 # --------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class Composition:
+    """How the webcam and the gameplay sit together in the render.
+
+    Everything here is in output pixels, except ``webcam_source``, which is
+    a rectangle in the source video.
+    """
+
+    #: Where the gameplay goes. The crop path is scaled to this.
+    gameplay_slot: LayoutSlot
+    #: Where the webcam is drawn. None means there is no webcam.
+    webcam_slot: LayoutSlot | None = None
+    #: Which part of the source the webcam comes from.
+    webcam_source: Rect | None = None
+    #: When the webcam is on screen, in clip-relative seconds.
+    spans: list[tuple[float, float]] = field(default_factory=list)
+    #: When the webcam is drawn larger, in clip-relative seconds. These come
+    #: from the shared speech timeline.
+    emphasis: list[tuple[float, float]] = field(default_factory=list)
+    #: How much larger the webcam is drawn during speech.
+    gain: float = 0.0
+
+
+def composition_from_layout(layout: LayoutPath | None) -> Composition | None:
+    """Pull the render facts out of a layout plan.
+
+    The gameplay area is the same for the whole clip: the crop path is built
+    for it, and a mid-clip change of size is not something one filtergraph
+    can express. The webcam's *presence* does vary, and that is carried by
+    the overlay's ``enable`` expression.
+    """
+    if layout is None:
+        return None
+
+    with_webcam = [segment for segment in layout.segments if segment.webcam_slot is not None]
+    if not with_webcam:
+        return None
+
+    first = with_webcam[0]
+    spans: list[tuple[float, float]] = []
+    emphasis: list[tuple[float, float]] = []
+    for segment in layout.segments:
+        if segment.webcam_slot is None:
+            continue
+        spans.append((segment.start_s, segment.end_s))
+        emphasis.extend(segment.speech_spans)
+
+    return Composition(
+        gameplay_slot=first.gameplay_slot,
+        webcam_slot=first.webcam_slot,
+        webcam_source=first.webcam_source,
+        spans=spans,
+        emphasis=emphasis,
+        gain=first.emphasis_gain,
+    )
+
+
 def build_video_filtergraph(
     request: ExportRequest,
     *,
@@ -103,8 +173,24 @@ def build_video_filtergraph(
     if not segments:
         raise ExportError("The crop path has no segments.")
 
+    composition = composition_from_layout(request.layout)
+    gameplay_slot = composition.gameplay_slot if composition else None
+    target_w = gameplay_slot.width if gameplay_slot else out_w
+    target_h = gameplay_slot.height if gameplay_slot else out_h
+
     parts: list[str] = []
     labels: list[str] = []
+
+    # The webcam is cut from the same input, so the input is split in two.
+    # Both branches are trimmed the same way, so they stay in step.
+    needs_webcam = composition is not None and composition.webcam_slot is not None
+    if needs_webcam:
+        parts.append("[0:v]split=2[gsrc][wsrc]")
+        game_source = "[gsrc]"
+        web_source = "[wsrc]"
+    else:
+        game_source = "[0:v]"
+        web_source = ""
 
     for index, segment in enumerate(segments):
         label = f"v{index}"
@@ -112,24 +198,24 @@ def build_video_filtergraph(
 
         if len(segments) == 1:
             # No trim needed; the input is already seeked to the clip.
-            source_label = "[0:v]"
+            source_label = game_source
             prefix = ""
         else:
             source_label = f"[s{index}]"
             prefix = (
-                f"[0:v]trim=start={segment.start_s:.4f}:end={segment.end_s:.4f},"
+                f"{game_source}trim=start={segment.start_s:.4f}:end={segment.end_s:.4f},"
                 f"setpts=PTS-STARTPTS{source_label}"
             )
             parts.append(prefix)
 
         if segment.fit:
-            parts.extend(_fit_chain(source_label, index, out_w, out_h))
+            parts.extend(_fit_chain(source_label, index, target_w, target_h))
             continue
 
         chain = [segment_crop_filter(segment)]
         if segment.zoom > 0:
-            chain.append(_zoom_filter(segment.zoom, out_w, out_h))
-        chain.append(f"scale={out_w}:{out_h}:flags=lanczos")
+            chain.append(_zoom_filter(segment.zoom, target_w, target_h))
+        chain.append(f"scale={target_w}:{target_h}:flags=lanczos")
         chain.append("setsar=1,format=yuv420p")
 
         parts.append(f"{source_label}{','.join(chain)}[{label}]")
@@ -140,6 +226,17 @@ def build_video_filtergraph(
         parts.append(f"{''.join(labels)}concat=n={len(segments)}:v=1:a=0[vcat]")
         current = "[vcat]"
 
+    if composition is not None and composition.webcam_slot is not None:
+        current = _compose_with_webcam(
+            parts,
+            current=current,
+            composition=composition,
+            segments=segments,
+            web_source=web_source,
+            out_w=out_w,
+            out_h=out_h,
+        )
+
     if request.burn_captions and subtitle_name is not None:
         # Bare relative names — ffmpeg runs with its cwd set to the render
         # workspace, so there is nothing here that needs escaping.
@@ -148,6 +245,162 @@ def build_video_filtergraph(
         parts.append(f"{current}null[vout]")
 
     return ";".join(parts)
+
+
+def _compose_with_webcam(
+    parts: list[str],
+    *,
+    current: str,
+    composition: Composition,
+    segments: list[CropSegment],
+    web_source: str,
+    out_w: int,
+    out_h: int,
+) -> str:
+    """Put the webcam on top of the gameplay, and return the new label.
+
+    The gameplay is scaled to its slot and the rest of the frame is filled
+    with a blurred copy of itself — the same treatment the wide-shot
+    fallback already uses, so a layout never produces plain black bars.
+    """
+    gameplay = composition.gameplay_slot
+    webcam = composition.webcam_slot
+    webcam_source = composition.webcam_source
+    if webcam is None or webcam_source is None:
+        return current
+
+    # -- the gameplay, placed in its slot --------------------------------
+    fills_frame = (
+        gameplay.width == out_w and gameplay.height == out_h and gameplay.x == 0 and gameplay.y == 0
+    )
+    if fills_frame:
+        parts.append(f"{current}null[laycanvas]")
+    else:
+        parts.append(f"{current}split=2[laybg][layfg]")
+        parts.append(
+            f"[laybg]scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
+            f"crop={out_w}:{out_h},boxblur={BACKGROUND_BLUR}:2[laybgfull]"
+        )
+        parts.append(f"[layfg]scale={gameplay.width}:{gameplay.height}:flags=lanczos[layfg2]")
+        parts.append(f"[laybgfull][layfg2]overlay=x={gameplay.x}:y={gameplay.y}[laycanvas]")
+
+    # -- the webcam, cut from the same source ----------------------------
+    parts.extend(
+        _webcam_branch(
+            composition=composition,
+            segments=segments,
+            web_source=web_source,
+        )
+    )
+
+    enable = _presence_expression(composition.spans)
+    parts.append(f"[laycanvas][laycam]overlay=x={webcam.x}:y={webcam.y}:enable='{enable}'[layout]")
+    return "[layout]"
+
+
+def _webcam_branch(
+    *,
+    composition: Composition,
+    segments: list[CropSegment],
+    web_source: str,
+) -> list[str]:
+    """Cut the webcam region out of the source and scale it into its slot.
+
+    The trims mirror the gameplay's, so the webcam stays in step with the
+    clip even when the crop path has several segments.
+    """
+    webcam = composition.webcam_slot
+    if webcam is None:
+        return []
+
+    parts: list[str] = []
+    labels: list[str] = []
+    crop = _webcam_crop_filter(composition)
+
+    for index, segment in enumerate(segments):
+        label = f"w{index}"
+        labels.append(f"[{label}]")
+
+        if len(segments) == 1:
+            source_label = web_source
+        else:
+            source_label = f"[ws{index}]"
+            parts.append(
+                f"{web_source}trim=start={segment.start_s:.4f}:end={segment.end_s:.4f},"
+                f"setpts=PTS-STARTPTS{source_label}"
+            )
+
+        parts.append(
+            f"{source_label}{crop},scale={webcam.width}:{webcam.height}:flags=lanczos[{label}]"
+        )
+
+    if len(segments) == 1:
+        parts.append("[w0]null[laycam]")
+    else:
+        parts.append(f"{''.join(labels)}concat=n={len(segments)}:v=1:a=0[laycam]")
+    return parts
+
+
+def _webcam_crop_filter(composition: Composition) -> str:
+    """The crop that takes the webcam region out of the source.
+
+    During speech the window is a little smaller, so the face is magnified
+    when it is scaled up into the slot. The window stays centred on the
+    region, and the scale that follows is a fixed size, so the overlay never
+    has to be rebuilt while somebody is talking.
+    """
+    webcam_source = composition.webcam_source
+    if webcam_source is None:
+        return "null"
+
+    source_w = _even(webcam_source.width)
+    source_h = _even(webcam_source.height)
+    x = int(webcam_source.x)
+    y = int(webcam_source.y)
+
+    speech = _speech_term(composition.emphasis)
+    if not speech or composition.gain <= 0:
+        return f"crop={source_w}:{source_h}:{x}:{y}"
+
+    factor = f"(1+{composition.gain:.4f}*({speech}))"
+    width = f"floor({source_w}/{factor}/2)*2"
+    height = f"floor({source_h}/{factor}/2)*2"
+    crop_x = f"{x}+({source_w}-{width})/2"
+    crop_y = f"{y}+({source_h}-{height})/2"
+    return f"crop=w='{width}':h='{height}':x='{crop_x}':y='{crop_y}'"
+
+
+def _even(value: float) -> int:
+    number = int(value)
+    if number % 2:
+        number -= 1
+    return max(2, number)
+
+
+def _presence_expression(spans: list[tuple[float, float]]) -> str:
+    """When the webcam is on screen."""
+    if not spans:
+        return "0"
+    terms = [f"between(t,{start:.4f},{end:.4f})" for start, end in spans if end > start]
+    if not terms:
+        return "0"
+    if len(terms) == 1:
+        return terms[0]
+    return "+".join(terms)
+
+
+def _speech_term(spans: list[tuple[float, float]]) -> str:
+    """An ffmpeg expression that is 1 while someone is speaking.
+
+    The intervals come from the shared speech timeline, so the webcam
+    emphasis and the music ducking agree about when somebody is talking.
+    """
+    terms = [f"between(t,{start:.4f},{end:.4f})" for start, end in spans if end > start]
+    if not terms:
+        return ""
+    if len(terms) == 1:
+        return terms[0]
+    return "+".join(terms)
 
 
 def _fit_chain(source_label: str, index: int, out_w: int, out_h: int) -> list[str]:
