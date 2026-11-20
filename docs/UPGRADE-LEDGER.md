@@ -251,3 +251,4 @@ Not started. Sequence and ordering constraints are in `docs/upgrade-audit.md` §
 | 2026-11-20 | `50f7180` | M2 — the layout planner and the ffmpeg composition layer: the 40/60 preset, the face-legibility fallback, the dwell rule, and six real-ffmpeg render tests |
 | 2026-11-20 | `1529b5b` | M2 — the layout wired into the runner, the per-source record (migration v17), and the `/api/layout` endpoints |
 | 2026-11-20 | `b5810a5` | M2 — Settings → Webcam layout |
+| 2026-11-20 | `41a8c82` | M2 — the ledger, the matrix and the audit updated with the M2 evidence |
