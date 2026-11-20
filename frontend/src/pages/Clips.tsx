@@ -391,7 +391,11 @@ function UploadBadge({
   }
   return (
     <span className="text-xs text-ink-500" title={upload.title}>
-      {upload.status === 'uploading' ? 'uploading to YouTube...' : 'queued for YouTube'}
+      {upload.status === 'uploading'
+        ? `uploading to YouTube${upload.progress_percent ? ` · ${upload.progress_percent}%` : '…'}`
+        : upload.next_attempt_at
+          ? 'waiting to retry'
+          : 'queued for YouTube'}
     </span>
   )
 }

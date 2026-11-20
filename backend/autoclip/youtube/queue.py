@@ -14,7 +14,7 @@ import logging
 
 from .. import config
 from ..db import store
-from . import oauth, uploads
+from . import backoff, oauth, uploads
 
 log = logging.getLogger(__name__)
 
@@ -89,7 +89,8 @@ class UploadQueue:
         if upload is None:
             self._current = None
             return
-        store.update_upload(upload_id, status="uploading", clear_error=True)
+        attempts = upload.attempts + 1
+        store.update_upload(upload_id, status="uploading", clear_error=True, attempts=attempts)
         upload.status = "uploading"
         try:
             video_id = await uploads.process_upload(upload, settings)
@@ -99,12 +100,39 @@ class UploadQueue:
             store.update_upload(upload_id, status="skipped", error=message)
             _notify(upload, "skipped", message)
         except Exception as exc:  # one bad upload must not stop the queue
-            log.warning("YouTube upload %s failed: %s", upload_id, exc)
             message = _message(exc)
-            store.update_upload(upload_id, status="failed", error=message)
-            _notify(upload, "failed", message)
+            transient = bool(getattr(exc, "transient", False))
+            if transient and backoff.should_retry(attempts):
+                # A dropped connection is worth another try, but not
+                # straight away: the delay grows with each attempt so a
+                # failing upload backs off instead of hammering the API.
+                due = backoff.next_attempt_at(attempts)
+                store.update_upload(
+                    upload_id,
+                    status="pending",
+                    error=message,
+                    next_attempt_at=due,
+                )
+                log.info(
+                    "YouTube upload %s stopped (%s); trying again at %s.",
+                    upload_id,
+                    message,
+                    due,
+                )
+            else:
+                log.warning("YouTube upload %s failed: %s", upload_id, exc)
+                store.update_upload(upload_id, status="failed", error=message)
+                _notify(upload, "failed", message)
         else:
-            store.update_upload(upload_id, status="done", video_id=video_id, clear_error=True)
+            store.update_upload(
+                upload_id,
+                status="done",
+                video_id=video_id,
+                clear_error=True,
+                session_url="",
+                bytes_sent=0,
+                next_attempt_at="",
+            )
             log.info("YouTube upload %s finished as %s.", upload_id, video_id)
             _notify(upload, "done", video_id)
         finally:

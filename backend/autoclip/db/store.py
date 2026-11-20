@@ -487,8 +487,10 @@ def create_upload(upload: YouTubeUpload) -> YouTubeUpload:
             INSERT INTO youtube_uploads (
                 id, export_id, clip_id, channel_row_id, status, video_id, title,
                 description, tags_json, privacy, error, created_at, updated_at,
-                made_for_kids, requested_privacy, actual_privacy, destination_channel_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                made_for_kids, requested_privacy, actual_privacy, destination_channel_id,
+                session_url, bytes_sent, total_bytes, session_expires_at, attempts,
+                next_attempt_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 upload.id,
@@ -508,6 +510,12 @@ def create_upload(upload: YouTubeUpload) -> YouTubeUpload:
                 upload.requested_privacy,
                 upload.actual_privacy,
                 upload.destination_channel_id,
+                upload.session_url,
+                upload.bytes_sent,
+                upload.total_bytes,
+                upload.session_expires_at,
+                upload.attempts,
+                upload.next_attempt_at,
             ),
         )
     return upload
@@ -549,9 +557,18 @@ def list_uploads_for_clip(clip_id: str) -> list[YouTubeUpload]:
 
 
 def next_pending_upload() -> YouTubeUpload | None:
+    """The next upload to work on, skipping the ones that are backing off.
+
+    A row with a ``next_attempt_at`` in the future is not due yet. The
+    comparison is on the stored ISO-8601 strings, which sort correctly
+    because they all carry the same offset.
+    """
     with connection() as conn:
         row = conn.execute(
-            "SELECT * FROM youtube_uploads WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1"
+            "SELECT * FROM youtube_uploads WHERE status = 'pending'"
+            " AND (next_attempt_at = '' OR next_attempt_at <= ?)"
+            " ORDER BY created_at ASC LIMIT 1",
+            (utcnow(),),
         ).fetchone()
     return YouTubeUpload.from_row(row) if row else None
 
@@ -580,6 +597,12 @@ def update_upload(
     requested_privacy: str | None = None,
     actual_privacy: str | None = None,
     destination_channel_id: str | None = None,
+    session_url: str | None = None,
+    bytes_sent: int | None = None,
+    total_bytes: int | None = None,
+    session_expires_at: str | None = None,
+    attempts: int | None = None,
+    next_attempt_at: str | None = None,
 ) -> None:
     fields: dict[str, Any] = {"updated_at": utcnow()}
     for name, value in (
@@ -593,6 +616,12 @@ def update_upload(
         ("requested_privacy", requested_privacy),
         ("actual_privacy", actual_privacy),
         ("destination_channel_id", destination_channel_id),
+        ("session_url", session_url),
+        ("bytes_sent", bytes_sent),
+        ("total_bytes", total_bytes),
+        ("session_expires_at", session_expires_at),
+        ("attempts", attempts),
+        ("next_attempt_at", next_attempt_at),
     ):
         if value is not None:
             fields[name] = value

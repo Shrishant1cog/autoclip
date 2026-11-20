@@ -946,6 +946,66 @@ def _migration_v23(conn: sqlite3.Connection) -> None:
             )
 
 
+# --- v24: resumable uploads, progress and quota ------------------------------
+
+_V24 = """
+-- The resumable upload's state, so an interrupted upload continues
+-- rather than starting again.
+--
+--   session_url        -- the handle YouTube gave for the session. It is
+--                         the only way back into an upload that stopped
+--                         partway through.
+--   bytes_sent         -- how many bytes YouTube has. The worker writes
+--                         it after every chunk, so the progress shown in
+--                         the UI is the real figure.
+--   total_bytes        -- the size of the file, so the progress has
+--                         something to be a fraction of.
+--   session_expires_at -- when the session stops being usable. A session
+--                         that has expired cannot be continued, so the
+--                         upload starts again from the beginning.
+--   attempts           -- how many times the upload has been tried.
+--   next_attempt_at    -- when the next attempt is due. The worker skips
+--                         the row until then, so a failing upload backs
+--                         off instead of hammering the API.
+--
+-- The columns are added by the migration function, because SQLite has no
+-- 'ADD COLUMN IF NOT EXISTS' and a half-applied migration must not stop
+-- the database from opening.
+"""
+
+
+def _migration_v24(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V24)
+    upload_columns = {row["name"] for row in conn.execute("PRAGMA table_info(youtube_uploads)")}
+    for column, definition in (
+        ("session_url", "TEXT NOT NULL DEFAULT ''"),
+        ("bytes_sent", "INTEGER NOT NULL DEFAULT 0"),
+        ("total_bytes", "INTEGER NOT NULL DEFAULT 0"),
+        ("session_expires_at", "TEXT NOT NULL DEFAULT ''"),
+        ("attempts", "INTEGER NOT NULL DEFAULT 0"),
+        ("next_attempt_at", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if column not in upload_columns:
+            conn.execute(f"ALTER TABLE youtube_uploads ADD COLUMN {column} {definition}")
+
+    # youtube_quota is one row per day: the units used, how many uploads
+    # started and how many finished. A YouTube upload costs 1600 units
+    # and the default daily quota is 10 000, so the day's usage is worth
+    # keeping an eye on — a retry loop can eat it in a handful of
+    # attempts.
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS youtube_quota (
+            day              TEXT PRIMARY KEY,
+            units_used       INTEGER NOT NULL DEFAULT 0,
+            uploads_started  INTEGER NOT NULL DEFAULT 0,
+            uploads_finished INTEGER NOT NULL DEFAULT 0,
+            updated_at       TEXT NOT NULL
+        );
+        """
+    )
+
+
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v1,
     _migration_v2,
@@ -970,6 +1030,7 @@ MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_v21,
     _migration_v22,
     _migration_v23,
+    _migration_v24,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS)

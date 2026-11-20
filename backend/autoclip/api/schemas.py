@@ -144,11 +144,26 @@ class UploadOut(BaseModel):
     #: True when the upload is on YouTube but is not visible the way it
     #: was asked to be — YouTube forced it private, for instance.
     published_but_not_as_asked: bool = False
+    #: How many bytes YouTube has. The worker writes it after every
+    #: chunk, so this is the real progress rather than a spinner.
+    bytes_sent: int = 0
+    #: The size of the file, so the progress has something to be a
+    #: fraction of.
+    total_bytes: int = 0
+    #: How many times the upload has been tried.
+    attempts: int = 0
+    #: When the next attempt is due. Empty when it is due now.
+    next_attempt_at: str = ""
+    #: The progress as a percentage, or 0 when it is not known.
+    progress_percent: int = 0
 
     @classmethod
     def of(cls, upload: models.YouTubeUpload) -> UploadOut:
         actual = upload.actual_privacy
         asked = upload.requested_privacy or upload.privacy
+        percent = 0
+        if upload.total_bytes > 0:
+            percent = min(100, round(upload.bytes_sent * 100 / upload.total_bytes))
         return cls(
             id=upload.id,
             export_id=upload.export_id,
@@ -169,6 +184,11 @@ class UploadOut(BaseModel):
             actual_privacy=actual,
             destination_channel_id=upload.destination_channel_id,
             published_but_not_as_asked=bool(actual and asked and actual != asked),
+            bytes_sent=upload.bytes_sent,
+            total_bytes=upload.total_bytes,
+            attempts=upload.attempts,
+            next_attempt_at=upload.next_attempt_at,
+            progress_percent=percent,
         )
 
 

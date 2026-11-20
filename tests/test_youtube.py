@@ -222,7 +222,9 @@ def test_upload_video_posts_metadata_then_the_file(
     assert calls["put"]["url"] == "https://upload.example/session"
 
 
-async def test_process_upload_reuses_generated_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_process_upload_reuses_generated_metadata(
+    initialised_db: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
     row = YouTubeUpload(
         id=new_id(),
         export_id="export-1",

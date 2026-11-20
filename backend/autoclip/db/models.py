@@ -308,6 +308,22 @@ class YouTubeUpload:
     actual_privacy: str = ""
     #: The YouTube channel id the video went to, read back from YouTube.
     destination_channel_id: str = ""
+    #: The resumable upload's session handle. It is the only way back
+    #: into an upload that stopped partway through.
+    session_url: str = ""
+    #: How many bytes YouTube has. The worker writes it after every
+    #: chunk, so the progress shown in the UI is the real figure.
+    bytes_sent: int = 0
+    #: The size of the file, so the progress has something to be a
+    #: fraction of.
+    total_bytes: int = 0
+    #: When the session stops being usable.
+    session_expires_at: str = ""
+    #: How many times the upload has been tried.
+    attempts: int = 0
+    #: When the next attempt is due. The worker skips the row until
+    #: then.
+    next_attempt_at: str = ""
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> YouTubeUpload:
@@ -334,6 +350,12 @@ class YouTubeUpload:
             requested_privacy=_column(row, "requested_privacy"),
             actual_privacy=_column(row, "actual_privacy"),
             destination_channel_id=_column(row, "destination_channel_id"),
+            session_url=_column(row, "session_url"),
+            bytes_sent=int(_column(row, "bytes_sent", "0") or 0),
+            total_bytes=int(_column(row, "total_bytes", "0") or 0),
+            session_expires_at=_column(row, "session_expires_at"),
+            attempts=int(_column(row, "attempts", "0") or 0),
+            next_attempt_at=_column(row, "next_attempt_at"),
         )
 
 

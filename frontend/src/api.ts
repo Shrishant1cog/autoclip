@@ -66,6 +66,26 @@ export interface UploadRecord {
    * asked to be — YouTube forced it private, for instance.
    */
   published_but_not_as_asked: boolean
+  /** How many bytes YouTube has. The worker writes it after every chunk. */
+  bytes_sent: number
+  /** The size of the file, so the progress has something to be a fraction of. */
+  total_bytes: number
+  /** How many times the upload has been tried. */
+  attempts: number
+  /** When the next attempt is due. Empty when it is due now. */
+  next_attempt_at: string
+  /** The progress as a percentage, or 0 when it is not known. */
+  progress_percent: number
+}
+
+/** How much of YouTube's daily API quota is left. */
+export interface YouTubeQuota {
+  day: string
+  units_used: number
+  uploads_started: number
+  uploads_finished: number
+  limit: number
+  remaining: number
 }
 
 export interface ExportRecord {
@@ -1187,6 +1207,8 @@ export const api = {
   /** What the publishing policy would do for a destination. */
   youtubePolicy: (channelRowId = '') =>
     request<YouTubePolicy>(`/api/youtube/policy?channel_row_id=${encodeURIComponent(channelRowId)}`),
+  /** How much of YouTube's daily API quota is left. */
+  youtubeQuota: () => request<YouTubeQuota>('/api/youtube/quota'),
   /** Record the audience declaration for the global setting. */
   setYouTubeAudience: (madeForKids: '' | 'false' | 'true') =>
     request<YouTubeStatus>('/api/youtube/audience', {

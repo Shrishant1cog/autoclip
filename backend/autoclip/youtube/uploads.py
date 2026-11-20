@@ -24,7 +24,7 @@ from ..pipeline import thumbnails
 from ..pipeline.transcript import Transcript, Word
 from ..providers import LLMProvider, build_provider
 from ..providers.base import looks_like_auth_failure
-from . import duplicates, oauth, uploader
+from . import duplicates, oauth, quota, uploader
 from . import metadata as metadata_module
 from . import policy as policy_module
 
@@ -141,6 +141,7 @@ def retry_upload(upload_id: str, settings: config.Settings | None = None) -> You
         upload.id,
         status="pending",
         clear_error=True,
+        next_attempt_at="",
     )
     return store.get_upload(upload.id)
 
@@ -243,6 +244,32 @@ async def process_upload(upload: YouTubeUpload, settings: config.Settings | None
         destination_channel_id=policy.destination_channel_id,
     )
 
+    # The upload costs 1600 quota units, and the default daily quota is
+    # 10 000 — six uploads. The units are reserved before the call, so
+    # a retry loop cannot quietly eat the day's quota.
+    quota.reserve(quota.UPLOAD_UNITS)
+
+    def progress(sent: int, total: int) -> None:
+        """Write the byte count after every chunk.
+
+        The progress shown in the UI is this number, so it is the real
+        one rather than a spinner.
+        """
+        store.update_upload(upload.id, bytes_sent=sent, total_bytes=total)
+
+    def session_started(url: str, expires_at: str) -> None:
+        """Keep the session handle, so the upload can be continued.
+
+        A session that is not stored cannot be resumed, and an upload
+        that dropped at 90% would have to start again.
+        """
+        store.update_upload(
+            upload.id,
+            session_url=url,
+            session_expires_at=expires_at,
+            total_bytes=path.stat().st_size,
+        )
+
     video_id = await asyncio.to_thread(
         uploader.upload_video,
         settings,
@@ -253,7 +280,13 @@ async def process_upload(upload: YouTubeUpload, settings: config.Settings | None
         category_id=category_id,
         language=language,
         account_id=account_id,
+        session_url=upload.session_url,
+        bytes_sent=upload.bytes_sent,
+        session_expires_at=upload.session_expires_at,
+        on_progress=progress,
+        on_session=session_started,
     )
+    quota.record_upload_finished()
 
     # Ask YouTube what it actually did. The upload has already happened, so
     # a failure to read it back is not a failure of the upload — it just

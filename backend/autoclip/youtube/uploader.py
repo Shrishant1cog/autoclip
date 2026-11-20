@@ -8,6 +8,8 @@ single PUT of the rendered file to that URL. httpx streams the file, so an
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,7 +20,7 @@ from .. import config
 from ..security import consent
 from ..security.egress import Transfer, gateway
 from ..security.urlpolicy import UrlRejected
-from . import oauth
+from . import oauth, resumable
 from .metadata import ClipMetadata
 
 log = logging.getLogger(__name__)
@@ -26,17 +28,19 @@ log = logging.getLogger(__name__)
 UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
 THUMBNAIL_URL = "https://www.googleapis.com/upload/youtube/v3/thumbnails/set"
 
-#: Uploads are large and home upload speeds are slow; the read timeout covers
-#: the body transfer, not just the connection.
-_UPLOAD_TIMEOUT = httpx.Timeout(1800.0, connect=30.0, write=300.0)
-
 
 class YouTubeError(RuntimeError):
-    """The upload was rejected by YouTube."""
+    """The upload was rejected by YouTube.
 
-    def __init__(self, message: str, *, hint: str = "") -> None:
+    ``transient`` says whether trying again later could work. A dropped
+    connection is transient; a malformed request is not. The worker
+    uses it to decide between backing off and giving up.
+    """
+
+    def __init__(self, message: str, *, hint: str = "", transient: bool = False) -> None:
         super().__init__(message)
         self.hint = hint
+        self.transient = transient
 
     def __str__(self) -> str:
         base = super().__str__()
@@ -53,6 +57,11 @@ def upload_video(
     category_id: str = "24",
     language: str = "",
     account_id: str | None = None,
+    session_url: str = "",
+    bytes_sent: int = 0,
+    session_expires_at: str = "",
+    on_progress: Callable[[int, int], None] | None = None,
+    on_session: Callable[[str, str], None] | None = None,
 ) -> str:
     """Upload one file and return its YouTube video id.
 
@@ -61,35 +70,29 @@ def upload_video(
     AutoClip made a legal declaration on the owner's behalf. The
     declaration is resolved by :mod:`autoclip.youtube.policy`, which
     refuses to resolve one that has not been answered.
+
+    ``session_url`` and ``bytes_sent`` continue an upload that stopped
+    partway through. The session is the handle YouTube gave; without it
+    the file is sent again from the beginning, which is what happened to
+    every dropped connection before.
+
+    ``session_expires_at`` is when the stored session stops being
+    usable. A session past its expiry cannot be continued, so the file
+    starts again rather than asking YouTube about a handle that is
+    already gone.
+
+    ``on_progress`` is called with the running byte count and the file's
+    size after every chunk.
+
+    ``on_session`` is called with the session URL and its expiry as
+    soon as a session exists, so the row can keep it. A session that is
+    not stored cannot be resumed.
     """
     if not path.is_file():
         raise YouTubeError(f"The exported file is missing: {path}")
 
     token = oauth.access_token(settings, account_id=account_id)
-
-    snippet: dict[str, object] = {
-        "title": metadata.title,
-        "description": metadata.description,
-        "tags": metadata.tags,
-        "categoryId": category_id or "24",
-    }
-    if language and len(language) == 2 and language.isalpha():
-        snippet["defaultLanguage"] = language.lower()
-
-    body = {
-        "snippet": snippet,
-        "status": {
-            "privacyStatus": privacy,
-            "selfDeclaredMadeForKids": made_for_kids,
-        },
-    }
-
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json; charset=UTF-8",
-        "X-Upload-Content-Length": str(path.stat().st_size),
-        "X-Upload-Content-Type": "video/mp4",
-    }
+    size = path.stat().st_size
 
     # The rendered clip is about to leave the machine. Publishing is an
     # explicit owner action, so it is recorded rather than consent-gated — but
@@ -107,47 +110,77 @@ def upload_video(
     except UrlRejected as exc:
         raise YouTubeError(f"YouTube was refused as a destination: {exc}") from exc
 
-    try:
-        init = httpx.post(
-            UPLOAD_URL,
-            params={"uploadType": "resumable", "part": "snippet,status"},
-            json=body,
-            headers=headers,
-            timeout=60.0,
-        )
-    except httpx.HTTPError as exc:
-        gateway.record(transfer, "failed", detail=str(exc))
-        raise YouTubeError(f"Could not reach YouTube: {exc}") from exc
+    def open_session() -> resumable.UploadSession:
+        """Ask YouTube for a session and tell the caller about it.
 
-    if init.status_code >= 400:
-        gateway.record(transfer, "failed", detail=f"HTTP {init.status_code}")
-        raise _translate(init)
-    location = init.headers.get("location") or init.headers.get("Location")
-    if not location:
-        gateway.record(transfer, "failed", detail="no session URL")
-        raise YouTubeError("YouTube did not return an upload session URL.")
-
-    size = path.stat().st_size
-    try:
-        with path.open("rb") as handle:
-            response = httpx.put(
-                location,
-                content=handle,
-                headers={
-                    "Content-Type": "video/mp4",
-                    "Content-Length": str(size),
-                },
-                timeout=_UPLOAD_TIMEOUT,
+        The session is the only way back into an upload that stopped
+        partway through, so it is handed over as soon as it exists — a
+        session that is not stored cannot be resumed.
+        """
+        try:
+            fresh = resumable.create_session(
+                url=UPLOAD_URL,
+                token=token,
+                metadata=metadata,
+                privacy=privacy,
+                made_for_kids=made_for_kids,
+                category_id=category_id,
+                language=language,
+                total_bytes=size,
             )
-    except httpx.HTTPError as exc:
+        except resumable.ResumableError as exc:
+            gateway.record(transfer, "failed", detail=str(exc))
+            raise YouTubeError(str(exc), transient=True) from exc
+        if on_session is not None:
+            on_session(fresh.url, fresh.expires_at)
+        return fresh
+
+    session: resumable.UploadSession
+    offset = bytes_sent
+    if session_url:
+        stored = resumable.UploadSession(
+            url=session_url, expires_at=session_expires_at, total_bytes=size
+        )
+        if stored.expired(time.time()):
+            # The session's own clock says it is finished. Asking
+            # YouTube anyway would only waste a call.
+            log.info("The stored upload session has expired; starting a new one.")
+            session = open_session()
+            offset = 0
+        else:
+            try:
+                # Ask YouTube what it actually has, rather than trusting
+                # the stored figure: the last chunk may have arrived
+                # after the row was written.
+                offset = resumable.probe(session_url=session_url, token=token, total_bytes=size)
+            except resumable.SessionGone:
+                # The session is gone. The file starts again — there is
+                # nothing left to continue.
+                log.info("The upload session is gone; starting a new one.")
+                session = open_session()
+                offset = 0
+            except resumable.ResumableError as exc:
+                gateway.record(transfer, "failed", detail=str(exc))
+                raise YouTubeError(str(exc), transient=True) from exc
+            else:
+                session = stored
+                log.info("Continuing upload %s from byte %s of %s.", path.name, offset, size)
+    else:
+        session = open_session()
+
+    try:
+        body = resumable.upload_file(
+            session=session,
+            path=path,
+            token=token,
+            start_offset=offset,
+            progress=on_progress,
+        )
+    except resumable.ResumableError as exc:
         gateway.record(transfer, "failed", detail=str(exc))
-        raise YouTubeError(f"The upload was interrupted: {exc}") from exc
+        raise YouTubeError(str(exc), transient=True) from exc
 
-    if response.status_code >= 400:
-        gateway.record(transfer, "failed", detail=f"HTTP {response.status_code}")
-        raise _translate(response)
-
-    video_id = response.json().get("id", "")
+    video_id = str(body.get("id", ""))
     if not video_id:
         gateway.record(transfer, "failed", detail="no video id in the response")
         raise YouTubeError("YouTube accepted the upload but returned no video id.")
@@ -339,5 +372,13 @@ def _translate(response: httpx.Response) -> YouTubeError:
         return YouTubeError(
             message,
             hint="The channel sign-in expired. Disconnect and connect the channel again.",
+        )
+    # A rate limit or a server-side fault is worth trying again later.
+    transient = response.status_code == 429 or response.status_code >= 500
+    if transient:
+        return YouTubeError(
+            message,
+            hint="YouTube was busy or rate-limited this request. It will be tried again.",
+            transient=True,
         )
     return YouTubeError(message)

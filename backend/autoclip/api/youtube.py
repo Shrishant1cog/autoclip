@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 
 from .. import config
 from ..db import store
-from ..youtube import oauth, policy, uploads
+from ..youtube import oauth, policy, quota, uploads
 from ..youtube.queue import upload_queue
 from .schemas import (
     UploadEditIn,
@@ -201,6 +201,17 @@ def get_policy(channel_row_id: str = Query(default="")) -> dict:
     so the page can say what is still missing.
     """
     return policy.describe(channel_row_id)
+
+
+@router.get("/quota")
+def get_quota() -> dict:
+    """How much of YouTube's daily API quota is left.
+
+    An upload costs 1600 units and the default daily quota is 10 000,
+    so this is the number that says whether another upload can go out
+    today.
+    """
+    return quota.read().to_dict()
 
 
 @router.post("/uploads/{upload_id}/retry", response_model=UploadOut)
