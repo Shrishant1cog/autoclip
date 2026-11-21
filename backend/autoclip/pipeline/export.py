@@ -197,16 +197,28 @@ def build_video_filtergraph(
     parts: list[str] = []
     labels: list[str] = []
 
-    # The webcam is cut from the same input, so the input is split in two.
-    # Both branches are trimmed the same way, so they stay in step.
+    # Each segment trims its own copy of the source, and each webcam segment
+    # trims its own copy too — so the source is split once per consumer.
+    #
+    # A filter output may be consumed only once. ffmpeg 9 tolerates naming the
+    # same output twice; ffmpeg 7 refuses it with "Invalid stream specifier",
+    # and the export then fails on every strict ffmpeg for any clip whose
+    # crop path has more than one segment. The split is what makes the graph
+    # valid everywhere, and it costs one output per consumer.
+    #
+    # The copies are named apart from the chains that consume them: a chain
+    # that read and wrote the same label would be ambiguous, and a label may
+    # not be reused either.
     needs_webcam = composition is not None and composition.webcam_slot is not None
-    if needs_webcam:
-        parts.append("[0:v]split=2[gsrc][wsrc]")
-        game_source = "[gsrc]"
-        web_source = "[wsrc]"
+    game_sources = [f"[gsrc{index}]" for index in range(len(segments))]
+    web_sources = [f"[wsrc{index}]" for index in range(len(segments))] if needs_webcam else []
+
+    if len(segments) == 1 and not needs_webcam:
+        # One segment, one consumer: the input is used as it is.
+        game_sources = ["[0:v]"]
     else:
-        game_source = "[0:v]"
-        web_source = ""
+        split_labels = game_sources + web_sources
+        parts.append(f"[0:v]split={len(split_labels)}{''.join(split_labels)}")
 
     for index, segment in enumerate(segments):
         label = f"v{index}"
@@ -214,12 +226,12 @@ def build_video_filtergraph(
 
         if len(segments) == 1:
             # No trim needed; the input is already seeked to the clip.
-            source_label = game_source
+            source_label = game_sources[0]
             prefix = ""
         else:
             source_label = f"[s{index}]"
             prefix = (
-                f"{game_source}trim=start={segment.start_s:.4f}:end={segment.end_s:.4f},"
+                f"{game_sources[index]}trim=start={segment.start_s:.4f}:end={segment.end_s:.4f},"
                 f"setpts=PTS-STARTPTS{source_label}"
             )
             parts.append(prefix)
@@ -248,7 +260,7 @@ def build_video_filtergraph(
             current=current,
             composition=composition,
             segments=segments,
-            web_source=web_source,
+            web_sources=web_sources,
             out_w=out_w,
             out_h=out_h,
         )
@@ -269,7 +281,7 @@ def _compose_with_webcam(
     current: str,
     composition: Composition,
     segments: list[CropSegment],
-    web_source: str,
+    web_sources: list[str],
     out_w: int,
     out_h: int,
 ) -> str:
@@ -305,7 +317,7 @@ def _compose_with_webcam(
         _webcam_branch(
             composition=composition,
             segments=segments,
-            web_source=web_source,
+            web_sources=web_sources,
         )
     )
 
@@ -318,12 +330,16 @@ def _webcam_branch(
     *,
     composition: Composition,
     segments: list[CropSegment],
-    web_source: str,
+    web_sources: list[str],
 ) -> list[str]:
     """Cut the webcam region out of the source and scale it into its slot.
 
     The trims mirror the gameplay's, so the webcam stays in step with the
     clip even when the crop path has several segments.
+
+    Each trim reads its own copy of the source: a filter output may be
+    consumed only once, so the copies are made by the split in
+    :func:`build_video_filtergraph` rather than by naming one output twice.
 
     The crop and the scale are applied once, to the joined webcam stream,
     rather than to every segment. They are per-frame operations, so the
@@ -339,14 +355,14 @@ def _webcam_branch(
     parts: list[str] = []
 
     if len(segments) == 1:
-        current = web_source
+        current = web_sources[0]
     else:
         labels: list[str] = []
         for index, segment in enumerate(segments):
             label = f"ws{index}"
             labels.append(f"[{label}]")
             parts.append(
-                f"{web_source}trim=start={segment.start_s:.4f}:end={segment.end_s:.4f},"
+                f"{web_sources[index]}trim=start={segment.start_s:.4f}:end={segment.end_s:.4f},"
                 f"setpts=PTS-STARTPTS[{label}]"
             )
         parts.append(f"{''.join(labels)}concat=n={len(segments)}:v=1:a=0[wcat]")

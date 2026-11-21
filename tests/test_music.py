@@ -8,7 +8,6 @@ compressor when a speech timeline is available.
 from __future__ import annotations
 
 import io
-import re
 
 import pytest
 from autoclip.config import ExportSettings
@@ -18,6 +17,7 @@ from autoclip.pipeline import export, music
 from autoclip.pipeline.reframe.croppath import CropPath, CropSegment
 from autoclip.pipeline.speech_timeline import SpeechInterval
 from fastapi.testclient import TestClient
+from graph_shape import graph_problems
 
 
 def _confirm_licence(path, *, state: str = LicenseState.USER_CONFIRMED) -> str:
@@ -501,55 +501,6 @@ def test_a_timeline_with_no_speech_does_not_duck_at_all() -> None:
     assert "[1:a]atrim" in mixed.filter_complex
 
 
-#: The leading bracketed labels of one filter chain — its inputs.
-_LEADING_LABELS = re.compile(r"^((?:\[[^\]]*\])+)")
-
-#: A chain's filters, closed by its output label(s). A filter may emit more
-#: than one output — `asplit` does — so there may be more than one.
-_CHAIN_TAIL = re.compile(r"[^[]*(\[[^\]]*\])*")
-
-
-def _graph_problems(graph: str) -> list[str]:
-    """The ways a filtergraph can be malformed regardless of the ffmpeg build.
-
-    Two defects are checked, both of which render on a recent ffmpeg and
-    fail on an older one — so neither can be left to the ffmpeg that
-    happens to be installed:
-
-    * a filter output consumed **twice**. A filter output may be consumed
-      only once; naming the same label twice is refused by ffmpeg 7 with
-      "Invalid stream specifier" and accepted by ffmpeg 9.
-    * a filter **after** an output label. A label closes its chain, so
-      the filters that follow it have no input and the chain's own output
-      is left unconnected — "Filter 'volume:default' has output 1 (bed)
-      unconnected".
-    """
-    problems: list[str] = []
-    used: list[str] = []
-
-    for chain in graph.split(";"):
-        chain = chain.strip()
-        if not chain:
-            continue
-
-        leading = _LEADING_LABELS.match(chain)
-        if not leading:
-            problems.append(f"a chain does not start with an input label: {chain!r}")
-            continue
-
-        used.extend(label for label in re.findall(r"\[([^\]]*)\]", leading.group(1)) if label)
-
-        tail = chain[leading.end() :]
-        if not _CHAIN_TAIL.fullmatch(tail):
-            problems.append(f"a filter follows an output label: {chain!r}")
-
-    repeated = sorted({label for label in used if used.count(label) > 1})
-    if repeated:
-        problems.append(f"these filter outputs are consumed more than once: {repeated}")
-
-    return problems
-
-
 @pytest.mark.parametrize(
     ("ducking", "intervals"),
     [
@@ -563,7 +514,7 @@ def test_every_graph_is_well_formed_for_any_ffmpeg(ducking: bool, intervals: lis
     settings = ExportSettings(music_track="bed.mp3", music_ducking=ducking)
     mixed = export.build_mixed_audio_filtergraph(settings, "C:/x/bed.mp3", 5.0, intervals)
 
-    problems = _graph_problems(mixed.filter_complex)
+    problems = graph_problems(mixed.filter_complex)
 
     assert not problems, "the filter graph is malformed: " + "; ".join(problems)
 

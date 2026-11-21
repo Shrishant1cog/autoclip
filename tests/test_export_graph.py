@@ -30,6 +30,7 @@ from autoclip.pipeline.reframe.layout import (
 )
 from autoclip.pipeline.reframe.webcam import Rect
 from autoclip.pipeline.transcript import Word
+from graph_shape import graph_problems
 
 #: Windows refuses a command line longer than this. The limit belongs to
 #: CreateProcess, not to ffmpeg.
@@ -214,3 +215,54 @@ class TestGraphGrowth:
 
         # 38 more stretches, each adding a trim and a crop of its own.
         assert len(large) - len(small) < 38 * 1200
+
+
+class TestGraphShape:
+    """The graph has to be valid on every ffmpeg, not only the newest one.
+
+    A filter output may be consumed only once. ffmpeg 9 tolerates naming the
+    same output twice; ffmpeg 7 refuses it with *"Invalid stream specifier"*,
+    and the export then fails on every strict ffmpeg for any clip whose crop
+    path has more than one segment.
+
+    The check is structural rather than a render, so it catches the defect on
+    any ffmpeg — the developer's included.
+    """
+
+    def test_the_graph_is_well_formed_for_any_ffmpeg(self) -> None:
+        graph = build_graph()
+
+        problems = graph_problems(graph)
+
+        assert not problems, "the filter graph is malformed: " + "; ".join(problems)
+
+    def test_the_graph_is_well_formed_with_a_single_segment(self) -> None:
+        graph = build_graph(
+            crop_stretches=CROP_STRETCHES[:1], layout_stretches=LAYOUT_STRETCHES[:1]
+        )
+
+        problems = graph_problems(graph)
+
+        assert not problems, "the filter graph is malformed: " + "; ".join(problems)
+
+    def test_the_graph_is_well_formed_without_a_webcam(self) -> None:
+        """A clip with no webcam has one consumer, and it gets one output."""
+        graph = build_graph(
+            layout_stretches=[(s, e, False, spans) for s, e, _, spans in LAYOUT_STRETCHES]
+        )
+
+        problems = graph_problems(graph)
+
+        assert not problems, "the filter graph is malformed: " + "; ".join(problems)
+
+    def test_every_segment_gets_its_own_copy_of_the_source(self) -> None:
+        """The source is split once per consumer, not once per branch.
+
+        This is the shape the fix took: a ``split`` with one output for each
+        segment of each branch, so no output is ever named twice.
+        """
+        graph = build_graph(crop_stretches=CROP_STRETCHES[:3])
+
+        # Three gameplay segments and three webcam segments: six outputs.
+        assert "split=6" in graph
+        assert graph.count("trim=start=") == 6
