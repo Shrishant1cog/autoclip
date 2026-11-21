@@ -21,6 +21,7 @@ milestone `In progress` and is reported as such.
 | M4a — YouTube hardening | **Complete** | 14/15 gate items done; 1149 tests passing; the live YouTube path is **Unverified (external)** — no authorised Google credentials were supplied |
 | M4b — Instagram | **Complete** | 14/15 gate items done; 126 tests across the M4b area passing; the live Instagram path is **Unverified (external)** — no authorised Meta credentials were supplied |
 | M5 — Audit and release | **Complete** | 10/10 gate items done; **1,300 tests** passing; the application exercised through its real UI on real media; **3 product defects and 1 CI defect found and fixed**; the release run green on all six CI jobs; the live external paths remain **Unverified (external)** |
+| **M5.1 — Ducking matrix** (post-release increment, 2026-11-21) | **Complete** | The last closeable PARTIAL matrix row (**MUS-31**) closed as **eight real renders**; **1,315 tests** passing; **a fourth product defect found and fixed** (an empty speech timeline was indistinguishable from no timeline); the matrix is now **110 Implemented · 9 Partial · 1 Blocked · 9 N/A**; the M5 verdict is unchanged and v0.1.0 is still gated on K1 |
 
 ---
 
@@ -405,6 +406,10 @@ also **found and fixed three defects** that no unit test had caught, and a fourt
 workflow itself — all four were found by running the application or its gates, and each is now
 guarded by a test that fails without the fix.
 
+*(A fourth product defect was found and fixed by M5.1, after this milestone closed. It is recorded
+in the M5.1 section below and in `docs/FINAL_UPGRADE_REPORT.md` §4.2, where the defect list is
+kept current.)*
+
 The release run is **green on all six CI jobs** — the four backend legs (Ubuntu 3.11, Ubuntu 3.12,
 macOS 3.12, Windows 3.12), the frontend build, and the Docker image with its health smoke test.
 The Ubuntu py3.12 leg, which had failed twice, now passes.
@@ -450,11 +455,90 @@ as a condition of the release, not quietly upgraded.
 | The **reframe golden set** — jitter, cut-off faces, the speaker on screen ≥95% of speaking time | Unverified — no fixed three-video set has been checked, before this upgrade or by it. **This is the gate for tagging v0.1.0** | Owner — supply the set and run the measurement |
 | The **original requirements and the 7 visual references** | Blocked — they are not on this machine, and they were not reconstructed | Owner — supply them |
 | The **re-export does not rebuild the webcam composition** | Partial — the per-clip `LayoutPath` is not persisted, so a re-export reuses the cached crop path | Next release |
-| The **eight-scenario ducking matrix** is asserted at the filter and timeline level | Partial — the three end-to-end render scenarios added at M5 cover the timeline path, the measured duck and the sidechain fallback; the full eight-case matrix is still not eight end-to-end renders | Next release |
+| The **eight-scenario ducking matrix** is asserted at the filter and timeline level | **Closed at M5.1** — all eight scenarios are now asserted as full renders. See the M5.1 section below | — |
 | The **multi-speaker path** was not exercised on real material | Partial — diarization was not enabled in the application run | Lane C, with diarized footage |
 | **Docker** was not built or scanned locally | Partial — Docker is not installed on this machine; the CI `docker` job builds the image and smoke-tests `GET /api/health` | CI covers it |
 | **No dependency audit, no fuzzing, no SAST scanner** | Gap — stated as gaps in `docs/M5-SECURITY-REVIEW.md` §7 rather than implied to be covered | Next release |
 | **mypy is at 10 errors in 8 files** | Partial — down from the 14-error baseline, unchanged since M1, in modules the upgrade did not touch. CI tolerates mypy with `continue-on-error` | Next release |
+
+---
+
+## M5.1 — Ducking matrix and the empty-timeline defect
+
+**Status: Complete.** A post-release increment, dated **2026-11-21**, on the same branch. The
+branch is untagged and **v0.1.0 is still gated on K1**, the reframe golden set, so this did not
+change the M5 verdict — it closed the last closeable PARTIAL matrix row and fixed the defect that
+writing it surfaced.
+
+**What it closed.** **MUS-31**, the eight-case ducking regression matrix, was the last row still
+marked Partial that could be closed without the owner. It asked for all eight scenarios —
+continuous speech, a short pause, a long pause, more than one speaker, a sound effect, a
+music-heavy source, a low-volume source, and no speech at all — to be **asserted**. The
+filter-level tests could only see that certain characters were in the filtergraph; they could not
+see whether the graph ducked where it should and stayed out of the way where it should.
+
+**How it was closed.** `tests/test_ducking_matrix.py` — **eight cases, each a real render.** Each
+case renders the same clip twice, once with the ducking on and once with it off, and measures the
+bed's **own frequency band** in a window of each. The bed sits at 440 Hz and the source's voice at
+1000 Hz, so a bandpass at 440 Hz reads the bed on its own, and the ratio of the two renders is the
+ducking as a number. The thresholds are deliberately loose about depth (a ducked window must be at
+least 6 dB down, against a configured 12 dB) and tight about shape (an un-ducked window must be
+within 0.26 dB of full level). What matters is *which* windows are ducked, not the exact number
+of decibels.
+
+**What it found.** Seven of the eight passed first time. The **no-speech** case failed, and it
+found a real defect: **an empty speech timeline was indistinguishable from no timeline at all.**
+The export's contract said an empty list meant "no timeline, fall back to keying the ducking on
+the audio", so a clip with no talking fell back to the loudness-keyed sidechain compressor and the
+music was pulled down by whatever else the source contained.
+
+**The fix.** `speech_timeline.ducking_intervals()` keeps the three answers apart:
+
+| Answer | Meaning | What the renderer does |
+|---|---|---|
+| `None` | There is no timeline to follow — it was never built, or it found no speech **anywhere** | Falls back to keying the ducking on the audio |
+| `[]` | The timeline was consulted and found no speech **in this clip** | The bed is **not ducked at all** |
+| a non-empty list | The speech in this clip | The bed follows an explicit envelope |
+
+The API and the pipeline both call the helper rather than slicing the timeline by hand, so the
+boundary cannot drift again.
+
+**Why it was fixed rather than documented away.** The measured impact was small — **≤ 0.9 dB** on
+a source carrying its own loud music — but the contract was violated at the API boundary, and the
+app's own stated principle is that the music ducking and the webcam layout use the same timeline
+and must agree. The webcam layout already treated an empty timeline as "no emphasis" without
+falling back; the export did not. **The two now answer the same question the same way.**
+
+**The guard was proven, not assumed.** With the four product files reverted to the pre-M5.1 code,
+`test_no_speech_means_no_ducking` fails at a ratio of **0.915** against a flat render, and the
+other seven still pass. The files were restored afterwards.
+
+| Case | Measured |
+|---|---|
+| Continuous speech | 0.397 down under speech, 1.000 flat outside |
+| Short pause (300 ms, inside the 350 ms merge window) | 0.408 in the gap — the bed does not recover |
+| Long pause (3 s) | 1.001 in the gap, 0.427 in each stretch |
+| Multi-speaker | 0.427 / 1.000 / 0.427 — a speaker change is not a pause |
+| Sound effect | 0.427 in speech, 1.005 at the effect — a transient is not somebody talking |
+| Music-heavy | 0.427 in speech, 1.001 outside; the source's own music within 0.25 of flat |
+| Low-volume | Ducked in speech, flat outside — the timeline drives the ducking, not the level |
+| **No speech** | 1.005 at the loudest point — full level throughout |
+
+### Decisions taken in M5.1
+
+| Decision | Why | Where recorded |
+|---|---|---|
+| **M5.1 is a post-release increment, not a change of verdict** | The branch is untagged and v0.1.0 is gated on K1, so the M5 documents are live branch documents and may be updated in place — but every change is dated and recorded here | `docs/UPGRADE-LEDGER.md`, `docs/upgrade-audit.md` §13 |
+| **The matrix is measured by differencing two renders, not by a level** | The bed and the speech share a file, so a level measurement alone cannot tell the bed from the voice. The bed's own frequency band can | `tests/test_ducking_matrix.py` |
+| **The thresholds are loose about depth and tight about shape** | The configured duck is 12 dB and the measured depth lands shallower, because the bandpass picks up some of the speech's skirt. Asserting the exact depth would make the test brittle for no gain; asserting *which* windows are ducked is the actual contract | `tests/test_ducking_matrix.py` |
+| **The empty-timeline defect was fixed, not recorded as a limitation** | The impact was ≤ 0.9 dB, but the contract was violated at the API boundary and the webcam layout already behaved correctly. Fixing it is cheaper than a permanent caveat that says the two halves of the same feature disagree | `docs/FINAL_UPGRADE_REPORT.md` §4.2, defect 4 |
+
+### Residuals carried out of M5.1
+
+Unchanged from M5 — **the live external paths, the reframe golden set, the missing original
+requirements, the re-export's missing webcam composition, the un-exercised multi-speaker path,
+the absent local Docker, the missing dependency audit, and mypy's 10 errors** all carry forward
+exactly as M5 recorded them. M5.1 closed one row and changed nothing else.
 
 ---
 
@@ -511,3 +595,6 @@ as a condition of the release, not quietly upgraded.
 | 2026-11-21 | `64d253d` | M5 — the release package: the application-testing evidence, the regression report, the security review, the performance report, the installation guide, the final report, the audit through M5, the matrix, the ledger and the README |
 | 2026-11-21 | `cbcbe1c` | docs — the M5 release commit recorded in the ledger and the commit trail |
 | 2026-11-21 | `ab9052e` | M5 — the release run recorded as **green on all six jobs** (the four backend legs, the frontend build, and the Docker image with its health smoke test), the Journey D records brought onto the same nine fields as journeys A–C, and the BLOCKED row added to the acceptance table |
+| 2026-11-21 | `2931059` | docs — the CI run history reads the same way whichever run you look at: a stable phrasing for the run count, and the run-23 row added |
+| 2026-11-21 | `822143e` | docs — four runs were cancelled, not three; the run table is framed as a record that grows |
+| 2026-11-21 | `294c274` | M5.1 — the ducking answer is tri-state: no timeline, a timeline that found no speech in this clip, or the speech itself. `ducking_intervals()` produces the right one of the three, and the API and the pipeline both call it. Guarded by the eight-case ducking matrix (`tests/test_ducking_matrix.py`), whose **no-speech** case fails without the fix |

@@ -58,23 +58,37 @@ v27 is not a slow operation.
 
 ### Suite-level measurement
 
-| | M0 | M5 |
-|---|---|---|
-| Mandatory suite (CI selection 1) | 672 passed in 193.77 s | **1,263 passed, 61 deselected in 270.59 s** |
-| Render suite (CI selection 2) | (not separated) | **37 passed, 1,287 deselected in 232.47 s** |
-| Whole suite, one invocation | 672 passed in 193.77 s | **1,300 passed in 709.11 s** |
-| Wall clock **per test** | 0.288 s | **0.214 s** |
+| | M0 | M5 | M5.1 |
+|---|---|---|---|
+| Mandatory suite (CI selection 1) | 672 passed in 193.77 s | **1,263 passed, 61 deselected in 270.59 s** | **1,270 passed, 69 deselected in 249.81 s** |
+| Render suite (CI selection 2) | (not separated) | **37 passed, 1,287 deselected in 232.47 s** | **45 passed, 1,294 deselected in 299.24 s** |
+| Whole suite, one invocation | 672 passed in 193.77 s | **1,300 passed in 709.11 s** | **1,315 passed in 534.88 s** |
+| Wall clock **per test** | 0.288 s | **0.214 s** | **0.197 s** |
 
-The suite grew by 628 tests (94%) and the per-test cost went *down* by 26%. The M5 whole-suite
+The suite grew by 643 tests (96%) and the per-test cost went *down* by 32%. The M5 whole-suite
 number is roughly double the sum of the two CI selections because a single invocation pays the
 import and model-load cost once and then re-runs the slow tests in the same process; CI's split is
 the figure to compare against.
+
+**The M5.1 column, against the M5 column.** M5.1 added 15 tests, eight of which are **real
+renders** — each case renders the same clip twice and measures the bed's own frequency band. That
+is why the render selection's wall clock rose by **28%** for **8 more tests**: the eight-case
+ducking matrix is the most expensive thing in the render selection, because each case is two
+ffmpeg encodes plus four band-limited measurements. The unit selection got *faster* per test
+(0.214 s → 0.197 s) because the seven tests it gained are ordinary unit tests, and the machine was
+otherwise idle.
 
 **The same two selections were also run on Linux** — WSL, ffmpeg 7.0.2, Python 3.12.16, the same
 Python as the Ubuntu py3.12 leg — because the CI runners are Linux and one of the defects found
 at M5 renders on Windows and fails on Linux. The counts are identical (**1,263** and **37**); the
 Linux wall clock is higher (315.39 s and 267.42 s) because the two legs shared the machine with
 each other.
+
+**The M5.1 tree was reproduced on Linux too**, before it was pushed. The counts are identical
+again — **1,270** in the unit selection (51.35 s) and **45** in the render selection (176.73 s) —
+and `ruff check` and `ruff format --check` are clean on both platforms. The Linux wall clock is
+*lower* than the Windows one here, because the two legs were not sharing the machine with each
+other this time.
 
 ---
 

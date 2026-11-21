@@ -155,6 +155,12 @@ keyring entry naming the *first* account's channel.
 package: `ruff check .` → *All checks passed*; `ruff format --check .` → *226 files already
 formatted*.
 
+**M5.1 re-verification (2026-11-21).** The tree gained one test file and the product changed in
+four files. The same pin was run against the whole tree again: `ruff check .` → *All checks
+passed*; `ruff format --check .` → *227 files already formatted*. The Linux leg was reproduced on
+the same tree — `ruff check .` → *All checks passed*; `ruff format --check .` → *221 files already
+formatted* (the synced subset). The pin is still the one CI honours.
+
 **Evidence:** commit `4cf309b`; the M5 gate output in `docs/M5-REGRESSION-REPORT.md`.
 
 ---

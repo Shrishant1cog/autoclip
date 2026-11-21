@@ -1,5 +1,11 @@
 # Feature coverage matrix (M0)
 
+> **M5.1 — 2026-11-21.** One row changed after M5 closed: **MUS-31**, the eight-case ducking
+> regression matrix, moved from `Partial` to `Implemented` once all eight cases were asserted as
+> **full renders** in `tests/test_ducking_matrix.py`. The counts below are recounted mechanically
+> by `scripts/verify_matrix_counts.py`, which fails if this table and the rows disagree. The M5
+> verdict is unchanged — see `docs/UPGRADE-LEDGER.md` §M5.1.
+
 **Status vocabulary** (from the governing specification Part 3.2 and Part 18):
 `Implemented` · `Partial` · `Missing` · `Unverified`.
 `NOT APPLICABLE` is added only where the specification itself puts the item out of scope.
@@ -45,12 +51,12 @@ Rows marked ⚠ are gaps this upgrade must close.
 | MUS-23 | 270 ms rule (9×30 ms @ ≥0.90) | None | `pipeline/speech_timeline.py` | Implemented | M1 | MUS-22 | 8 frames insufficient; 9 frames at ≥0.90 sufficient | Automated test verified (nine confident frames make an interval without a word) |
 | MUS-24 | Merge at 349 ms, not at 350 ms | None | `pipeline/speech_timeline.py:merge_intervals` | Implemented | M1 | MUS-21 | Exact boundary asserted on ms timestamps, not on quantised frames | Automated test verified (349 ms merges, 350 ms does not; the boundary is asserted in milliseconds) |
 | MUS-25 | Continuous speech does not fragment | None | `pipeline/speech_timeline.py:merge_intervals` | Implemented | M1 | MUS-24 | A 30 s speech run yields one interval | Automated test verified |
-| MUS-26 | Duck only the added music | Sidechain compression on the bed | `pipeline/export.py:build_mixed_audio_filtergraph` | Partial | M1 | MUS-21 | Original voice/game audio is bit-identical to the no-music render | Automated test verified that the speech chain is untouched and only the bed is shaped — **the bit-identical render is not asserted** |
+| MUS-26 | Duck only the added music | Sidechain compression on the bed | `pipeline/export.py:build_mixed_audio_filtergraph` | Partial | M1, M5.1 | MUS-21 | Original voice/game audio is bit-identical to the no-music render | Automated test verified that the speech chain is untouched and only the bed is shaped. **Measured at M5.1** on a source carrying its own music: the source's music comes out of the ducked render within 0.25 of the flat render's, while the added bed drops by at least 6 dB. The **bit-identical** render is not asserted — a bit-identical comparison is not possible once the bed is mixed in, so the guarantee is structural plus measured, not bitwise |
 | MUS-27 | Smooth attack/recovery | `attack=120:release=600` fixed | `pipeline/export.py:build_ducking_filters` | Implemented | M1 | MUS-26 | No step discontinuity at interval edges; values configurable | Automated test verified (the filter starts and ends at full level; `ducking_attack_ms` / `ducking_release_ms` are settings) |
 | MUS-28 | No repeated recovery between words | None — compressor follows the envelope | `pipeline/export.py:build_ducking_filters` | Implemented | M1 | MUS-24 | Inside a merged interval the bed stays down | Automated test verified (the envelope stays down inside an interval and recovers at its end) |
 | MUS-29 | Manual ducking controls | `music_volume`, `ducking_amount_db`, `music_ducking` | `config.py:ExportSettings` | Implemented | M1 | — | Controls change the render measurably | Automated test verified (`tests/test_music.py`) |
 | MUS-30 | Volume-envelope preview | None | `api/music.py:envelope`, `frontend/src/components/MusicLibrary.tsx` | Implemented | M1 | MUS-21 | The preview's envelope equals the applied gain curve within tolerance | Automated test verified (the route returns the points and the intervals); the route and the export both call `envelope_points` |
-| MUS-31 | Ducking regression matrix (continuous/short/long pauses, multi-speaker, SFX, music-heavy, low-volume, no-speech) | Partial — some cases in `tests/test_music.py` | `tests/test_music.py` | Partial | M1 | MUS-26 | All eight scenarios asserted | Automated test verified for the filter shape and the timeline rules — **the eight end-to-end render scenarios are not asserted** |
+| MUS-31 | Ducking regression matrix (continuous/short/long pauses, multi-speaker, SFX, music-heavy, low-volume, no-speech) | None | `tests/test_ducking_matrix.py` | Implemented | M1, M5.1 | MUS-26 | All eight scenarios asserted | Automated test verified — **all eight are asserted as full renders** in `tests/test_ducking_matrix.py`: each case renders the same clip twice, with the ducking on and off, and measures the bed's own frequency band in a window of each. The one case that failed is the one that found the empty-timeline defect (M5.1) |
 
 ---
 
@@ -198,8 +204,8 @@ Rows marked ⚠ are gaps this upgrade must close.
 
 | Status | Count |
 |---|---|
-| Implemented | 109 |
-| Partial | 10 |
+| Implemented | 110 |
+| Partial | 9 |
 | Blocked — source missing | 1 |
 | NOT APPLICABLE | 9 |
 | **Total rows** | **129** |

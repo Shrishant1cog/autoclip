@@ -624,6 +624,15 @@ PART 12 lists the unusual inputs to try. Each was tried against the real applica
 All three were found by **running the application or its gates**, not by reading the code, and all
 three are covered by tests that fail without the fix.
 
+> **Amendment — 2026-11-21 (M5.1).** This application run found **three** product defects, and
+> this section records them as they stood at M5. A **fourth product defect** was found afterwards,
+> by closing the last PARTIAL matrix row: the eight-case ducking matrix, written as eight **real
+> renders**, exposed that an empty speech timeline was indistinguishable from no timeline at all,
+> so a clip with no talking had its music pulled down by the source. It was fixed and guarded —
+> see `docs/FINAL_UPGRADE_REPORT.md` §4.2 (defect 4) and §4.3, and
+> `docs/upgrade-audit.md` §13.2. **Nothing in this section is invalidated by it**; the three
+> defects below remain exactly as measured here.
+
 | # | Defect | Found by | Fix | Guard |
 |---|---|---|---|---|
 | 1 | The API export path ignored the user's music preference and the speech-interval ducking. | Clicking *Export this clip* on a clip with a track chosen. | `api/clips.py` resolves the music through the same three-scope precedence the pipeline uses, and hands the renderer the job's speech timeline sliced to the clip. | 7 regression tests in `tests/test_api.py::TestClipExportHonoursTheUsersMusic`; **6 of the 7 fail without the fix**. |

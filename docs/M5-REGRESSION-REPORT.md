@@ -15,14 +15,14 @@ and one of the defects found at M5 renders on Windows and fails on Linux. See §
 | # | Gate | Command | Result | Verdict |
 |---|---|---|---|---|
 | G1 | Lint | `ruff check .` | *All checks passed!* | **PASS** |
-| G2 | Format | `ruff format --check .` | *226 files already formatted* | **PASS** |
+| G2 | Format | `ruff format --check .` | *227 files already formatted* | **PASS** |
 | G3 | Types | `mypy backend/autoclip` | *Found 10 errors in 8 files (checked 137 source files)* | **BASELINE — unchanged** |
-| G4 | Unit suite | `pytest -m "not slow and not golden and not e2e" -q` | **1,263 passed**, 61 deselected, 270.59 s | **PASS** |
-| G5 | Render suite | `pytest -m "slow and not golden and not e2e" -q` | **37 passed**, 1,287 deselected, 232.47 s | **PASS** |
+| G4 | Unit suite | `pytest -m "not slow and not golden and not e2e" -q` | **1,270 passed**, 69 deselected, 249.81 s | **PASS** |
+| G5 | Render suite | `pytest -m "slow and not golden and not e2e" -q` | **45 passed**, 1,294 deselected, 299.24 s | **PASS** |
 | G6 | Frontend | `npm run build` (`tsc -b && vite build`) | 59 modules transformed, built in 2.68 s | **PASS** |
 | G7 | Container | `docker build -f docker/Dockerfile --target base .` + `GET /api/health` | **Not runnable locally — Docker is not installed on this machine.** Verified by the CI `docker` job on every push. | **PASS (CI)** |
 | G8 | Real media | `AUTOCLIP_E2E_MEDIA=… pytest tests/test_pipeline_e2e.py -q` | See §5 | **PASS** |
-| G9 | Whole suite | `pytest tests -q --ignore=tests/test_pipeline_e2e.py` | **1,300 passed**, 0 failed, 0 xfailed, 0 skipped, 709.11 s | **PASS** |
+| G9 | Whole suite | `pytest tests -q --ignore=tests/test_pipeline_e2e.py` | **1,315 passed**, 0 failed, 0 xfailed, 0 skipped, 534.88 s | **PASS** |
 
 ### G3 in detail — mypy is at its baseline, and that is the claim
 
@@ -54,16 +54,21 @@ error appeared in a module the upgrade added. The M5 export fix did not add one 
 
 ## 2. What the upgrade changed in the suite
 
-| | M0 | M5 | Δ |
+| | M0 | M5.1 | Δ |
 |---|---|---|---|
-| Test files | 35 | **54** | +19 |
-| Test functions in the tree | 648 | **1,229** | +581 |
-| Tests collected | 672 (of which 26 were `xfail`) | **1,300** (of which **0** are `xfail`) | **+628** |
+| Test files | 35 | **55** | +20 |
+| Test functions in the tree | 648 | **1,244** | +596 |
+| Tests collected | 672 (of which 26 were `xfail`) | **1,315** (of which **0** are `xfail`) | **+643** |
 | Failing | 0 | **0** | — |
 | Skipped | 0 | **0** — the only `pytest.skip` calls in the tree are the e2e media gate, which is deliberate and documented | — |
 | `xfail` markers | **26** (the SSRF gap, pre-registered) | **0** | −26 |
-| Wall clock, unit selection | 193.77 s (672 tests, one invocation) | **270.59 s** (1,263 tests) | — |
-| Wall clock **per test** | 0.288 s | **0.214 s** | **−26%** |
+| Wall clock, unit selection | 193.77 s (672 tests, one invocation) | **249.81 s** (1,270 tests) | — |
+| Wall clock **per test** | 0.288 s | **0.197 s** | **−32%** |
+
+**The M5.1 column, against the M5 column.** M5.1 added **one test file** and **15 tests**: the
+eight-case ducking matrix (`tests/test_ducking_matrix.py`, 8 tests), four unit tests for the
+tri-state `ducking_intervals()` helper, two API-boundary contract tests, and one filter-graph
+test. The M5 figures were 1,300 collected across 54 files and 1,229 test functions.
 
 **The 26 `xfail` markers are the important number.** At M0 the SSRF policy was specified but not
 enforced, so the twenty-six target-policy tests were pre-registered as `xfail(strict=True)` — the
@@ -88,10 +93,10 @@ Ubuntu py3.12 leg — and it is run **before** the release commits are pushed, n
 
 | Selection | Windows (ffmpeg 9.0.2) | Linux (ffmpeg 7.0.2) |
 |---|---|---|
-| Unit — `-m "not slow and not golden and not e2e"` | **1,263 passed**, 61 deselected | **1,263 passed**, 61 deselected |
-| Render — `-m "slow and not golden and not e2e"` | **37 passed**, 1,287 deselected | **37 passed**, 1,287 deselected |
+| Unit — `-m "not slow and not golden and not e2e"` | **1,270 passed**, 69 deselected | **1,270 passed**, 69 deselected |
+| Render — `-m "slow and not golden and not e2e"` | **45 passed**, 1,294 deselected | **45 passed**, 1,294 deselected |
 | `ruff check .` | *All checks passed* | *All checks passed* |
-| `ruff format --check .` | *226 files already formatted* | *225 files already formatted* (the synced subset) |
+| `ruff format --check .` | *227 files already formatted* | *221 files already formatted* (the synced subset) |
 
 **The same tests, the same counts, on both platforms — and one of them only passes on one.** The
 sidechain fallback consumed one filter output twice, which ffmpeg 9 accepts and ffmpeg 7 refuses.
@@ -157,6 +162,8 @@ grows; the claim that matters is the one under it, which does not go stale.
 | 21 | `64d253d` | M5: the release package | **cancelled** — superseded by run 22 |
 | 22 | `cbcbe1c` | docs: record the M5 release commit in the ledger and the commit trail | **success** — all six jobs green: the four backend legs, the frontend build, and the Docker image with its health smoke test |
 | 23 | `ab9052e` | docs: the release run is green, and the Journey D records are complete | **success** — all six jobs green again, including the Ubuntu py3.12 leg that had failed twice |
+| 24 | `2931059` | docs: the CI run history reads the same way whichever run you look at | **success** — all six jobs green |
+| 25 | `822143e` | docs: four runs were cancelled, not three | **success** — all six jobs green |
 
 **Every run on this branch since the two failures was green.** Two of the runs failed, and **both
 failures were real defects** — not flakes, and neither was explained away. Four runs were cancelled
@@ -283,3 +290,63 @@ that the double stands in for is the same code path the real service would take.
 the credential, and the credential was never supplied. That is a statement about the environment,
 not about the code, and it is the reason the release assessment says *ship with the external
 integrations unverified* rather than *ship*.
+
+---
+
+## 9. The M5.1 amendment — the ducking matrix
+
+**2026-11-21.** M5.1 is a post-release increment on the same branch. The branch is untagged and
+v0.1.0 is still gated on the reframe golden set, so this report was updated in place rather than
+superseded. **The M5 verdict does not change.** What changed is the suite and the matrix.
+
+### What was added
+
+| File | Tests | What it asserts |
+|---|---|---|
+| `tests/test_ducking_matrix.py` | **8** | The eight-case ducking matrix, each case a **real render** |
+| `tests/test_speech_timeline.py` | +4 | The tri-state `ducking_intervals()` helper |
+| `tests/test_api.py` | +2 | The API boundary keeps "empty slice" and "no timeline" apart |
+| `tests/test_music.py` | +1 | The filter graph for an empty-but-present timeline |
+
+**+15 tests, +1 file.** 1,300 → **1,315** collected, all passing, zero xfail.
+
+### How the matrix is measured
+
+Each case renders the same clip **twice** — once with the ducking on and once with it off — and
+measures the bed's **own frequency band** in a window of each. The bed sits at 440 Hz and the
+source's voice at 1000 Hz, so a bandpass at 440 Hz reads the bed on its own, and the ratio of the
+two renders is the ducking as a number. A level measurement alone could not tell the bed from the
+voice; the difference between two renders can.
+
+The thresholds are deliberately **loose about depth and tight about shape**: a ducked window must
+be at least 6 dB down (against a configured 12 dB), and an un-ducked window must be within 0.26 dB
+of full level. What matters is *which* windows are ducked, not the exact number of decibels.
+
+| Case | Measured |
+|---|---|
+| Continuous speech | 0.397 down under speech, 1.000 flat outside |
+| Short pause (300 ms, inside the 350 ms merge window) | 0.408 in the gap — the bed does not recover |
+| Long pause (3 s) | 1.001 in the gap, 0.427 in each stretch |
+| Multi-speaker | 0.427 / 1.000 / 0.427 — a speaker change is not a pause |
+| Sound effect | 0.427 in speech, 1.005 at the effect — a transient is not somebody talking |
+| Music-heavy | 0.427 in speech, 1.001 outside; the source's own music within 0.25 of flat |
+| Low-volume | Ducked in speech, flat outside — the timeline drives the ducking, not the level |
+| **No speech** | 1.005 at the loudest point — full level throughout |
+
+### The defect it found, and the guard
+
+Seven of the eight passed first time. The **no-speech** case failed, and it found a real defect:
+an empty speech timeline was indistinguishable from no timeline at all, so a clip with no talking
+fell back to keying the ducking on the audio and the music was pulled down by whatever else the
+source contained. It was fixed by making the answer tri-state — `None` (no timeline), `[]` (a
+timeline that found no speech in this clip), and the speech itself — with
+`speech_timeline.ducking_intervals()` as the one way to produce it.
+
+**The guard was proven.** With the four product files reverted to the pre-M5.1 code,
+`test_no_speech_means_no_ducking` fails at a ratio of **0.915** against a flat render, and the
+other seven still pass. The files were restored afterwards.
+
+The measured impact of the defect was small — **≤ 0.9 dB** on a source carrying its own loud
+music — but the contract was violated at the API boundary, and the webcam layout already treated
+an empty timeline as "no emphasis" without falling back. **It was fixed rather than documented
+away.**
