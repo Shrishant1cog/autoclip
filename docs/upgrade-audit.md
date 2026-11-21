@@ -377,25 +377,25 @@ would have failed the format step before reaching the tests — which is consist
   independently, and "multiple accounts" currently means "one token displayed twice".
 - **D15 — the formatter gate is broken on a clean checkout** (above).
 
-**Since the baseline (through M5.2).** The table above is the *M0 baseline* and is deliberately left
+**Since the baseline (through M5.3).** The table above is the *M0 baseline* and is deliberately left
 as it was measured. The current state is recorded per milestone in `docs/UPGRADE-LEDGER.md`; at
-the end of M5.2 it is:
+the end of M5.3 it is:
 
-| Gate | At M0 (baseline) | At M5 (release) | At M5.1 | At M5.2 |
-|---|---|---|---|---|
-| Unit selection — `-m "not slow and not golden and not e2e"` | 672 passed | **1,263 passed**, 61 deselected | **1,270 passed**, 69 deselected | **1,285 passed**, 69 deselected |
-| Render selection — `-m "slow and not golden and not e2e"` | (included above) | **37 passed**, 1,287 deselected | **45 passed**, 1,294 deselected | **45 passed**, 1,309 deselected |
-| **Total in the two CI selections** | **672** | **1,300** | **1,315** | **1,330** |
-| Local full suite (Windows, excluding the e2e collection) | — | **1,300 passed** | **1,315 passed**, 534.88 s | **1,330 passed**, 499.52 s |
-| `xfail` markers | 26 (the SSRF suite) | **0** | **0** | **0** |
-| `ruff check .` | clean | **clean** | **clean** | **clean** |
-| `ruff format --check .` | **FAILED** — 38 of 147 files unformatted | **clean** — 226 files already formatted | **clean** — 227 files already formatted | **clean** — 227 files already formatted |
-| `ruff` version | unpinned (`>=0.7`) | **pinned at `0.17.5`** (`pyproject.toml:89`) — committed as `4cf309b`, which closes **D15** and **T2** | unchanged | unchanged |
-| mypy | 14 errors in 10 files | **10 errors in 8 files** (tolerated by `continue-on-error`) | **10 errors in 8 files** — unchanged | **10 errors in 8 files** — unchanged |
-| Frontend `tsc -b && vite build` | not run locally at audit time | **green**, run locally and in CI | unchanged — no frontend file was touched | unchanged — no frontend file was touched |
-| Docker build + health smoke | not run locally at audit time | **not run locally** — Docker is not installed on this machine; the CI `docker` job builds the image and smoke-tests `GET /api/health` | unchanged | unchanged |
-| Real-media ingest | not run | not run | not run | **run twice on the complete file** — 684,877,097 B at 360p and 5,529,989,793 B at the default 1080p |
-| Real-media pipeline | 24 e2e tests on a 180 s segment | **done** on a real segment | unchanged | **done again** on a real 180 s segment cut from a real four-hour download, with a real local model |
+| Gate | At M0 (baseline) | At M5 (release) | At M5.1 | At M5.2 | **At M5.3** |
+|---|---|---|---|---|---|
+| Unit selection — `-m "not slow and not golden and not e2e"` | 672 passed | **1,263 passed**, 61 deselected | **1,270 passed**, 69 deselected | **1,285 passed**, 69 deselected | **1,351 passed**, 70 deselected |
+| Render selection — `-m "slow and not golden and not e2e"` | (included above) | **37 passed**, 1,287 deselected | **45 passed**, 1,294 deselected | **45 passed**, 1,309 deselected | **46 passed**, 1,375 deselected |
+| **Total in the two CI selections** | **672** | **1,300** | **1,315** | **1,330** | **1,397** |
+| Local full suite (Windows, excluding the e2e collection) | — | **1,300 passed** | **1,315 passed**, 534.88 s | **1,330 passed**, 499.52 s | **1,397 passed**, 454.05 s |
+| `xfail` markers | 26 (the SSRF suite) | **0** | **0** | **0** | **0** |
+| `ruff check .` | clean | **clean** | **clean** | **clean** | **clean** |
+| `ruff format --check .` | **FAILED** — 38 of 147 files unformatted | **clean** — 226 files already formatted | **clean** — 227 files already formatted | **clean** — 227 files already formatted | **clean** — 230 files already formatted |
+| `ruff` version | unpinned (`>=0.7`) | **pinned at `0.17.5`** (`pyproject.toml:89`) — committed as `4cf309b`, which closes **D15** and **T2** | unchanged | unchanged | unchanged |
+| mypy | 14 errors in 10 files | **10 errors in 8 files** (tolerated by `continue-on-error`) | **10 errors in 8 files** — unchanged | **10 errors in 8 files** — unchanged | **10 errors in 8 files** — unchanged, and checked against a clean worktree at `HEAD` to be certain that none of the ten is new |
+| Frontend `tsc -b && vite build` | not run locally at audit time | **green**, run locally and in CI | unchanged — no frontend file was touched | unchanged — no frontend file was touched | unchanged — no frontend file was touched |
+| Docker build + health smoke | not run locally at audit time | **not run locally** — Docker is not installed on this machine; the CI `docker` job builds the image and smoke-tests `GET /api/health` | unchanged | unchanged | unchanged |
+| Real-media ingest | not run | not run | not run | **run twice on the complete file** — 684,877,097 B at 360p and 5,529,989,793 B at the default 1080p | **run once on a complete ten-minute file** — 140,602,318 B in 64.55 s, at format 399+140 |
+| Real-media pipeline | 24 e2e tests on a 180 s segment | **done** on a real segment | unchanged | **done again** on a real 180 s segment cut from a real four-hour download, with a real local model | **done on a whole source, end to end** — a complete ten-minute Hindi podcast through every stage, with a real local model, producing three real clips and three real exports |
 
 **The M5.1 column, against the M5 column.** M5.1 added **one test file** and **15 tests**: the
 eight-case ducking matrix (`tests/test_ducking_matrix.py`, 8 tests), four unit tests for the
@@ -417,6 +417,13 @@ unit selection is **1,285 passed** — identical to Windows — and a **212-test
 selection** covering the ducking matrix's real renders, the render tests, the music tests and the
 four M5.2 guard files passed in **193.04 s**, with `ruff check` and `ruff format --check` clean on
 both platforms.
+
+**The Linux leg was reproduced on the M5.3 tree as well** — and it **failed**, which is how it
+found defect 13. From the **exact committed tree** (`git archive` of `2b5935d`), on **ffmpeg
+7.0.2**, the **267-test ffmpeg-sensitive selection** failed with *"Invalid stream specifier:
+gsrc"*. After the fix it is green: **267 passed** in **104.89 s**, the unit selection is **1,351
+passed / 70 deselected** — identical to Windows — and `ruff check` and `ruff format --check` are
+clean on both platforms.
 
 **The ruff pin is the point of this row.** The baseline's format failure was not a style
 preference: with no version pinned, the gate was evaluated against whatever ruff CI happened to
@@ -447,7 +454,7 @@ new body. A failure that is only fixed in CI is a failure that comes back.
 
 **Every run on this branch since those two failures was green.**
 
-### 13.2 Eight product defects, found by running the application
+### 13.2 Thirteen product defects, found by running the application
 
 The full-suite gates were green while the application was broken. These defects were found
 by **running the application and its gates**, not by reading the code, and each is now guarded by
@@ -463,6 +470,11 @@ a test that fails without the fix.
 | 6 | **The yt-dlp download was authorised but never written to the transfer log**, so `EGRESS-INVENTORY.md` E11's claim that it is *logged* was false, and the largest thing AutoClip ever sends left the machine with nothing in the user's own log | reading *Settings → External processing* after a **5.52 GB** download: **0 rows** | `tests/test_ingest.py::test_the_download_is_recorded_in_the_transfer_log` — **fails without the fix** (`assert [] == [('ok', ...)]`) |
 | 7 | **The crop-safety diagnostic compared a per-clip crop against the whole-source webcam region** and called it *"the detected face"*, so it reported *"the crop cuts through the detected face"* on a clip that tracks the face perfectly, and on a clip with **no face in it at all** | the application's own diagnostics on two real clips of a real stream | 5 tests in `tests/test_diagnostics.py` and 2 in `tests/test_reframe.py`; the time-matching test **fails without the fix** |
 | 8 | **The URL policy refused any host whose two DNS answers were not the same set of addresses**, so a legitimate load-balanced host — `graph.facebook.com` — was treated as a DNS-rebinding attack and the publish was refused | the **full-suite gate**, as a flaky failure in the Instagram publishing tests, which passes alone and fails in a full run | 2 tests in `tests/test_url_policy.py` **fail without the fix**; 3 more assert that the rebinding protection still holds, and 1 asserts the unit suite never resolves a real hostname |
+| 9 | **The sentence and clause terminators were Latin-only**, so a Devanagari transcript had almost no sentence boundaries in it — and the clip-edge refinement then *silently dropped* every candidate that fell short of the minimum duration | the **real ten-minute Hindi source**: the danda `।` appears in **5** of its **1,128** words, and the old pattern matched **1** | 65 tests across `tests/test_transcript.py` (new) and `tests/test_boundaries.py`; **33 fail without the fix** |
+| 10 | **The export's ffmpeg command line could exceed Windows' own 32,767-character limit**, and the job died with `FileNotFoundError: [WinError 206] The filename or extension is too long` — a message about a *filename* for what is really an over-long *filter graph* | the **real export** of a clip with **20 crop segments** and **11 speech-emphasis spans**: the command was **36,743 characters**, and it failed at progress 0.88 **every time** | 7 tests fail without the export fix (6 in the new `tests/test_export_graph.py`, plus the behavioural render test); 4 more fail without the command-line guard |
+| 11 | **The webcam's speech emphasis was evaluated against a segment-local clock**, so the webcam only ever magnified in the **first** segment of a clip | the same real clip, read against `croppath.axis_expression`, which subtracts `offset_s` for exactly this reason | `tests/test_export_render.py::TestLayoutRender::test_the_speech_emphasis_renders_in_a_later_stretch` — a **behavioural** render test; **fails without the fix** |
+| 12 | **A caption could be held on screen for twelve seconds**, because the caption inherited the recogniser's word timing rather than bounding its own lifetime | the application's **own diagnostic** on a real clip: *"3 word(s) are held on screen too long"*. The exported `.srt` carried a cue of `00:00:09,080 --> 00:00:21,650` | 8 tests in `tests/test_captions.py::TestCaptionLifetime` and 2 in `tests/test_diagnostics.py`; **8 fail without the fix** |
+| 13 | **The export's video graph consumed a filter output once per crop segment.** The source was split in two, and then *each* segment read from the same output again — which is invalid, because a filter output may be consumed only once | the **Linux leg**, on **ffmpeg 7.0.2** — the version that reproduces the CI's platform. ffmpeg **9** tolerates it; ffmpeg **7** refuses it with *"Invalid stream specifier"*, so a multi-segment clip exported on the developer's machine and failed on every strict ffmpeg | 4 tests in `tests/test_export_graph.py::TestGraphShape`; **3 fail without the fix**. The structural graph check moves to `tests/graph_shape.py` and is now applied to the **video** graph as well as the music graph — it was already written for this class of defect, but only ever looked at the music graph |
 
 **Defect 3 is the one that would have shipped.** It rendered on the machine the code was written
 on and would have failed on the CI runners and on every user with an ffmpeg older than 9. It was
@@ -495,6 +507,39 @@ a legitimate Instagram publish was refused for no security gain. The guard now c
 **class** of the two answers, and a public → private or public → loopback move is still refused.
 The unit suite also no longer resolves real hostnames, which is what made the failure look like a
 flake in the first place.
+
+**Defects 9 to 12 were found by pointing the application at a complete ten-minute video and letting
+it run all the way through.** They are the defects a user in Hindi would have met on their first
+real video, and every one of them is invisible to the whole test suite:
+
+* **Defect 9** is a silent one. The old patterns matched `. ! ?` and a few ASCII marks; a Hindi
+  transcript carries the **danda**, so the sentence boundaries were effectively absent, and the
+  clip-edge rule — which had no fallback for a too-short range — dropped the candidates outright.
+  Over **1,130** plausible candidate ranges from the real transcript, the old rule kept **852** and
+  the new one keeps **1,070**.
+* **Defect 10** is a hard failure with a misleading message. Windows refuses a command line longer
+  than **32,767 characters** and says *"the filename or extension is too long"*; the export's filter
+  graph was **36,743**. The cause was one line of arithmetic — the webcam crop repeated a
+  **293-character** emphasis expression once per segment, **80 times**.
+* **Defect 11** was hiding behind defect 10. The emphasis expression is written against
+  clip-relative spans, but the crop was applied to each PTS-reset segment, so the expression's `t`
+  restarted at every boundary and the webcam only ever magnified in the first segment.
+* **Defect 12** was found by the application's **own diagnostic**, which said *"3 word(s) are held
+  on screen too long"*. Whisper had stretched one Hindi word across **7.84 seconds**, the caption
+  inherited it, and the exported `.srt` carried a cue of **12.57 seconds**.
+
+**Defect 13 is the same class as defect 3, and the same leg found it.** The export's video graph
+consumed a filter output once per crop segment — the source was split in two, and then *each*
+segment read from the same output again. A filter output may be consumed only once; ffmpeg 9
+tolerates the violation and ffmpeg 7 refuses it with *"Invalid stream specifier"*. The developer's
+machine agreed with the developer's ffmpeg, so it rendered there and nowhere else.
+
+The structural check for this class of defect was **already written** — it was the fix for defect
+3 — but it only ever looked at the **music** graph. The video graph was never checked, so nothing
+in the suite could see this. The check now lives in `tests/graph_shape.py` and is applied to both
+graphs. It also earned its keep immediately: it caught a **name collision** in the first version of
+the fix, before any render — the split's outputs and the trims' outputs were both named
+`ws{index}`. A parser catches that; a render on one ffmpeg does not.
 
 ---
 
@@ -536,6 +581,14 @@ These are YouTube-sourced third-party videos. Two consequences:
 2. They are **not** usable for publishing acceptance: rights are not confirmed for their creators,
    and the application will (after M1/M0.5) refuse to publish a source without a stored rights
    confirmation. Lane C publishing must use the owner's own footage and own channel.
+
+**Two further real sources were used by the M5.2 and M5.3 increments**, both supplied by the owner
+and both third-party creators' material used for **technical acceptance only**:
+
+| Increment | Source | Length | What it was used for |
+|---|---|---|---|
+| M5.2 | `https://www.youtube.com/live/l-oEKLu4Y3w` — *"BACK AT IT AGAIN IN THE VICE CITY!!! \| NO PROMOTIONS"*, channel **CarryisLive** | **4:00:10** | The **complete ingest** of the whole file, twice, at two formats; then the pipeline on real segments cut from that same file |
+| M5.3 | `https://youtu.be/tg2MwT5FPdY` — *"PODCAST OF THE DECADE🥵 \| CARRYMINATI"*, channel **CarryMinati** | **10:19** | The **complete pipeline**, end to end, on a whole source — the ingest, the transcript, the highlights, the layout, the export, the captions and the diagnostics |
 
 They are untracked and must stay untracked (`git ls-files` confirms no media is tracked).
 

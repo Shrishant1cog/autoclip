@@ -272,3 +272,89 @@ before the renders ran:
 
 The Windows numbers for the same selections are identical. **A fix that only renders on the
 developer's machine is not a fix**, and this is the leg that proves the opposite.
+
+---
+
+## 8. The M5.3 amendment — a complete source, measured
+
+**Run 2026-11-21, documented 2026-11-22.** M5.3 pointed the application at a **real ten-minute
+YouTube video** and ran it through **every stage, end to end**. That is the first run in this
+project whose timing figures cover a **whole source**, and two of them change what is known.
+
+### What was measured
+
+| Measurement | Value | Note |
+|---|---|---|
+| **Download** | **140,602,318 B in 64.55 s** | ≈ **2.18 MB/s** on this machine's connection. Format **399+140** (1920×1080 AV01 + AAC @ 129.482 kbps) |
+| **Transcription, 619 s of real Hindi speech** | **1,346 s** | whisper `small`, `compute_type=int8`, CPU only. ≈ **2.17× real time** |
+| **Highlight detection** | **174.8 s** (first job) · **152.5 s** (the re-run's own call) | Real local model (`llama3.1:8b` over Ollama) |
+| **Creative planning** | **98.2 s** · **148.7 s** · **96.6 s** | The same model; the spread is the schema-repair retry, and it varies with the model's output |
+| **Reframe, including the first-use model download** | **≈ 528 s** | MediaPipe face tracking over the whole source, plus the **3.6 MB** `face_landmarker.task` download on first use |
+| **Export, three real clips** | **176.3 s** | 1080×1920, burnt captions, `.srt` sidecars. Output: 31.30 s, 40.27 s and 33.37 s |
+| **The complete pipeline** | **≈ 40 min** for 619 s of source | ≈ **3.9× real time**, end to end, including the model download and the reframe pass |
+
+### What it changes in this report
+
+- **P7 is now partly answered, again.** The transcription figure is now measured on **two**
+  different real sources: **432 s per 180 s** at M5.2 (2.4× real time) and **1,346 s per 619 s**
+  here (2.17× real time). The two agree closely, which is what makes the **16-hour** arithmetic
+  for the four-hour recording trustworthy rather than a guess. The missing half is unchanged: there
+  is still no **M0 counterpart** to compare against, because the pre-upgrade pipeline had no
+  equivalent path.
+- **P6 is now partly answered.** yt-dlp's **download** time was measured on a second real source:
+  **64.55 s** for 140.6 MB (≈ 2.18 MB/s). Its *import* time — the metadata and manifest fetches —
+  was still not measured separately, so P6 stays open.
+- **P4 is still open.** Peak memory, CPU and GPU during a real render were not sampled. The M5.3
+  run was long and real, but it was not instrumented for resources.
+
+### The suite, at M5.3
+
+| | M0 | M5 | M5.1 | M5.2 | **M5.3** |
+|---|---|---|---|---|---|
+| Mandatory suite (CI selection 1) | 672 passed in 193.77 s | **1,263 passed, 61 deselected in 270.59 s** | **1,270 passed, 69 deselected in 249.81 s** | **1,285 passed, 69 deselected** | **1,351 passed, 70 deselected in 230.28 s** |
+| Render suite (CI selection 2) | (not separated) | **37 passed, 1,287 deselected in 232.47 s** | **45 passed, 1,294 deselected in 299.24 s** | **45 passed, 1,309 deselected** | **46 passed, 1,375 deselected in 231.92 s** |
+| Whole suite, one invocation | 672 passed in 193.77 s | **1,300 passed in 709.11 s** | **1,315 passed in 534.88 s** | **1,330 passed in 499.52 s** | **1,397 passed in 454.05 s** |
+
+**No claim of a speed-up is made.** The whole-suite wall clock moved from **499.52 s** to
+**454.05 s** while the suite grew by **67 tests**, and the per-test figure moved from **0.375 s**
+to **0.325 s**. Both of those are **machine load, not a speed-up**: this is a shared four-core
+laptop, and the wall clock of a shared machine moves by tens of seconds for reasons that have
+nothing to do with the code. The honest reading is **unchanged per test**.
+
+### One performance note that belongs here
+
+The M5.3 export fix does **not** change how long a render takes, and it is worth saying so rather
+than letting the numbers imply otherwise. The webcam crop and scale are now applied **once**,
+after the segment concat, instead of once per segment — so the *filter graph* is **0.33×** of its
+former size — but ffmpeg was doing the same total amount of per-frame work either way. What the
+fix buys is that the render **completes at all** on Windows, and that the command line fits.
+
+### The Linux leg, re-run at M5.3
+
+The Linux leg was reproduced from the **exact committed tree** (`git archive` of the M5.3 commit),
+on **ffmpeg 7.0.2** — the version that exposed defect 3 — with the `ass` filter confirmed present
+before the renders ran. The selection now carries the M5.3 guards explicitly: the filter-graph
+structure tests, the ffmpeg command-line tests, the caption-lifetime tests and the emphasis
+render.
+
+The first run of this leg **failed** — and the failure was a **real product defect**, not a
+harness problem. The export's video graph consumed a filter output once per crop segment; ffmpeg 9
+tolerates that and ffmpeg 7 refuses it with *"Invalid stream specifier"*. The developer's machine
+agreed with the developer's ffmpeg, so it rendered there and nowhere else. That is **defect 13**,
+and it is why the leg exists.
+
+After the fix, from the committed tree (`2b5935d`, by `git archive` — what is tested is what is
+committed):
+
+| | Result |
+|---|---|
+| The toolchain | **Python 3.12.16**, **ffmpeg 7.0.2** (static build), `ass` filter confirmed present, the Windows ffmpeg explicitly kept **off** PATH |
+| ffmpeg-sensitive selection | **267 passed**, 0 failed, 104.89 s |
+| Unit selection (`-m "not slow and not golden and not e2e"`) | **1,351 passed**, 70 deselected, 48.45 s |
+| `ruff check .` | *All checks passed* |
+| `ruff format --check .` | exit 0 |
+
+The venv lives **outside** the tree, exactly as CI has it. A venv inside the tree puts the venv's
+own `activate_this.py` in front of ruff, and it is neither lint-clean nor format-clean — a harness
+artefact, not a finding.
+

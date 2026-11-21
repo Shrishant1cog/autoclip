@@ -637,6 +637,26 @@ PART 12 lists the unusual inputs to try. Each was tried against the real applica
    application's own Review screen explains the outcome: *"No clips came back. The model found
    nothing self-contained enough to stand alone — which is a real answer for some source
    material, not necessarily a failure."* It is recorded as a **model-quality observation**.
+10. **The M5.3 run's clip counts are not comparable across runs.** The detection stage runs at
+    `DetectionConfig.temperature = 0.3`, so the before-run and the re-run saw **different candidate
+    sets** and proposed **different titles**. The raw "1 clip before, 3 clips after" comparison is
+    **not** a controlled measurement of the fix and is not offered as one. The controlled comparison
+    is the **same ten candidates** refined by the old rule and the new rule — **2 kept against 6**
+    — plus the offline sweep over **1,130** candidate ranges (AT-F-06, AT-F-07).
+11. **The M5.3 run's caption bound is a constant, not a measurement of reading speed.**
+    `captions.MAX_CAPTION_S = 2.5` is the same for every style and every language, and it bounds
+    the caption rather than correcting the recogniser's alignment. A style with a deliberately
+    slower reading pace may have its caption cut short. Named as **K24** and **K25**.
+12. **The M5.3 run is still not a publishing test, and it is still not a complete four-hour
+    pipeline.** The complete source it ran was **ten minutes** long; the four-hour recording is
+    still unrun for the measured reason in AT-E-11 and **K22**. Nothing was published anywhere, no
+    account was connected, and no hosted credential was spent.
+13. **The Linux leg covers two ffmpeg versions, not every ffmpeg.** The graph's shape was measured
+    against **ffmpeg 7.0.2** and **ffmpeg 9.0.2**, and the export now uses only constructs both
+    accept. An ffmpeg older than 7, or a build with a different filter set, is **not** covered by
+    evidence. Named as **K27**. What the leg *does* establish is that the graph no longer depends
+    on a **newer** ffmpeg's leniency — and that the structural check, not the ffmpeg, is what
+    catches this class of defect now.
 
 ---
 
@@ -932,6 +952,318 @@ inject their own.
 
 ---
 
+## M5.3 — The complete ten-minute pipeline (2026-11-21)
+
+**What this section is.** A post-release increment to this file, dated **2026-11-21**, on the same
+branch. It records a run of the real application against a **real, third-party YouTube video**,
+supplied by the owner:
+
+```
+https://youtu.be/tg2MwT5FPdY?si=CEj6REktSyC2O_An
+```
+
+> **Rights.** This is another creator's video. It is used here for **technical acceptance only**.
+> Nothing produced from it was published anywhere, no account was connected, and no hosted
+> credential was spent. It is not a release artefact.
+
+**What M5.3 adds, and why it is not M5.2 again.** M5.2 ingested a **whole four-hour file** but ran
+the pipeline on **pieces** of it; the complete-pipeline claim was left open as a stated limitation
+(**K22**). This increment runs a **whole source** through **every stage** — paste, ingest,
+prepare, transcribe, highlight, lay out, export, caption, diagnose — and inspects what came out.
+The source is short enough to do that honestly: transcription measured at about seven minutes per
+180 s on this four-core machine, so ten minutes of audio is about twenty minutes of transcription.
+
+**The environment.** A separate application instance on **port 8803** with its own home at
+`%TEMP%\opencode\autoclip-yt-v3`, so the owner's own instance and its database were untouched. The
+model was the same real local **Ollama** (`llama3.1:8b` at `127.0.0.1:11434`), and
+`active_provider=ollama` means **no hosted call and no hosted spend**.
+
+**The source, as the internet described it.**
+
+| | |
+|---|---|
+| Video id | `tg2MwT5FPdY` |
+| Title | PODCAST OF THE DECADE🥵 \| CARRYMINATI |
+| Channel | CarryMinati (`UCj22tfcQrWG7EMEKS0qLeEg`) |
+| Duration | 619 s — **10:19** |
+| Was live | no |
+| Upload date | 2026-09-14 |
+| Views / likes | 29,316,913 / 1,193,759 |
+| Availability | public, no age limit |
+| Audio track | Hindi (`hi`), **no manual subtitles** |
+| Formats offered | 50 — and **not one** of them muxed; the best was 2560×1440 @ 30 fps, AV01 + Opus |
+
+**This source is harder than M5.2's.** It is a podcast with intercut b-roll: a full-screen face at
+5 s, an AI-generated animation at 120 s with **no face**, a **pillarboxed vertical** clip at 240 s
+with **no face**, and a different, wider framing at 600 s.
+
+### Journey F — the complete pipeline
+
+#### AT-F-01 — Paste the short link
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-F-01 |
+| **User input** | `https://youtu.be/tg2MwT5FPdY?si=CEj6REktSyC2O_An`, pasted into the YouTube source field |
+| **Expected** | The application accepts a **short** `youtu.be` link as well as a long `youtube.com` one, registers it immediately, and returns — the download happens in the background, not in the request |
+| **Actual** | `POST /api/sources/youtube` → **201 Created** in one round trip, with a source row (`47d64e9e7fc14313`) whose title was the URL itself. The download had not started yet. The frontend (`Ingest.tsx`) posts the URL **unchanged** |
+| **Result** | **VERIFIED** |
+| **Screenshot** | Not captured — this run was driven through the HTTP API the browser uses, not through the screen. The screens were not the subject of this increment |
+| **Logs** | `INFO: 127.0.0.1 - "POST /api/sources/youtube HTTP/1.1" 201 Created` |
+| **Backend evidence** | `sources` row: `type=youtube`, `url=https://youtu.be/tg2MwT5FPdY?si=CEj6REktSyC2O_An` — the **query string preserved**, because the query is part of what the user pasted |
+| **Export inspection** | n/a — nothing has been rendered yet |
+
+#### AT-F-02 — The download happens on the worker, with a real `yt-dlp`
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-F-02 |
+| **User input** | Start a job on that source |
+| **Expected** | The job's prepare stage runs `yt-dlp` against the URL, writes the complete file under `<root>/raw/<source_id>/`, and the source row is then updated with the real metadata |
+| **Actual** | Job `1075820ea45841fe` went `queued → running/prepare`. A real `yt-dlp` process wrote `raw/47d64e9e7fc14313/source.mp4` — **140,602,318 B** — in **64.55 s**, at format **399+140** (1920×1080 AV01 `av01.0.08M.08` + `mp4a.40.2` @ 129.482 kbps) |
+| **Result** | **VERIFIED** |
+| **Screenshot** | n/a — the background worker has no screen |
+| **Logs** | `Downloading YouTube source 47d64e9e7fc14313 with yt-dlp.`; the app's own progress event carried the download percentage |
+| **Backend evidence** | `raw/47d64e9e7fc14313/source.mp4` = 140,602,318 B, confirmed with `ffprobe`; `sources` row updated to `duration_s=618.811791`, `width=1920`, `height=1080`, `fps=29.97002997002997`, `has_audio=1` |
+| **Export inspection** | n/a — the ingest produces a source, not an export |
+
+#### AT-F-03 — The source row carries the real metadata, and the title's encoding survives
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-F-03 |
+| **User input** | Open the source after the download |
+| **Expected** | The source row carries the title, the channel, the duration, the frame size and the frame rate of the media that actually arrived — and the title is stored **exactly** as `yt-dlp` reported it |
+| **Actual** | `title='PODCAST OF THE DECADE🥵\| CARRYMINATI'`, `channel='CarryMinati'`, `duration_s=618.811791`, `width=1920`, `height=1080`, `fps=29.97002997002997`. The emoji's **U+1F975** code point is intact, there is **no U+FFFD** anywhere in the string, there are **no lone surrogates**, and the database row is **byte-identical** to what `GET /api/sources/{id}` returns |
+| **Result** | **VERIFIED** |
+| **Screenshot** | n/a |
+| **Logs** | — |
+| **Backend evidence** | The row above, read back through the API and out of `autoclip.db`, and compared against the `source.info.json` sidecar byte for byte |
+| **Export inspection** | n/a |
+
+> **A note about the console.** During this run the title printed as mojibake in the terminal. That
+> was the **PowerShell console's cp1252 code page**, not the data. The evidence above is the
+> byte-level comparison, and it is clean. It is recorded here because a reader who repeats the run
+> will see the same mojibake and should not mistake it for a defect.
+
+#### AT-F-04 — The download appears in the transfer log — **exactly one row**
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-F-04 |
+| **User input** | Open *Settings → External processing* after the download |
+| **Expected** | The download is classified before the fetch and **logged** — one row, with the destination's query string stripped and the duration recorded |
+| **Actual** | **Exactly one** row for the download: `operation=media_download`, `provider=yt-dlp`, `destination=https://youtu.be/tg2MwT5FPdY` (query stripped), `destination_class=public`, `outcome=ok`, `duration_ms=64550`, `data_summary="A page and its media are fetched from the URL you supplied."` |
+| **Result** | **VERIFIED** |
+| **Screenshot** | Not captured — the transfer log was read through `GET /api/privacy/transfers` and out of the `egress_log` table |
+| **Logs** | — |
+| **Backend evidence** | The `egress_log` row above, `occurred_at=2026-11-21T14:31:06Z` |
+| **Export inspection** | n/a |
+
+#### AT-F-05 — The whole file is transcribed
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-F-05 |
+| **User input** | Let the job's transcribe stage run |
+| **Expected** | The **complete** 619 s is transcribed by the local whisper, and the transcript is written out with word-level timings |
+| **Actual** | **1,346 s** (22.4 min) for 619 s of audio. `transcript.json` written: language `hi`, model `small`, **1,128 words**, **193 segments** |
+| **Result** | **VERIFIED** |
+| **Screenshot** | n/a |
+| **Logs** | the job's own progress events, `stage=transcribe` |
+| **Backend evidence** | `work/1075820ea45841fe/transcript.json` — `language=hi`, `model=small`, 1,128 words, 193 segments |
+| **Export inspection** | n/a |
+
+#### AT-F-06 — The refinement keeps six candidates out of ten — **the defect this increment found**
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-F-06 |
+| **User input** | Let the job's highlight stage run, and compare the candidates the model proposed with the candidates the refinement kept |
+| **Expected** | The refinement snaps each candidate to a real sentence boundary and keeps it if it falls inside the duration rules. **On a Hindi transcript, the sentence boundaries have to exist at all** |
+| **Actual** | The model proposed **10 raw candidates**. The **old** refinement kept **2**. The **fixed** refinement kept **6**, and the pipeline's own deduplication turned those into the **3 clips** that were exported. The reason is measured: on the real transcript the old `SENTENCE_END` matched **1** of **1,128** words — the danda `।` appears in **5** of them and was invisible — and the old `CLAUSE_END` matched **28**. The new patterns match **6** and **34** |
+| **Result** | **VERIFIED** (after the fix) — **FAILED** before it |
+| **Screenshot** | n/a — this is a pipeline measurement, read out of the candidate dump the harness captured |
+| **Logs** | — |
+| **Backend evidence** | The raw candidate list and the refined list, captured from the same run; `transcript.json` for the word timings |
+| **Export inspection** | The three clips this produced — AT-F-08 |
+
+> **What this test does *not* claim.** The **before-run** of this job produced **1** clip and the
+> **re-run** produced **3**, but the detection stage runs at `DetectionConfig.temperature = 0.3`, so
+> the two runs saw **different candidate sets** and proposed **different titles**. The raw
+> "1 against 3" comparison is therefore **not** a controlled measurement of the fix. The controlled
+> comparison is the one above — the **same ten candidates**, refined by the old code and by the new
+> code — and the offline sweep in AT-F-07.
+
+#### AT-F-07 — The clip edges land on real boundaries — the offline sweep
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-F-07 |
+| **User input** | Take the real transcript and run every plausible candidate range through the old rule and the new rule |
+| **Expected** | The rule keeps a candidate when it can find a sentence end inside it, and when it cannot, it falls back to the **first word that reaches the minimum duration** instead of dropping the candidate |
+| **Actual** | Over **1,130** plausible candidate ranges drawn from the real transcript: the **old** rule kept **852** (75 %) and dropped **278**; the **new** rule kept **1,070** (94 %) and dropped **60**. The mean kept duration fell from **61.1 s** to **52.9 s** — the old rule was keeping *longer* clips because it was willing to stretch to the next sentence end, and dropping the rest |
+| **Result** | **VERIFIED** (after the fix) — **FAILED** before it |
+| **Screenshot** | n/a |
+| **Logs** | — |
+| **Backend evidence** | The sweep was run over the real `transcript.json`; the per-candidate decisions were written out and compared rule against rule |
+| **Export inspection** | n/a |
+
+#### AT-F-08 — The export completes — the command fits — **the defect this increment found**
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-F-08 |
+| **User input** | Let the export stage render the three clips |
+| **Expected** | The export produces three files. On Windows, the ffmpeg **command line** must fit inside the operating system's **32,767-character** limit |
+| **Actual** | **The first attempt died.** Job `f4648116d6ba49e4` failed at progress **0.88** with `FileNotFoundError: [WinError 206] The filename or extension is too long` — and it reproduced **every time**. The clip that failed is *Alien interview* (478.08–518.26 s), with **20 crop segments** and **11 speech-emphasis spans**: its filter graph was **36,588** characters and its command line **36,743** — **1.1× over the limit**. The cause was one line of arithmetic: the webcam crop spelled the whole emphasis expression out once per segment, repeating a **293-character** term **80 times**. **After the fix**, the same clip's command is **10,697** characters — **0.33×** of the limit — and the job reaches `done` with all three clips exported |
+| **Result** | **VERIFIED** (after the fix) — **FAILED** before it |
+| **Screenshot** | n/a — the export stage has no screen |
+| **Logs** | the job's own error field carried the `WinError 206`; the re-run carried `status=done stage=export progress=1.0000 error=None` |
+| **Backend evidence** | The command sizes, measured on the real clip's own crop path: *Why most agencies die at 10 clients* 6,817 → 6,972; *Alien interview* **36,743 → 10,697**; *The problem with marriage* 7,609 → 7,764 |
+| **Export inspection** | `alien-interview_9x16.mp4` — 34,941,233 B, 1080×1920, 29.97 fps, AAC stereo, **0.000 % full-scale** |
+
+> **A guard was added in front of the failure.** `ffmpeg.check_command_line_length` now refuses an
+> over-long command **before** ffmpeg is launched, and the message names the **filter graph** rather
+> than blaming a filename. The limit is overridable so the check itself is testable on Linux CI.
+> **7 tests fail without the export fix** (the 6 in `tests/test_export_graph.py` and the behavioural
+> render test), and **4 more** fail without the command-line guard.
+
+#### AT-F-09 — The webcam's speech emphasis renders in a later stretch — **the defect this increment found**
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-F-09 |
+| **User input** | Render the same composition twice — once during a quiet moment, once during a talking moment — in the **second** stretch of the clip |
+| **Expected** | The emphasis expression is written against **clip-relative** speech spans, so the webcam strip magnifies during speech **wherever in the clip** the speech is |
+| **Actual** | **Before the fix, it did not.** The crop was applied to each PTS-reset (`setpts=PTS-STARTPTS`) segment, so the expression's `t` restarted at every segment boundary: the webcam only ever magnified in the **first** segment. `croppath.axis_expression` subtracts `offset_s` for exactly this reason, and the two disagreed. **After the fix** — the crop applied once, after the segment concat — the strip differs between the quiet moment and the talking moment in the later stretch |
+| **Result** | **VERIFIED** (after the fix) — **FAILED** before it |
+| **Screenshot** | n/a — this is a pixel comparison inside the render test |
+| **Logs** | — |
+| **Backend evidence** | `tests/test_export_render.py::TestLayoutRender::test_the_speech_emphasis_renders_in_a_later_stretch` — a **behavioural** render test: it compares the webcam strip at a quiet moment (2.7 s) with the webcam strip at a talking moment (4.0 s), in the second stretch, and asserts the two differ |
+| **Export inspection** | The three exported files, each with a webcam strip that tracks the speech through the whole clip rather than only its first segment |
+
+#### AT-F-10 — The caption is not held on screen for twelve seconds — **the defect this increment found**
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-F-10 |
+| **User input** | Read the application's **own** caption diagnostic on the clip *The problem with marriage* |
+| **Expected** | A caption is read, not watched. It should not sit on screen long after the words have been read |
+| **Actual** | **Before the fix, the application's own diagnostic said:** *"3 word(s) are held on screen too long"*. The cause was an alignment estimate — Whisper stretched one Hindi word, `में`, across **7.84 seconds** (552.730 → 560.570 s), and the caption inherited it. Measured on the rendered file: `bold_pop` held one caption for **7.84 s**, and the group styles (`karaoke_fill`, `clean_lower`) held a four-word cue for **12.57 s**. **After the fix**, the longest caption is **2.05 s** (per word) and **2.50 s** (group) |
+| **Result** | **VERIFIED** (after the fix) — **FAILED** before it |
+| **Screenshot** | n/a |
+| **Logs** | — |
+| **Backend evidence** | The fresh diagnostic on the re-exported clip: `caption_timing` **ok**, measured `"20 words, 0 overlap(s), longest caption 2.05s"`, and the clip's overall verdict `ok: true` |
+| **Export inspection** | The `.srt` sidecar — AT-F-11 |
+
+> **Why the fix is in the caption layer and not the transcript layer.** The recogniser's word
+> timings are **estimates**, and several other consumers want them as the recogniser reported
+> them. It is the **caption's own lifetime** that needs a bound, so `captions.MAX_CAPTION_S = 2.5`
+> bounds it — and `captions.caption_spans()` is now the **single source** of the caption timing,
+> shared by the renderer and the diagnostic, so the diagnostic measures the captions that are
+> actually burned into the export.
+
+#### AT-F-11 — The `.srt` sidecar: every cue bounded, and the text preserved
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-F-11 |
+| **User input** | Read every cue of every `.srt` sidecar the export wrote |
+| **Expected** | No cue is held for longer than the bound, and **no word is lost** — the text is still all there |
+| **Actual** | **Before the fix**, `the-problem-with-marriage_9x16.srt` carried the cue `00:00:09,080 --> 00:00:21,650` — **12.57 s** — with the text `ने, नहीं, साइड में`. **After the fix**, that cue is **two**: `ने, नहीं,` (9.080 → 11.580) and `साइड में` (11.760 → 14.260), and the sidecar has **6 cues**. The longest captions across the three re-exported clips are **2.500 s / 2.500 s / 2.380 s** — **none over the bound**. Every word of the clip is still captioned |
+| **Result** | **VERIFIED** (after the fix) — **FAILED** before it |
+| **Screenshot** | n/a |
+| **Logs** | — |
+| **Backend evidence** | The sidecars were read back with `pysubs2` and every cue's duration measured. `pysubs2` 1.8 stores subtitle times in **milliseconds**, not centiseconds |
+| **Export inspection** | `the-problem-with-marriage_9x16.srt` — 443 B, 6 cues; `alien-interview_9x16.srt` — 1,256 B, 15 cues; `why-most-agencies-die-at-10-clients_9x16.srt` — 1,479 B, 15 cues |
+
+#### AT-F-12 — The application's own ten measurements, on all three clips
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-F-12 |
+| **User input** | Open each clip's diagnostics |
+| **Expected** | Ten measurements per clip: caption timing, crop safety, duplicate clips, export validity, duration, resolution, frame-rate consistency, black frames, audio present, audio clipping |
+| **Actual** | *Alien interview* (`f22a5314317d44c5`) — **every measurement `ok: true`**. *The problem with marriage* (`170047e67fc44a55`) — **every measurement `ok: true`**, including `caption_timing` with `"20 words, 0 overlap(s), longest caption 2.05s"`. *Why most agencies die at 10 clients* (`5c15ddb7f920411d`) — `ok: false` on **`black_frames` only**; the other nine are `ok: true` |
+| **Result** | **VERIFIED** |
+| **Screenshot** | Not captured — the diagnostics were read through `GET /api/clips/{id}/diagnostics` |
+| **Logs** | — |
+| **Backend evidence** | The diagnostics payloads, captured verbatim. The three clips: `5c15ddb7f920411d` (572.47 → 603.67 s, score 87), `f22a5314317d44c5` (478.080812 → 518.26 s, score 60), `170047e67fc44a55` (538.92 → 572.19 s, score 50) |
+| **Export inspection** | `why-most-agencies-die-at-10-clients_9x16.mp4` — 40,539,188 B, 1080×1920, 29.97 fps, 31.30 s; `alien-interview_9x16.mp4` — 34,941,233 B, 40.27 s; `the-problem-with-marriage_9x16.mp4` — 28,552,646 B, 33.37 s. Every one: AAC stereo, **0.000 % of samples at full scale** |
+
+#### AT-F-13 — The black stretch is in the source, not in the export
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-F-13 |
+| **User input** | Run `ffmpeg blackdetect` over the **raw source**, and compare its answer with the export's |
+| **Expected** | If the measurement is right about the export, it should also be right about the source — and if the source has a black stretch, the export carrying the same stretch is **correct behaviour, not a defect** |
+| **Actual** | The raw source has `black_start:601.534267 black_end:603.369433 black_duration:1.835167`, plus a second stretch of **0.53 s** at 154.49 s. The export carries the **identical** 1.835 s stretch. The diagnostic was **right**, and the source is what is black |
+| **Result** | **VERIFIED** — the measurement is a true positive about the source |
+| **Screenshot** | n/a |
+| **Logs** | — |
+| **Backend evidence** | `ffmpeg -i raw/47d64e9e7fc14313/source.mp4 -vf blackdetect` output, against the export's own `black_frames` measurement |
+| **Export inspection** | The export carries the source's own black frames, unchanged. **Nothing was "fixed"** — there was nothing to fix |
+
+#### AT-F-14 — The complete pipeline, with nothing left as "not run"
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-F-14 |
+| **User input** | Run the application against one URL, and follow it all the way to the finished files |
+| **Expected** | Every stage of the pipeline runs on a **complete** source: ingest → prepare → transcribe → highlight → creative → reframe → export, with the diagnostics measured on the results |
+| **Actual** | Job `f4648116d6ba49e4` reached **`done`** with `progress=1.0000` and `error=None`. **Every stage ran.** The transcript and the plan were reused from the earlier run, so the **model was not asked a second time** for the re-export — the comparison stayed controlled. The job's own timeline: `prepare` and `transcribe` complete, `highlights` reached in **instantly** on the re-run, and the export ran to `progress=1.0000` in **176.3 s** |
+| **Result** | **VERIFIED** |
+| **Screenshot** | Not captured — this run was driven through the HTTP API the browser uses |
+| **Logs** | the job's progress events, from `queued` through `running/export` to `done` |
+| **Backend evidence** | `jobs` row: `id=f4648116d6ba49e4`, `status=done`, `current_stage=export`, `progress=1.0`, `error=NULL`. The transfer log holds **9 rows** for the whole run, all of them accounted for: **1** `media_download` (yt-dlp, public), **6** `highlights`/`creative_planning` against `http://127.0.0.1:11434` (class **loopback**), and **2** `model_download` of `face_landmarker.task` from `storage.googleapis.com` (class **public**) |
+| **Export inspection** | Three vertical exports and three `.srt` sidecars, all measured — AT-F-11 and AT-F-12 |
+
+> **One new public egress was observed and is now in the inventory.** The MediaPipe face detector
+> downloads `face_landmarker.task` (**3.6 MB**) from
+> `storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/` on first use.
+> That is `E12` in `docs/EGRESS-INVENTORY.md`, and the observed destination is recorded there.
+
+#### AT-F-15 — The export's graph is valid on the CI's ffmpeg, not only on the newest one — **the defect the Linux leg found**
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-F-15 |
+| **User input** | Run the **Linux reproduction leg** — the ffmpeg-sensitive selection, on the CI's platform (**ffmpeg 7.0.2**), from the **committed** tree rather than the working directory |
+| **Expected** | The export's filter graph is valid on **every** ffmpeg, not only the newest one. A clip whose crop path has more than one segment exports on the CI runners and on a user's machine with an older ffmpeg |
+| **Actual** | The leg **failed**: `Invalid stream specifier: gsrc` / `Error binding filtergraph inputs/outputs: Invalid argument`. The video graph split the source in **two** — `[0:v]split=2[gsrc][wsrc]` — and then **each** crop segment read from the same output again. A filter output may be consumed **only once**. ffmpeg **9.0.2** tolerates it; ffmpeg **7.0.2** refuses it. The developer's machine agreed with the developer's ffmpeg, so it rendered there and nowhere else. After the fix the leg is green: **267 passed** |
+| **Result** | **VERIFIED** — the defect was reproduced on ffmpeg 7.0.2, fixed, and the leg re-run green from the committed tree |
+| **Screenshot** | n/a — a gate, not a screen |
+| **Logs** | The leg's log: `1 failed, 262 passed` before the fix; `267 passed in 104.89s` after |
+| **Backend evidence** | The committed tree `2b5935d`, by `git archive` — what was tested is what is committed. The shape was **measured on both ffmpeg builds** before it was chosen: `split=N` is accepted up to **64** outputs by 7.0.2 and 9.0.2 alike, while the alternative — one `trim` with several ranges — needs a `setpts` per output, because `setpts` has only one |
+| **Export inspection** | The two-stretch test graph now reads `split=4` — two gameplay copies and two webcam copies. The real 20-segment clip would read `split=40`. The structural check now runs over the **video** graph as well as the music graph |
+
+> **This is the same class as defect 3**, the M5 sidechain bug — a filter output consumed twice —
+> and it was found by the **same** leg. That leg exists because the CI runners are Linux, on a
+> different ffmpeg from the development machine, and because a fix that only renders on the
+> developer's machine is not a fix.
+
+### What M5.3 adds up to
+
+| | |
+|---|---|
+| **The complete pipeline** | **VERIFIED** — a whole ten-minute source, every stage, end to end. This is what **K22** said was missing |
+| **The short link** | **VERIFIED** — `youtu.be` is accepted and the URL is stored as the user pasted it |
+| **The title's encoding** | **VERIFIED** — byte-identical to `yt-dlp`'s, with the emoji intact |
+| **The transfer log** | **VERIFIED** — exactly one row for the download, with the duration |
+| **The sentence boundaries** | **VERIFIED** after the fix; a Hindi transcript had almost none before it |
+| **The clip-edge rule** | **VERIFIED** after the fix; it dropped candidates silently before |
+| **The export** | **VERIFIED** after the fix; the ffmpeg command line could exceed Windows' own limit before |
+| **The webcam emphasis** | **VERIFIED** after the fix; it only ever worked in the first segment before |
+| **The caption's lifetime** | **VERIFIED** after the fix; a caption could be held for twelve seconds before |
+| **The graph's portability** | **VERIFIED** after the fix; a multi-segment clip failed on ffmpeg 7 before |
+| **The complete four-hour pipeline** | **NOT APPLICABLE** — 16 hours of transcription on this machine. A complete *ten-minute* source was run instead, and that is what the claim above rests on |
+| **Any publishing** | **NOT APPLICABLE** — out of scope; technical acceptance only |
+| **The hosted-LLM and ElevenLabs paths** | **UNVERIFIED** — no authorised credential; the run used a local Ollama and local whisper |
+
+---
+
 ## The defects this testing found
 
 All of them were found by **running the application or its gates**, not by reading the code, and all
@@ -960,6 +1292,23 @@ of them are covered by tests that fail without the fix.
 > failure** in the Instagram publishing tests, it was reproduced, it was diagnosed, and it was
 > fixed. Details in the row below and in `docs/FINAL_UPGRADE_REPORT.md` §4.2.
 
+> **Amendment — 2026-11-21 (M5.3).** The increment recorded above found **four more**, and they are
+> the ones a user in **Hindi** would have hit on their first real video: the sentence terminators
+> were **Latin-only**, so a Devanagari transcript had almost no sentence boundaries in it
+> (**defect 9**); the export's ffmpeg command line could exceed **Windows' own 32,767-character
+> limit** (**defect 10**); the webcam's speech emphasis ran on a **segment-local** clock and so
+> only ever worked in a clip's first segment (**defect 11**); and a caption could be held on screen
+> for **twelve seconds** because it inherited the recogniser's word timing (**defect 12**). They are
+> in the table below, and the full evidence for each is in the M5.3 section of this file. The eight
+> defects above remain exactly as measured here.
+>
+> **Amendment — 2026-11-22 (M5.3, the Linux leg).** The **Linux reproduction leg** then found a
+> **fifth**: the export's video graph **consumed a filter output once per crop segment**, which
+> ffmpeg 9 tolerates and ffmpeg 7 refuses (**defect 13**). It is in the table below, and the full
+> evidence is in AT-F-15. It is the same class as **defect 3**, and it was found by the **same**
+> leg — which is the reason the leg exists. The nine defects above remain exactly as measured
+> here.
+
 | # | Defect | Found by | Fix | Guard |
 |---|---|---|---|---|
 | 1 | The API export path ignored the user's music preference and the speech-interval ducking. | Clicking *Export this clip* on a clip with a track chosen. | `api/clips.py` resolves the music through the same three-scope precedence the pipeline uses, and hands the renderer the job's speech timeline sliced to the clip. | 7 regression tests in `tests/test_api.py::TestClipExportHonoursTheUsersMusic`; **6 of the 7 fail without the fix**. |
@@ -969,6 +1318,11 @@ of them are covered by tests that fail without the fix.
 | 6 | The yt-dlp download was authorised but **never written to the transfer log**, so `EGRESS-INVENTORY.md` E11's claim that it is *logged* was false — and the largest thing AutoClip ever sends left the machine with nothing in the user's own log. | Reading *Settings → External processing* after a 5.52 GB download: **0 rows** (AT-E-04). | The transfer is recorded on refusal, on a failed launch, on a failed download and on success, with the duration. | `tests/test_ingest.py::test_the_download_is_recorded_in_the_transfer_log` — **fails without the fix** (`assert [] == [('ok', ...)]`). |
 | 7 | The crop-safety diagnostic compared a **per-clip** crop against the **whole-source webcam region** and called it *"the detected face"*, so it reported *"the crop cuts through the detected face"* on a clip that tracks the face perfectly, and on a clip with **no face in it at all**. | The application's own diagnostics on two real clips of a real stream (AT-E-08). | The crop plan carries the faces it was built around, in source pixels and in the clip's own time base; the check compares each keyframe against the face nearest it **in time**, and `diagnose_clip` no longer accepts a whole-source rectangle as a face. | 5 tests in `tests/test_diagnostics.py` and 2 in `tests/test_reframe.py`; the time-matching test **fails without the fix**. |
 | 8 | The URL policy refused **any** host whose two DNS answers were not the same set of addresses, so a legitimate load-balanced host was treated as a DNS-rebinding attack and the publish was refused: *"DNS for graph.facebook.com changed between lookups … refusing a possible rebinding"*. | The full-suite gate — a **flaky failure** in `tests/test_instagram.py::test_a_publish_that_dropped_part_of_the_request_is_reported`, which passes alone and fails in a full run. | The rebinding guard now compares the **class** of the two answers, not the exact set of addresses: an answer that moved *inwards* (public → private or loopback) is refused, and an answer that moved between two **public** addresses is a load balancer and is allowed. The unit suite also no longer resolves real hostnames. | 2 tests in `tests/test_url_policy.py` **fail without the fix** (a load-balanced host is resolved and classified as public); 3 more assert that the protection still holds (public → loopback, public → a forbidden address, and the existing public → private case), and 1 asserts the suite never touches the network. |
+| 9 | The sentence and clause terminators were **Latin-only**, so a Devanagari transcript had almost no sentence boundaries in it — and the clip-edge refinement then *silently dropped* every candidate that fell short of the minimum duration, because the too-short branch had no fallback at all. | The real **ten-minute Hindi source**: the danda `।` appears in **5** of its **1,128** words, and the old pattern matched **1** (AT-F-06). | The terminator sets carry the marks of the other writing systems — every code point verified against the Unicode database — and `_clamp_duration`'s too-short branch falls back to the **first word that reaches the minimum duration** instead of dropping the candidate. The Tibetan tsheg is **deliberately excluded**: it separates syllables, not clauses, and a test pins that. | 65 tests across `tests/test_transcript.py` (new) and `tests/test_boundaries.py`; **33 fail without the fix**. |
+| 10 | The export's ffmpeg command line could exceed **Windows' own 32,767-character limit**, and the job died with `FileNotFoundError: [WinError 206] The filename or extension is too long` — a message about a *filename* for what is really an over-long *filter graph*. | The **real export** of a clip with **20 crop segments** and **11 speech-emphasis spans** (AT-F-08). The command was **36,743** characters and failed at progress 0.88 **every time**. | The webcam crop and scale are applied **once, after the segment concat** rather than once per segment. They are per-frame operations, so the picture is the same. A guard refuses an over-long command **before** ffmpeg runs, naming the filter graph rather than blaming a filename. | 7 tests fail without the export fix (6 in the new `tests/test_export_graph.py`, plus the behavioural render test); 4 more fail without the command-line guard. The real command drops **36,743 → 10,697**. |
+| 11 | The webcam's speech emphasis was evaluated against a **segment-local** clock, so the webcam only ever magnified in the **first** segment of a clip. | The same real clip, read against `croppath.axis_expression`, which subtracts `offset_s` for exactly this reason (AT-F-09). | Applying the crop **after** the concat restores the clip-relative timeline, so the emphasis expression means the same thing it means everywhere else in the product. | `tests/test_export_render.py::TestLayoutRender::test_the_speech_emphasis_renders_in_a_later_stretch` — a **behavioural** render test: it compares the webcam strip at a quiet moment with the webcam strip at a talking moment in the **second** stretch. It **fails without the fix**. |
+| 12 | A caption could be held on screen for **twelve seconds**, because the caption inherited the recogniser's word timing rather than bounding its own lifetime. | The application's **own diagnostic** on a real clip: *"3 word(s) are held on screen too long"*. The exported `.srt` carried a cue of `00:00:09,080 --> 00:00:21,650` (AT-F-10, AT-F-11). | The caption's lifetime is the **renderer's** business, not the recogniser's: `captions.MAX_CAPTION_S = 2.5` bounds every caption, the grouping breaks on a start-span ceiling, and `captions.caption_spans()` is the single source of the caption timing — shared by the renderer and the diagnostic. | 8 tests in `tests/test_captions.py::TestCaptionLifetime` and 2 in `tests/test_diagnostics.py`; **8 fail without the fix**. The longest caption drops **12.57 s → 2.50 s**, with the text fully preserved. |
+| 13 | The export's **video** graph consumed a filter output **once per crop segment**: the source was split in two, and then *each* segment read from the same output again — which is invalid, because a filter output may be consumed only once. ffmpeg **9** tolerates it; ffmpeg **7** refuses it with *"Invalid stream specifier"*. | The **Linux reproduction leg**, on **ffmpeg 7.0.2** — the version that reproduces the CI's platform (AT-F-15). The developer's machine agreed with the developer's ffmpeg, so it rendered there and nowhere else. | The source is split **once per consumer**, so every segment has a copy of its own. The shape was measured against **both** ffmpeg builds before it was chosen: `split=64` is accepted by 7.0.2 and 9.0.2 alike, while a multi-output `trim` would need a `setpts` per output because `setpts` has only one. | 4 tests in `tests/test_export_graph.py::TestGraphShape`; **3 fail without the fix**. The structural graph check moves to `tests/graph_shape.py` and is now applied to the **video** graph as well as the music graph — it was already written for this class of defect, but only ever looked at the music graph |
 
 **Defect 3 is the one that would have shipped.** It rendered on the machine the code was written
 on, and it would have failed on the CI runners and on every user with an ffmpeg older than 9. It

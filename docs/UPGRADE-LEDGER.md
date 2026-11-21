@@ -23,6 +23,7 @@ milestone `In progress` and is reported as such.
 | M5 — Audit and release | **Complete** | 10/10 gate items done; **1,300 tests** passing; the application exercised through its real UI on real media; **3 product defects and 1 CI defect found and fixed**; the release run green on all six CI jobs; the live external paths remain **Unverified (external)** |
 | **M5.1 — Ducking matrix** (post-release increment, 2026-11-21) | **Complete** | The last closeable PARTIAL matrix row (**MUS-31**) closed as **eight real renders**; **1,315 tests** passing; **a fourth product defect found and fixed** (an empty speech timeline was indistinguishable from no timeline); the matrix is now **110 Implemented · 9 Partial · 1 Blocked · 9 N/A**; the M5 verdict is unchanged and v0.1.0 is still gated on K1 |
 | **M5.2 — Real ingest** (post-release increment, 2026-11-21) | **Complete** | The application pointed at a **real four-hour YouTube live recording** and run through the **real ingest path** — twice, at 360p and at the product's default 1080p; the pipeline exercised on real segments cut from that same file, with a real local model; **1,330 tests** passing; **four more product defects found and fixed** (the configured format was dead, the download was never logged, the crop-safety measurement lied, and a load-balanced host was mistaken for a DNS rebinding); the matrix is **unchanged** at 110 · 9 · 1 · 9; the M5 verdict is unchanged and v0.1.0 is still gated on K1 |
+| **M5.3 — Complete pipeline** (post-release increment, run 2026-11-21) | **Complete** | The application pointed at a **real ten-minute YouTube video** and run through **every stage, end to end** — ingest, transcribe, highlight, lay out, export, caption, diagnose — which is what K22 said was missing; **1,397 tests** passing; **five more product defects found and fixed** (the sentence terminators were Latin-only, the ffmpeg command line could exceed Windows' own limit, the webcam emphasis ran on a segment-local clock, a caption could be held for twelve seconds, and the video graph consumed a filter output once per crop segment — which ffmpeg 9 tolerates and ffmpeg 7 refuses); the matrix is **unchanged** at 110 · 9 · 1 · 9; the M5 verdict is unchanged and v0.1.0 is still gated on K1 |
 
 ---
 
@@ -634,6 +635,102 @@ exactly as before. M5.2 closed no matrix row and opened none.
 
 ---
 
+## M5.3 — The complete ten-minute pipeline
+
+**Status: Complete.** A third post-release increment, run on **2026-11-21** and documented on
+**2026-11-22**, on the same branch. The branch is untagged and **v0.1.0 is still gated on K1**, the
+reframe golden set, so this did not change the M5 verdict — it changed the **evidence base** and
+the **defect count**.
+
+**What it did.** M5.2 left one thing on the table and named it: **the complete pipeline had never
+been run on a complete source**. The four-hour recording was ingested in full but only *segmented*;
+the pipeline ran on pieces cut from it. The reason was measured, not assumed — transcription took
+about seven minutes per 180 s on this four-core machine, so four hours would have needed roughly
+sixteen hours of transcription alone.
+
+**A ten-minute source does not have that problem.** M5.3 chose one and pushed it through **every
+stage**: paste the link, ingest, prepare, transcribe, highlight, lay out, export, caption,
+diagnose — and inspected what came out.
+
+**The source.** `https://youtu.be/tg2MwT5FPdY?si=CEj6REktSyC2O_An` — *"PODCAST OF THE DECADE🥵|
+CARRYMINATI"*, channel **CarryMinati**, uploaded **2026-09-14**, **10:19** long, **29,316,913
+views**, **1,193,759 likes**, public, no age limit, a **Hindi** audio track with **no manual
+subtitles**, and **50 formats** — of which **not one** was muxed; the best was **2560×1440@30**
+AV01 + Opus.
+
+> **Rights.** This is a third-party creator's video with no rights confirmation. It was used for
+> **technical acceptance only**. Nothing produced from it was published anywhere, no account was
+> connected, and no hosted credential was spent. It is not a release artefact.
+
+**It was harder than M5.2's source.** A podcast with intercut b-roll — a full-screen face at 5 s,
+an AI-generated animation at 120 s with **no face**, a **pillarboxed vertical** clip at 240 s with
+**no face**, and a different, wider framing at 600 s.
+
+**What ran.**
+
+| Run | What | Result |
+|---|---|---|
+| **Acceptance** | The **short** `youtu.be` link through the real UI and the real API | `POST /api/sources/youtube` → **201**, source id **`47d64e9e7fc14313`**; the frontend posts the URL **unchanged** |
+| **Ingest** | The whole file, through the real yt-dlp path | Format **399+140** (1920×1080 AV01 `av01.0.08M.08` + `mp4a.40.2` @ 129.482 kbps), **140,602,318 B** in **64.55 s**. The source row: `duration_s=618.811791`, `width=1920`, `height=1080`, `fps=29.97002997002997` |
+| **The transfer log** | The one row the download must leave | **exactly one**: `operation=media_download`, `provider=yt-dlp`, `destination=https://youtu.be/tg2MwT5FPdY` (query stripped), `destination_class=public`, `outcome=ok`, `duration_ms=64550` |
+| **Transcribe** | The whole file, local whisper `small`, language auto-detected | **1,346 s** (22.4 min) for 619 s. `transcript.json`: language `hi`, model `small`, **1,128 words**, **193 segments** |
+| **Highlight** | A real local Ollama (`llama3.1:8b` at `127.0.0.1:11434`) | **10 raw candidates**; the fixed refinement kept **6**, the old one kept **2**; the pipeline's own deduplication → **3 clips** |
+| **Export** | All three clips, through the real renderer | `why-most-agencies-die-at-10-clients_9x16.mp4` (40,539,188 B), `alien-interview_9x16.mp4` (34,941,233 B), `the-problem-with-marriage_9x16.mp4` (28,552,646 B) — each 1080×1920, 29.97 fps, AAC stereo, **0.000 % full-scale**, and each with a `.srt` sidecar |
+| **Diagnose** | The application's own ten measurements, on each clip | Two clips: **every measurement `ok: true`**. The third: `ok: false` on **`black_frames` only** — and that one is a **true positive about the source** |
+
+**The title is stored exactly as yt-dlp returned it** — the emoji's U+1F975 code point intact, no
+U+FFFD, no lone surrogates, and the database row identical to what the API returns. The mojibake
+that appeared in the console was **the PowerShell cp1252 code page**, not the data.
+
+**No hosted credential was spent and no hosted call was made.** Both pipeline stages build a single
+provider from `active_provider`, and `active_provider=ollama`.
+
+### The five defects it found
+
+The first four were found by the **real run**. The fifth was found by the **Linux reproduction
+leg**, on the CI's platform — and it is the reason the leg exists.
+
+| # | Defect | Fix | Guard |
+|---|---|---|---|
+| 9 | The sentence and clause terminators were **Latin-only**, so a Devanagari transcript had almost no sentence boundaries in it — and the clip-edge refinement then *silently dropped* every candidate that fell short of the minimum duration, because the too-short branch had no fallback at all | The terminator sets carry the marks of the other writing systems — every code point verified against the Unicode database — and `_clamp_duration`'s too-short branch falls back to the **first word that reaches the minimum duration**. The Tibetan tsheg is **deliberately excluded**: it separates syllables, not clauses | 65 tests across `tests/test_transcript.py` (new) and `tests/test_boundaries.py`; **33 fail without the fix** |
+| 10 | The export's ffmpeg command line could exceed **Windows' own 32,767-character limit**, and the job died with `FileNotFoundError: [WinError 206] The filename or extension is too long` — a message about a *filename* for what is really an over-long *filter graph* | The webcam crop and scale are applied **once, after the segment concat** rather than once per segment. They are per-frame operations, so the picture is the same. A guard refuses an over-long command **before** ffmpeg runs, naming the filter graph rather than blaming a filename | 7 tests fail without the export fix (6 in the new `tests/test_export_graph.py`, plus the behavioural render test); 4 more fail without the command-line guard. The real command drops **36,743 → 10,697** |
+| 11 | The webcam's speech emphasis was evaluated against a **segment-local** clock, so the webcam only ever magnified in the **first** segment of a clip | Applying the crop **after** the concat restores the clip-relative timeline, so the emphasis expression means the same thing it means everywhere else in the product | `tests/test_export_render.py::TestLayoutRender::test_the_speech_emphasis_renders_in_a_later_stretch` — a **behavioural** render test; **fails without the fix** |
+| 12 | A caption could be held on screen for **twelve seconds**, because the caption inherited the recogniser's word timing rather than bounding its own lifetime | The caption's lifetime is the **renderer's** business, not the recogniser's: `captions.MAX_CAPTION_S = 2.5` bounds every caption, the grouping breaks on a start-span ceiling, and `captions.caption_spans()` is the single source of the caption timing — shared by the renderer and the diagnostic | 8 tests in `tests/test_captions.py::TestCaptionLifetime` and 2 in `tests/test_diagnostics.py`; **8 fail without the fix**. The longest caption drops **12.57 s → 2.50 s**, with the text fully preserved |
+| 13 | The export's **video** graph consumed a filter output **once per crop segment**: the source was split in two, and then *each* segment read from the same output again — which is invalid, because a filter output may be consumed only once. ffmpeg **9** tolerates it; ffmpeg **7** refuses it with *"Invalid stream specifier"*, so a multi-segment clip exported on the developer's machine and failed on every strict ffmpeg | The source is split **once per consumer**, so every segment has a copy of its own. The shape was measured against **both** ffmpeg builds before it was chosen: `split=64` is accepted by 7.0.2 and 9.0.2 alike, while a multi-output `trim` would need a `setpts` per output because `setpts` has only one | 4 tests in `tests/test_export_graph.py::TestGraphShape`; **3 fail without the fix**. The structural graph check moves to `tests/graph_shape.py` and is now applied to the **video** graph as well as the music graph — it was already written for this class of defect, but only ever looked at the music graph |
+
+### Decisions taken in M5.3
+
+| Decision | Why | Where recorded |
+|---|---|---|
+| **M5.3 is a post-release increment, not a change of verdict** | The branch is untagged and v0.1.0 is gated on K1, so the M5 documents are live branch documents and may be updated in place — but every change is dated and recorded here | `docs/UPGRADE-LEDGER.md`, `docs/upgrade-audit.md` §13.2 |
+| **A complete *ten-minute* source was run, and the claim was split from the four-hour one** | The four-hour recording would need ~16 h of transcription on this machine. Running a complete source end to end is a **stronger** claim than running pieces of a long source, and the arithmetic for the four-hour one is attached rather than asserted | `docs/M5-APPLICATION-TESTING.md` AT-F-14, `docs/FINAL_UPGRADE_REPORT.md` §4.5 |
+| **The clip-count comparison was *not* offered as evidence** | Detection runs at `DetectionConfig.temperature = 0.3`, so the before-run and the re-run saw **different candidate sets** and proposed **different titles**. The controlled comparison is the **same ten candidates** refined by the old rule and the new rule — **2 against 6** — plus the offline sweep over **1,130** candidate ranges | `docs/M5-APPLICATION-TESTING.md` AT-F-06, AT-F-07 |
+| **The caption bound is in the caption layer, not the transcript layer** | The recogniser's word timings are **estimates**, and several other consumers want them as the recogniser reported them. It is the **caption's own lifetime** that needs a bound, so the caption is bounded and the recogniser's timings are left alone. The trade-off is recorded as **K25**, not hidden | `backend/autoclip/pipeline/captions.py`, `docs/FINAL_UPGRADE_REPORT.md` §6 |
+| **The Tibetan tsheg is deliberately *not* a clause mark** | It separates syllables, not clauses. Treating it as a clause end would split Tibetan speech into one word per segment. A test pins the exclusion so a later "add more marks" change cannot quietly introduce it | `tests/test_transcript.py::TestClauseEnd::test_the_tibetan_tsheg_is_not_a_clause_mark` |
+| **The `out_w`/`out_h` sub-fix was tried and rejected** | ffmpeg does **not** update `out_w` for a dynamic width, so the emphasis died — and the existing render test caught it. The rejection and its reason are in the code, so the idea does not get re-tried from scratch | `backend/autoclip/pipeline/export.py` |
+| **The black stretch was not "fixed"** | `ffmpeg blackdetect` on the **raw source** finds the same 1.835 s stretch the export carries. The measurement is a **true positive about the source**; changing it would have made the diagnostic lie | `docs/M5-APPLICATION-TESTING.md` AT-F-13 |
+| **Nothing derived from the source was published** | The source is a third-party creator's video. This increment is technical acceptance only | `docs/M5-APPLICATION-TESTING.md`, `docs/FINAL_UPGRADE_REPORT.md` §4.5 |
+| **The video graph is split once per consumer, and the graph's shape was *measured* before it was chosen** | A filter output may be consumed only once, and ffmpeg 7 refuses it where ffmpeg 9 tolerates it. Rather than pick a shape by reading the documentation, both candidate shapes were run against **both** ffmpeg builds. `split=N` is accepted up to **64** outputs by 7.0.2 and 9.0.2 alike; the alternative — one `trim` with several ranges — needs a `setpts` per output, because `setpts` has only one | `backend/autoclip/pipeline/export.py`, `docs/M5-APPLICATION-TESTING.md` AT-F-15 |
+| **The structural graph check was moved out of the music test and applied to the video graph too** | It was already written for exactly this class of defect — the M5 sidechain bug — but only ever looked at the **music** graph, so the video graph was never checked. It also caught a **name collision** in the first version of the fix, before any render: a parser catches that, and a render on one ffmpeg does not | `tests/graph_shape.py`, `tests/test_export_graph.py::TestGraphShape` |
+
+### Residuals carried out of M5.3
+
+Unchanged from M5, M5.1 and M5.2 — **the live external paths, the reframe golden set, the missing
+original requirements, the re-export's missing webcam composition, the un-exercised multi-speaker
+path, the absent local Docker, the missing dependency audit, and mypy's 10 errors** all carry
+forward exactly as before. M5.3 closed no matrix row and opened none.
+
+**Four new residuals, stated rather than buried:**
+
+| # | Residual |
+|---|---|
+| R1 | **The complete four-hour pipeline is still unrun** — a complete *ten-minute* source was run instead, and that is what the end-to-end claim rests on. The four-hour recording remains out of reach for the measured reason in AT-E-11 and **K22**. |
+| R2 | **The caption lifetime is one constant for every style and every language** (**K24**), and bounding the caption hides the symptom rather than correcting the recogniser's alignment (**K25**). |
+| R3 | **The ffmpeg command line is still built inline** (**K26**). ffmpeg 9.0.2 removed `-filter_complex_script` and neither `@file` nor `/file` reads a file, so there is no way to move a long graph off the command line. The M5.3 fix keeps the graph **0.33×** of the limit for the shape that failed, and an over-long command is now **refused before ffmpeg runs** rather than failing obscurely. |
+| R4 | **The ffmpeg-version coverage is two builds wide** (**K27**). The graph's shape was measured against **ffmpeg 7.0.2** and **ffmpeg 9.0.2**, and the export now uses only constructs both accept. An ffmpeg older than 7, or a build with a different filter set, is **not** covered by evidence. What *is* established is that the graph no longer depends on a newer ffmpeg's leniency — and that the structural check, not the ffmpeg, is what catches this class of defect now. |
+
+---
+
 ## Change log
 
 | Date | Commit(s) | Change |
@@ -700,3 +797,9 @@ exactly as before. M5.2 closed no matrix row and opened none.
 | 2026-11-21 | CI run 29 | The whole M5.2 code tree (`a907805`) is **green on all six jobs** |
 | 2026-11-21 | M5.2 docs | The M5.2 evidence: the ledger's M5.2 section, the audit's gate table and its eight-defect table, the regression and performance reports, the security review's re-verified S2, the matrix's GOV-14 evidence, the application-testing record and the final report's §4.4 |
 | 2026-11-21 | CI run 26 | The M5.1 tree is **green on all six jobs** — the four backend legs (Ubuntu 3.11, Ubuntu 3.12, macOS 3.12, Windows 3.12), the frontend build, and the Docker image with its health smoke test |
+| 2026-11-21 | CI run 30 | The whole M5.2 documentation tree (`f1cbe81`) is **green on all six jobs** |
+| 2026-11-21 | `a7fc82d` | M5.3 — the terminators each script actually uses: `SENTENCE_END` and `CLAUSE_END` carry the marks of the other writing systems, every code point verified against the Unicode database, and the Tibetan tsheg deliberately **excluded** because it separates syllables rather than clauses. The clip-edge rule's too-short branch now falls back to the **first word that reaches the minimum duration** instead of dropping the candidate silently. On the real ten-minute Hindi source the old patterns matched **1** of **1,128** words; over **1,130** plausible candidate ranges the old rule kept **852** and the new one keeps **1,070**. Guarded by **65 tests**, of which **33 fail without the fix** |
+| 2026-11-21 | `09f8a29` | M5.3 — the webcam crop is built once, not once per segment: the crop and the scale are applied **once, after the segment concat**, so the filter graph no longer grows with the segment count, and the speech emphasis is evaluated against the **clip's** timeline rather than a segment-local one. The real clip's command was **36,743** characters against Windows' own **32,767** limit and failed at progress 0.88 **every time**; it is now **10,697**. A guard refuses an over-long command **before** ffmpeg runs and names the filter graph rather than blaming a filename. Guarded by **7 tests** that fail without the export fix and **4 more** without the guard |
+| 2026-11-21 | `a3aecab` | M5.3 — a caption is read, not watched: `MAX_CAPTION_S = 2.5` bounds every caption, the grouping breaks on a start-span ceiling so a stretched word does not drag the words before it along, and `caption_spans()` is the **single source** of the caption timing, shared by the renderer and the diagnostic. The longest caption drops **12.57 s → 2.50 s** with the text fully preserved. The bound belongs to the caption layer, not the transcript layer, because the recogniser's timings are estimates and several consumers want them as they are. Guarded by **8 tests** that fail without the fix |
+| 2026-11-22 | `2b5935d` | M5.3 — every segment gets its own copy of the source: found by the **Linux leg** on **ffmpeg 7.0.2**, the version that reproduces the CI's platform. The export's video graph consumed a filter output **once per crop segment** — the source was split in two and then *each* segment read from the same output again, which is invalid. ffmpeg 9 tolerates it; ffmpeg 7 refuses it with *"Invalid stream specifier"*, so a multi-segment clip exported on the developer's machine and failed on every strict ffmpeg. The source is now split **once per consumer**, and the shape was measured against **both** ffmpeg builds before it was chosen (`split=64` is accepted by 7.0.2 and 9.0.2 alike). The structural graph check moves to `tests/graph_shape.py` and is now applied to the **video** graph as well as the music graph — it was already written for this class of defect, but only ever looked at the music graph, so the video graph was never checked. Guarded by **4 tests**, of which **3 fail without the fix** |
+| 2026-11-22 | M5.3 docs | The M5.3 evidence: the ledger's M5.3 section, the audit's thirteen-defect table, the regression report's §11, the performance report's §8, the security review's §3b, the matrix's CR-06 and GOV-14 evidence, the egress inventory's observed E12 row, the application-testing record AT-F-01 … AT-F-15 and the final report's §4.5 |

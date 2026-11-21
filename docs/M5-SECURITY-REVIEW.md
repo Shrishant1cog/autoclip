@@ -311,6 +311,69 @@ suite resolves no real hostname.
 
 ---
 
+## 3b. The M5.3 amendment — no new finding, and one finding's evidence strengthened
+
+**Run 2026-11-21, documented 2026-11-22.** M5.3 pointed the application at a **real ten-minute
+YouTube video** and ran it through **every stage, end to end**. It found **five product defects** —
+and **none of them is a security finding**. They are correctness and robustness defects:
+
+| # | Defect | Why it is not a security finding |
+|---|---|---|
+| 9 | The sentence terminators were Latin-only, so a Hindi transcript had almost no sentence boundaries and candidates were silently dropped | A **loss of output**, not an exposure of anything. It cannot send, leak or reveal more than the user supplied |
+| 10 | The ffmpeg command line could exceed Windows' own 32,767-character limit | The render **failed**; it did not do anything wrong. The fix adds a guard that refuses the command **before** ffmpeg runs, which is strictly safer than dying inside `Popen` |
+| 11 | The webcam's speech emphasis ran on a segment-local clock | A **visual** defect. It changes what the user sees, and nothing else |
+| 12 | A caption could be held on screen for twelve seconds | A **visual** defect, measured on the rendered file |
+| 13 | The export's video graph consumed a filter output once per crop segment, which ffmpeg 9 tolerates and ffmpeg 7 refuses | A **portability** defect: the render **failed** on a strict ffmpeg. It did not do anything wrong, and it exposed nothing — the graph is built from the user's own media and never touches the network |
+
+**Defect 10 is the one with a security edge, and it is worth stating.** An over-long command line
+is a denial-of-service vector on Windows: the operation fails in a way that is hard to diagnose and
+easy to reach by feeding the pipeline a pathological source. The fix makes the failure **explicit
+and early** — the command is refused with a message that names the filter graph — and it makes the
+graph structurally smaller, so the limit is further away. Neither the old nor the new behaviour
+executes anything the user did not ask for.
+
+### What M5.3 did strengthen: S5's evidence
+
+**S5** (the MediaPipe model download at first use) was closed at M0.5 on the strength of **reading
+the code**: `models.py` classifies the host through the gateway and records the download in the
+transfer log. That was the right basis for closing it, but it was still a code reading.
+
+**The M5.3 run observed it.** The real ten-minute run's transfer log holds a row for it:
+
+```
+operation=model_download  provider=model-host
+destination=https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
+destination_class=public  outcome=ok
+data_summary="The face_landmarker model file (3.6 MB)."
+```
+
+The **full destination** — not just the host prefix — is what the log records, so the row is
+checkable against `docs/EGRESS-INVENTORY.md` E12 without taking the inventory's word for it. S5's
+closure is now backed by an observation rather than by a reading.
+
+### The whole run's egress, as a security fact
+
+The M5.3 run's transfer log holds **9 rows**, and every one of them is one of the paths this
+review documents:
+
+| Operation | Count | Destination | Class |
+|---|---|---|---|
+| `media_download` (E11) | 1 | `https://youtu.be/tg2MwT5FPdY` | **public** |
+| `highlights` / `creative_planning` (E4/E5) | 6 | `http://127.0.0.1:11434` | **loopback** |
+| `model_download` (E12) | 2 | `storage.googleapis.com` | **public** |
+
+**No hosted provider was contacted and no hosted credential was spent.** That is not an assertion
+here — it is what the log says. It is also the reason the four live paths in §6 remain unverified
+rather than broken: they were not exercised, not exercised and failed.
+
+### S7, re-verified at M5.3
+
+The tree gained two test files and the product changed in seven. The same pin was run against the
+whole tree again: `ruff check .` → *All checks passed*; `ruff format --check .` → *230 files already
+formatted*. The Linux leg was reproduced on the same tree — the pin is still the one CI honours.
+
+---
+
 ## 4. The new subsystems, reviewed
 
 ### 4.1 The music library (M1)
@@ -433,6 +496,17 @@ the release assessment in `docs/FINAL_UPGRADE_REPORT.md` carries it.
 **M5.2 did not close any residual, and did not add one.** The four live paths remain unverified for
 the same reason — no authorised credential was supplied. **R1** is unchanged: the yt-dlp secondary
 requests are still made by yt-dlp, and a Lane B controlled test is still what would close it.
+
+**M5.3 did not close any residual either, and did not add one.** The same four live paths remain
+unverified for the same reason — no authorised credential was supplied, and the run used a local
+Ollama and local whisper throughout. The transfer log is the proof: **6** of its **9** rows point
+at `127.0.0.1`, and **no hosted host appears at all**.
+
+**What M5.3 changed on this page is the *evidence*, not the residuals.** The MediaPipe model
+download (S5) was previously closed on the strength of reading the code; the real run **observed**
+it, with the full destination in the log and checkable against `docs/EGRESS-INVENTORY.md` E12. The
+five product defects M5.3 found are **not** security findings, and they are recorded here so that
+the absence of a finding is explicit rather than implied.
 
 **What M5.2 changed on this page is the *evidence*, not the residuals.** The yt-dlp download — the
 largest transfer AutoClip makes — was previously authorised and then dropped without a record, so

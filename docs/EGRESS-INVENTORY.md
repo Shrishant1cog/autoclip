@@ -173,6 +173,7 @@ the machine.
 | Trigger | First reframe that needs face detection, or `autoclip doctor` |
 | Consent | Classified and logged (M0.5). No user content is involved — a model file — so it is logged rather than consent-gated. The first-run surprise remains open as a product limitation (M3 pre-flight). |
 | Failure | `URLError`/timeout surfaces as `FaceDetectionUnavailable` → centre-crop fallback |
+| **Verified at M5.3** | On the real ten-minute run, the transfer log holds exactly one row for it: `operation=model_download`, `provider=model-host`, `destination=https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`, `destination_class=public`, `outcome=ok`, `duration_ms=0`, `data_summary="The face_landmarker model file (3.6 MB)."`. The **full destination** — not just the host prefix above — is what the log records, so the row is checkable against this entry. |
 
 ### E13 — Whisper model acquisition
 
@@ -241,6 +242,15 @@ trending chart, source downloads and publishing carry no private content, so
 requiring a decision for each would train the user to click through prompts.
 The content-bearing operations — transcription, voiceover and AI analysis — are
 the ones that ask.
+
+**What the M5.3 real run actually left in the log.** The complete ten-minute
+pipeline produced **9 rows**, and every one of them is one of the paths above:
+**1** `media_download` (E11, yt-dlp, public), **6** `highlights` /
+`creative_planning` against `http://127.0.0.1:11434` (E4/E5, class
+**loopback**), and **2** `model_download` of `face_landmarker.task` (E12,
+public). **No hosted provider was contacted and no hosted credential was
+spent** — the run used a local Ollama and local whisper throughout, and the
+log is the proof of that rather than an assertion.
 
 ## 6. Where the enforcement lives
 

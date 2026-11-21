@@ -17,14 +17,14 @@ and one of the defects found at M5 renders on Windows and fails on Linux. See §
 | # | Gate | Command | Result | Verdict |
 |---|---|---|---|---|
 | G1 | Lint | `ruff check .` | *All checks passed!* | **PASS** |
-| G2 | Format | `ruff format --check .` | *227 files already formatted* | **PASS** |
+| G2 | Format | `ruff format --check .` | *230 files already formatted* | **PASS** |
 | G3 | Types | `mypy backend/autoclip` | *Found 10 errors in 8 files (checked 137 source files)* | **BASELINE — unchanged** |
-| G4 | Unit suite | `pytest -m "not slow and not golden and not e2e" -q` | **1,285 passed**, 69 deselected — and the **same 1,285 on the Linux leg** | **PASS** |
-| G5 | Render suite | `pytest -m "slow and not golden and not e2e" -q` | **45 passed**, 1,309 deselected | **PASS** |
+| G4 | Unit suite | `pytest -m "not slow and not golden and not e2e" -q` | **1,351 passed**, 70 deselected — and the **same 1,351 on the Linux leg** | **PASS** |
+| G5 | Render suite | `pytest -m "slow and not golden and not e2e" -q` | **46 passed**, 1,375 deselected | **PASS** |
 | G6 | Frontend | `npm run build` (`tsc -b && vite build`) | 59 modules transformed, built in 2.68 s | **PASS** |
 | G7 | Container | `docker build -f docker/Dockerfile --target base .` + `GET /api/health` | **Not runnable locally — Docker is not installed on this machine.** Verified by the CI `docker` job on every push. | **PASS (CI)** |
 | G8 | Real media | `AUTOCLIP_E2E_MEDIA=… pytest tests/test_pipeline_e2e.py -q` | See §5 | **PASS** |
-| G9 | Whole suite | `pytest tests -q --ignore=tests/test_pipeline_e2e.py` | **1,330 passed**, 0 failed, 0 xfailed, 0 skipped, **499.52 s** | **PASS** |
+| G9 | Whole suite | `pytest tests -q --ignore=tests/test_pipeline_e2e.py` | **1,397 passed**, 0 failed, 0 xfailed, 0 skipped, **454.05 s** | **PASS** |
 
 ### G3 in detail — mypy is at its baseline, and that is the claim
 
@@ -63,18 +63,18 @@ figures printed in the earlier revisions of this document were taken with a narr
 excluded the class methods). The **deltas** are unaffected; the absolute numbers are now
 reproducible from any revision with one command.
 
-| | M0 (`bf76811`) | M5 (`bcdfc47`) | M5.1 (`b59605b`) | M5.2 (`a907805`) | Δ M0 → M5.2 |
-|---|---|---|---|---|---|
-| Test files | 35 | **54** | **55** | **55** | +20 |
-| Test functions in the tree | 658 | **1,257** | **1,272** | **1,287** | **+629** |
-| — of which module-level | 384 | 900 | 913 | **926** | +542 |
-| Tests collected | 672 (of which 26 were `xfail`) | 1,300 (of which **0** are `xfail`) | **1,315** (of which **0** are `xfail`) | **1,330** (of which **0** are `xfail`) | **+658** |
-| Failing | 0 | **0** | **0** | **0** | — |
-| Skipped | 0 | **0** — the only `pytest.skip` calls in the tree are the e2e media gate, which is deliberate and documented | **0** | **0** | — |
-| `xfail` markers | **26** (the SSRF gap, pre-registered) | **0** | **0** | **0** | −26 |
-| Wall clock, unit selection | 193.77 s (672 tests, one invocation) | — | **249.81 s** (1,270 tests) | — | — |
-| Wall clock, whole suite | — | — | **534.88 s** (1,315 tests) | **499.52 s** (1,330 tests) | — |
-| Wall clock **per test** | 0.288 s | — | **0.407 s** (whole suite, incl. renders) | **0.375 s** (whole suite, incl. renders) | — |
+| | M0 (`bf76811`) | M5 (`bcdfc47`) | M5.1 (`b59605b`) | M5.2 (`a907805`) | **M5.3** | Δ M0 → M5.3 |
+|---|---|---|---|---|---|---|
+| Test files | 35 | **54** | **55** | **55** | **57** | +22 |
+| Test functions in the tree | 658 | **1,257** | **1,272** | **1,287** | **1,322** | **+664** |
+| — of which module-level | 384 | 900 | 913 | **926** | **928** | +544 |
+| Tests collected | 672 (of which 26 were `xfail`) | 1,300 (of which **0** are `xfail`) | **1,315** (of which **0** are `xfail`) | **1,330** (of which **0** are `xfail`) | **1,397** (of which **0** are `xfail`) | **+725** |
+| Failing | 0 | **0** | **0** | **0** | **0** | — |
+| Skipped | 0 | **0** — the only `pytest.skip` calls in the tree are the e2e media gate, which is deliberate and documented | **0** | **0** | **0** | — |
+| `xfail` markers | **26** (the SSRF gap, pre-registered) | **0** | **0** | **0** | **0** | −26 |
+| Wall clock, unit selection | 193.77 s (672 tests, one invocation) | — | **249.81 s** (1,270 tests) | — | **230.28 s** (1,351 tests) | — |
+| Wall clock, whole suite | — | — | **534.88 s** (1,315 tests) | **499.52 s** (1,330 tests) | **454.05 s** (1,397 tests) | — |
+| Wall clock **per test** | 0.288 s | — | **0.407 s** (whole suite, incl. renders) | **0.375 s** (whole suite, incl. renders) | **0.325 s** (whole suite, incl. renders) | — |
 
 **The M5.1 column, against the M5 column.** M5.1 added **one test file** and **15 tests**: the
 eight-case ducking matrix (`tests/test_ducking_matrix.py`, 8 tests), four unit tests for the
@@ -90,6 +90,26 @@ because every one of its four guards belongs to a file that already existed:
 | `tests/test_diagnostics.py` | **+5** | The crop-safety check measures the clip's own face, matched **in time** |
 | `tests/test_reframe.py` | **+2** | The faces travel with the crop path, and an older crop path without faces still loads |
 | `tests/test_url_policy.py` | **+5** | A load-balanced public host is not a rebinding (2); the protection still holds (2); the unit suite resolves no real hostname (1) |
+
+**The M5.3 column, against the M5.2 column.** M5.3 added **two new test files** and **35 test
+functions** — **67 collected tests**, because five of the new tests are parameterised over the
+terminators of nineteen writing systems:
+
+| File | Tests | What it asserts |
+|---|---|---|
+| `tests/test_transcript.py` | **+6 functions, 39 collected** (new file) | Every writing system's own sentence and clause terminator is recognised — the Devanagari danda, the Arabic marks, the Ethiopic, Tibetan, Myanmar, Khmer, Ideographic, fullwidth, Armenian, Georgian, Mongolian and Balinese ones — and the Tibetan **tsheg** is deliberately **not** a clause mark |
+| `tests/test_export_graph.py` | **+10 functions** (new file) | The filter graph does not grow with the number of segments; the emphasis expression appears once per stretch rather than once per segment; the real clip that failed in the field fits inside the command-line limit; and the graph is **well-formed for any ffmpeg** — no filter output consumed twice, no filter after an output label — for any number of segments, with or without a webcam, and every segment gets its own copy of the source |
+| `tests/test_boundaries.py` | **+3** | The too-short range is extended to the **first word that reaches the floor**, a range that cannot reach the floor is still dropped, and a Devanagari danda is a sentence boundary |
+| `tests/test_ffmpeg.py` | **+4** | A command that fits is accepted; an over-long one is refused **before** ffmpeg runs, with a message that names the filter graph; the limit is the platform's own |
+| `tests/test_export_render.py` | **+1** | A **behavioural** render: the webcam's speech emphasis renders in a **later** stretch, not only in the first |
+| `tests/test_captions.py` | **+8** | A caption is never held for longer than `MAX_CAPTION_S`, in **every** preset, in the ASS that gets burned in and in the `.srt` sidecar — and bounding it drops **no word** |
+| `tests/test_diagnostics.py` | **+2** | A word the recogniser stretched is not a fault, and the longest caption is measured on the **rendered** captions |
+
+> **A note on `tests/graph_shape.py`.** It is a **new file**, but it holds **no test functions** —
+> it is the shared structural checker that `tests/test_music.py` and `tests/test_export_graph.py`
+> both call. It is not counted in the "test files" row above, because it contains no tests. Its
+> arrival is what moved the **music** graph's check out of `tests/test_music.py` and applied the
+> same check to the **video** graph — which is where defect 13 was hiding.
 
 **The 26 `xfail` markers are the important number.** At M0 the SSRF policy was specified but not
 enforced, so the twenty-six target-policy tests were pre-registered as `xfail(strict=True)` — the
@@ -114,11 +134,11 @@ Ubuntu py3.12 leg — and it is run **before** the release commits are pushed, n
 
 | Selection | Windows (ffmpeg 9.0.2) | Linux (ffmpeg 7.0.2) |
 |---|---|---|
-| Unit — `-m "not slow and not golden and not e2e"` | **1,285 passed**, 69 deselected | **1,285 passed**, 69 deselected |
-| Render — `-m "slow and not golden and not e2e"` | **45 passed**, 1,309 deselected | 45 passed (CI job; locally covered by the ffmpeg-sensitive selection below) |
-| ffmpeg-sensitive selection — the ducking matrix, the render tests, the music tests, and the four M5.2 guard files | — | **212 passed**, 193.04 s |
+| Unit — `-m "not slow and not golden and not e2e"` | **1,351 passed**, 70 deselected | **1,351 passed**, 70 deselected |
+| Render — `-m "slow and not golden and not e2e"` | **46 passed**, 1,375 deselected | 46 passed (CI job; locally covered by the ffmpeg-sensitive selection below) |
+| ffmpeg-sensitive selection — the ducking matrix, the render tests, the music tests, the M5.3 guards and the four M5.2 guard files | — | **267 passed**, 104.89 s |
 | `ruff check .` | *All checks passed* | *All checks passed* |
-| `ruff format --check .` | *227 files already formatted* | *221 files already formatted* (the synced subset) |
+| `ruff format --check .` | *230 files already formatted* | *230 files already formatted* |
 
 **The same tests, the same counts, on both platforms — and one of them only passes on one.** The
 sidechain fallback consumed one filter output twice, which ffmpeg 9 accepts and ffmpeg 7 refuses.
@@ -129,6 +149,13 @@ that what was tested was what was committed and not a working directory with edi
 toolchain was **ffmpeg 7.0.2** — the version that exposed defect 3 — and the `ass` filter was
 confirmed present before the renders ran. The **212-test** ffmpeg-sensitive selection passed,
 including the eight-case ducking matrix's real renders.
+
+**The M5.3 Linux leg found the same class of defect again, in the other graph.** The export's
+**video** graph consumed a filter output once per crop segment; ffmpeg 9 tolerated it and ffmpeg 7
+refused it. It is **defect 13**, and the leg caught it in the same way it caught defect 3 — by
+running on the CI's platform rather than on the developer's. After the fix, the leg is green from
+the committed tree: **267 passed** in the ffmpeg-sensitive selection and **1,351 passed / 70
+deselected** in the unit selection, with ruff clean on both platforms.
 
 ---
 
@@ -196,6 +223,7 @@ grows; the claim that matters is the one under it, which does not go stale.
 | 27 | `d8db47f` | docs: the M5.1 tree is green on all six CI jobs | **success** — all six jobs green |
 | 28 | `066bbf6` | Ingest: the configured yt-dlp format is the one that is used | **success** — all six jobs green. The first M5.2 code commit |
 | 29 | `a907805` | Security: a load-balanced public host is not a DNS rebinding | **success** — all six jobs green. The whole M5.2 code tree: the transfer log, the crop-safety measurement and the URL policy |
+| 30 | `f1cbe81` | docs: M5.2 — the real four-hour ingest, and four more defects | **success** — all six jobs green. The whole M5.2 documentation tree |
 
 **Every run on this branch since the two failures was green.** Two of the runs failed, and **both
 failures were real defects** — not flakes, and neither was explained away. Four runs were cancelled
@@ -312,10 +340,15 @@ Stated so a reviewer does not assume more than was checked.
   that same downloaded file. Running the complete four-hour recording through every stage would
   have needed roughly **16 hours** of transcription on this four-core machine — measured, not
   assumed. The claim is therefore about the ingest path and about the pipeline on real segments,
-  **not** about the complete recording end to end.
+  **not** about the complete recording end to end. **Amended at M5.3:** a *complete* source — a
+  **ten-minute** podcast — was run through **every** stage end to end, so the end-to-end claim
+  now rests on a whole source rather than on pieces of a long one. The **four-hour** recording
+  remains unrun, for the measured reason above.
 - **No second model, and no hosted model, on the real segment.** The pipeline was exercised with
   a **local** Ollama model and **local** whisper. The hosted-LLM paths remain unverified for the
-  same reason as before — no authorised credential was supplied.
+  same reason as before — no authorised credential was supplied. **The M5.3 run is the same:** a
+  local `llama3.1:8b` over Ollama and local whisper `small`, and the transfer log is the proof —
+  **6** of its **9** rows point at `127.0.0.1` and **no hosted host appears at all**.
 - **No publishing of anything derived from the real media.** The source is a third-party creator's
   stream and was used for **technical acceptance only**. Nothing produced from it was published
   anywhere.
@@ -458,3 +491,110 @@ test must not depend on the internet, or on which addresses a third party happen
 | Unit selection, Linux (ffmpeg 7.0.2) | **1,285 passed**, 69 deselected |
 | ffmpeg-sensitive selection, Linux (ffmpeg 7.0.2) | **212 passed**, 193.04 s — the ducking matrix's real renders included |
 | CI | **Run 29 green on all six jobs** |
+
+---
+
+## 11. The M5.3 amendment — the complete ten-minute pipeline
+
+**Run 2026-11-21, documented 2026-11-22.** M5.3 is a third post-release increment on the same
+branch. The branch is still untagged and v0.1.0 is still gated on the reframe golden set, so this
+report was updated in place rather than superseded. **The M5 verdict does not change.** What changed
+is the suite, the defect count and the evidence base.
+
+### What was run
+
+The application was pointed at a **real ten-minute YouTube video** and run through **every stage,
+end to end** — which is what §7's *four-hour pipeline* limitation said was missing. The full
+details are in `docs/M5-APPLICATION-TESTING.md` §M5.3 (AT-F-01 … AT-F-15) and
+`docs/FINAL_UPGRADE_REPORT.md` §4.5; the regression-relevant facts are:
+
+| | |
+|---|---|
+| The source | A real 10:19 Hindi podcast, 1920×1080 AV01, published by a third-party creator |
+| The ingest | The complete file — **140,602,318 B in 64.55 s**, at format 399+140 |
+| The pipeline | The **whole source**, through every stage, with a **real local model** (`llama3.1:8b` over Ollama) and a **real local transcription** (whisper `small`, `int8`) — **1,128 words** |
+| The output | **Three** real clips and **three** real exports, each with a `.srt` sidecar in Devanagari |
+| The full four-hour pipeline | **Still not run** — ~16 hours of transcription on this machine. A complete *ten-minute* source was run instead, and that is what the end-to-end claim rests on |
+
+### What it found
+
+**Five** product defects, each fixed and each guarded by a test that fails without the fix. The
+first four were found by the **real run**; the fifth was found by the **Linux leg**, on the CI's
+platform.
+
+| # | Defect | Guard |
+|---|---|---|
+| 9 | The sentence and clause terminators were **Latin-only**, so a Devanagari transcript had almost no sentence boundaries in it — and the clip-edge rule then *silently dropped* every candidate that fell short of the minimum duration | 65 tests across `tests/test_transcript.py` (new) and `tests/test_boundaries.py`; **33 fail without the fix** |
+| 10 | The export's ffmpeg command line could exceed **Windows' own 32,767-character limit**, and the job died with a misleading *"filename or extension is too long"* | 7 tests fail without the export fix (6 in the new `tests/test_export_graph.py`, plus the behavioural render test); 4 more fail without the command-line guard |
+| 11 | The webcam's speech emphasis was evaluated against a **segment-local** clock, so the webcam only ever magnified in the **first** segment of a clip | `tests/test_export_render.py::TestLayoutRender::test_the_speech_emphasis_renders_in_a_later_stretch` — a **behavioural** render; **fails without the fix** |
+| 12 | A caption could be held on screen for **twelve seconds**, because the caption inherited the recogniser's word timing rather than bounding its own lifetime | 8 tests in `tests/test_captions.py::TestCaptionLifetime` and 2 in `tests/test_diagnostics.py`; **8 fail without the fix** |
+| 13 | The export's **video** graph consumed a filter output **once per crop segment** — invalid, because a filter output may be consumed only once. ffmpeg **9** tolerates it; ffmpeg **7** refuses it | 4 tests in `tests/test_export_graph.py::TestGraphShape`; **3 fail without the fix**. The structural graph check moves to `tests/graph_shape.py` and is now applied to the **video** graph as well as the music graph |
+
+### The guards were proven by reverting the fix
+
+Every claim in that table was checked by **reverting the product code to `HEAD` and running the
+guard against it**, then restoring the fix:
+
+| Reverted | Result | Restored |
+|---|---|---|
+| `transcript.py` + `boundaries.py` | **33 failed**, 32 passed (of 65) | **65 passed** |
+| `export.py` | **7 failed** (6 graph + the emphasis render) | **7 passed** |
+| `ffmpeg.py` | **4 failed** (`AttributeError` — the guard does not exist) | **37 passed** |
+| `captions.py` + `diagnostics.py` | **8 failed**, 70 passed (of 78) | **78 passed** |
+| `export.py` (the defect-13 fix) | **3 failed** in `tests/test_export_graph.py::TestGraphShape` | **38 passed** with `tests/test_music.py`; **41 passed** with `tests/test_export_render.py` |
+
+A guard that was never seen failing is a guard that might never fire. These were all seen failing.
+
+### The fifth defect, and why it needed a second platform
+
+Defect 13 is the **same class** as defect 3 — a filter output consumed twice — and it was found by
+the **same** leg. ffmpeg 9.0.2 accepted the graph; ffmpeg 7.0.2 refused it with *"Invalid stream
+specifier: gsrc"*. The developer's machine agreed with the developer's ffmpeg, so it rendered
+there and nowhere else.
+
+The structural check for this class of defect was **already in the tree** — it was the fix for
+defect 3 — but it only ever looked at the **music** graph. The video graph was never checked, so
+nothing in the suite could see this. The check now lives in `tests/graph_shape.py` and covers
+**both** graphs. It also caught a **label collision** in the first version of the fix, before any
+render: the split's outputs and the trims' outputs were both named `ws{index}`. A parser catches
+that; a render on one ffmpeg does not.
+
+### The guards were proven by reverting the fix
+
+Every claim in that table was checked by **reverting the product code to `HEAD` and running the
+guard against it**, then restoring the fix:
+
+| Reverted | Result | Restored |
+|---|---|---|
+| `transcript.py` + `boundaries.py` | **33 failed**, 32 passed (of 65) | **65 passed** |
+| `export.py` | **7 failed** (6 graph + the emphasis render) | **7 passed** |
+| `ffmpeg.py` | **4 failed** (`AttributeError` — the guard does not exist) | **37 passed** |
+| `captions.py` + `diagnostics.py` | **8 failed**, 70 passed (of 78) | **78 passed** |
+
+A guard that was never seen failing is a guard that might never fire. These were all seen failing.
+
+### Two things this increment deliberately does **not** claim
+
+1. **The clip counts are not comparable across runs.** The detection stage runs at
+   `DetectionConfig.temperature = 0.3`, so the before-run and the re-run saw **different candidate
+   sets** and proposed **different titles**. The raw *"1 clip before, 3 clips after"* comparison is
+   **not** a controlled measurement of the fix and is not offered as one. The controlled comparison
+   is the **same ten candidates** refined by the old rule and the new rule — **2 kept against 6** —
+   plus an offline sweep over **1,130** candidate ranges from the real transcript: the old rule
+   kept **852**, the new one keeps **1,070**.
+2. **The black-frame failure is not a pipeline defect.** `ffmpeg blackdetect` on the **raw source**
+   finds the same **1.835 s** black stretch the export carries. The diagnostic is a **true positive
+   about the source**, and changing it would have made the diagnostic lie.
+
+### The gates, re-run
+
+| Gate | Result at the M5.3 tree |
+|---|---|
+| `ruff check .` | *All checks passed* |
+| `ruff format --check .` | *230 files already formatted* |
+| `mypy backend/autoclip` | **10 errors in 8 files** — the M1 baseline, **unchanged**, and checked against a clean worktree at `HEAD` to be certain that none of the ten is new |
+| Whole suite, Windows (ffmpeg 9.0.2) | **1,397 passed**, 0 failed, 0 skipped, 0 xfailed, 454.05 s |
+| Unit selection, Windows (ffmpeg 9.0.2) | **1,351 passed**, 70 deselected, 230.28 s |
+| Render selection, Windows (ffmpeg 9.0.2) | **46 passed**, 1,375 deselected, 231.92 s |
+| Feature matrix | **129 rows, consistent** — 110 Implemented · 9 Partial · 1 Blocked · 9 Not Applicable · 0 Missing |
+| Linux leg (ffmpeg 7.0.2) | **267 passed** in the ffmpeg-sensitive selection, **1,351 passed / 70 deselected** in the unit selection, ruff clean — reproduced from the committed tree. See `docs/M5-PERFORMANCE-REPORT.md` §8 |
