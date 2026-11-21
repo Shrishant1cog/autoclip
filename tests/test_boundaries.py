@@ -106,6 +106,57 @@ class TestRefine:
         assert result.start_s >= 0.0
 
 
+class TestSparsePunctuation:
+    """Real ASR output is punctuated sparsely, or not at all.
+
+    Whisper on Hindi emits the Devanagari danda, and only a handful of them
+    across a whole video. A refiner that can only see Latin punctuation drops
+    every candidate that is shorter than the minimum duration.
+    """
+
+    @staticmethod
+    def unpunctuated(word_count: int) -> Transcript:
+        return Transcript(
+            words=[Word(text=f"w{i}", start=i * 0.5, end=i * 0.5 + 0.4) for i in range(word_count)]
+        )
+
+    def test_too_short_range_is_extended_to_the_first_word_that_reaches_the_floor(self) -> None:
+        transcript = self.unpunctuated(200)
+
+        result = boundaries.refine(transcript, 0, 9, min_duration_s=20.0, max_duration_s=90.0)
+
+        assert result is not None
+        # Word 40 is the first that reaches the 20s floor (20.4s). Taking the
+        # furthest word that fits would turn a 5s proposal into a 90s clip.
+        assert result.end_word == 40
+        assert 20.0 <= result.duration_s <= 90.0
+
+    def test_a_range_that_cannot_reach_the_floor_is_still_dropped(self) -> None:
+        transcript = self.unpunctuated(60)
+
+        assert (
+            boundaries.refine(transcript, 0, 9, min_duration_s=200.0, max_duration_s=300.0) is None
+        )
+
+    def test_a_devanagari_danda_is_treated_as_a_sentence_boundary(self) -> None:
+        transcript = Transcript(
+            words=[
+                Word(
+                    text=f"शब्द{i}" + ("।" if i % 10 == 9 else ""),
+                    start=i * 0.5,
+                    end=i * 0.5 + 0.4,
+                )
+                for i in range(100)
+            ]
+        )
+
+        result = boundaries.refine(transcript, 0, 9, min_duration_s=12.0, max_duration_s=40.0)
+
+        assert result is not None
+        assert result.end_word == 29
+        assert transcript.words[result.end_word].ends_sentence
+
+
 class TestSilenceAlignment:
     def test_start_lands_inside_a_nearby_silence(self) -> None:
         # Speech begins at 10.0; silence runs 9.4-10.0.

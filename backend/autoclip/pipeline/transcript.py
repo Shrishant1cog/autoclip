@@ -18,11 +18,23 @@ from typing import Any
 
 #: A word ending in one of these closes a sentence, which is where we prefer to
 #: place clip boundaries.
-SENTENCE_END = re.compile(r"[.!?…]+[\"'”’)\]]*$")
+#:
+#: Whisper emits the terminator of the language it transcribed: a full stop for
+#: English, the danda for Hindi, the ideographic full stop for Japanese. A
+#: Latin-only class sees no sentence boundary at all in those languages, so the
+#: class spans the scripts we support rather than just English punctuation.
+#: Every character here is a Unicode punctuation mark (category Po).
+SENTENCE_END = re.compile(r"[.!?…।॥؟۔።།༎։՜՞။។。！？．᠃᭞Ⴛ]+[\"'”’)\]]*$")
 
 #: Mid-sentence breaks — usable as fallback boundaries when no sentence end is
-#: near enough.
-CLAUSE_END = re.compile(r"[,;:—–]+[\"'”’)\]]*$")
+#: near enough. Same reasoning as above: the Arabic comma, the Ethiopic
+#: comma, the CJK comma and the Burmese "little section" are all clause marks
+#: in their own scripts, and a Latin-only class misses every one of them.
+#:
+#: The Tibetan tsheg is deliberately absent: it separates syllables, not
+#: clauses, and treating it as a clause end would split Tibetan speech into
+#: one word per segment.
+CLAUSE_END = re.compile(r"[,;:—–،؛፣፤՝၊៕、，；：]+[\"'”’)\]]*$")
 
 
 @dataclass

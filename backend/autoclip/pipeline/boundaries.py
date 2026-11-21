@@ -191,14 +191,31 @@ def _clamp_duration(
                 return None
 
     if duration_at(end_word) < min_duration_s:
+        # Extend the clip to the first sentence end that reaches the floor.
+        #
+        # Whisper punctuates sparsely — a Hindi transcript carries a handful of
+        # dandas across a whole video, often further apart than the maximum
+        # clip length — so a sentence end may not exist inside the range at
+        # all. Dropping the candidate then loses the clip entirely. Fall back
+        # to the first word that reaches the floor instead: it keeps the clip
+        # as close to the proposed length as the duration rules allow, and the
+        # nearest end is the one that least changes what was proposed.
         last_index = len(transcript.words) - 1
+        sentence_end: int | None = None
+        first_reaching_floor: int | None = None
         for candidate in range(end_word + 1, last_index + 1):
-            if duration_at(candidate) > max_duration_s:
+            duration = duration_at(candidate)
+            if duration > max_duration_s:
                 break
-            if transcript.words[candidate].ends_sentence:
-                end_word = candidate
-                if duration_at(end_word) >= min_duration_s:
-                    break
+            if first_reaching_floor is None and duration >= min_duration_s:
+                first_reaching_floor = candidate
+            if duration >= min_duration_s and transcript.words[candidate].ends_sentence:
+                sentence_end = candidate
+                break
+        if sentence_end is not None:
+            end_word = sentence_end
+        elif first_reaching_floor is not None:
+            end_word = first_reaching_floor
 
     duration = duration_at(end_word)
     if duration < min_duration_s or duration > max_duration_s:
