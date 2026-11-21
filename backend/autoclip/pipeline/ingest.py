@@ -160,8 +160,10 @@ def download_youtube(
     try:
         permit = gateway.authorize(transfer)
     except UrlRejected as exc:
+        gateway.record(transfer, "failed", detail=f"Refused by the URL policy: {exc}")
         raise IngestError(f"That URL will not be downloaded: {exc}") from exc
     if permit.destination_class == "private":
+        gateway.record(transfer, "failed", detail="Private network address refused.")
         raise IngestError(
             "That URL points at a private network address, which AutoClip will not "
             "download from. Use a public address, or run the download yourself and "
@@ -172,6 +174,7 @@ def download_youtube(
 
     log.info("Downloading YouTube source %s with yt-dlp.", source.id)
     output: list[str] = []
+    started = time.perf_counter()
 
     for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
         try:
@@ -184,6 +187,7 @@ def download_youtube(
                 errors="replace",
             )
         except OSError as exc:
+            gateway.record(transfer, "failed", detail="yt-dlp could not be started.")
             raise IngestError(
                 "Could not start yt-dlp.",
                 hint="Install or repair yt-dlp, then retry the job.",
@@ -204,7 +208,9 @@ def download_youtube(
         detail = "\n".join(output[-30:]) or f"yt-dlp exited with code {return_code}."
         if attempt == _DOWNLOAD_ATTEMPTS:
             # Leave the .part file in place so a later retry resumes from here.
-            raise _translate_ytdlp_error(RuntimeError(detail), settings)
+            error = _translate_ytdlp_error(RuntimeError(detail), settings)
+            gateway.record(transfer, "failed", detail=str(error))
+            raise error
 
         log.warning(
             "yt-dlp attempt %d/%d for source %s failed; resuming in %.0fs.",
@@ -222,9 +228,19 @@ def download_youtube(
 
         info = _probe_and_validate(downloaded)
         metadata = _read_youtube_metadata(target_dir)
-    except Exception:
+    except Exception as exc:
+        gateway.record(transfer, "failed", detail=f"{type(exc).__name__}: {exc}")
         shutil.rmtree(target_dir, ignore_errors=True)
         raise
+
+    # The download is the largest thing AutoClip ever sends out, and the
+    # transfer log is where the user looks to see what left the machine. It
+    # has to be written here, by the caller, because yt-dlp made the request.
+    gateway.record(
+        transfer,
+        "ok",
+        duration_ms=int((time.perf_counter() - started) * 1000),
+    )
 
     source.path = str(downloaded)
     source.filename = downloaded.name

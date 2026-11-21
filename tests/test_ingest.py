@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from autoclip import paths
 from autoclip.config import IngestSettings
-from autoclip.pipeline import ingest
+from autoclip.pipeline import ffmpeg, ingest
 from autoclip.security.egress import Permit
 
 
@@ -88,3 +88,55 @@ def test_the_download_asks_for_english_captions_when_preferred(
 
     assert "--write-auto-subs" in command
     assert command[command.index("--sub-langs") + 1] == "en.*"
+
+
+def test_the_download_is_recorded_in_the_transfer_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A download that leaves the machine must appear in the user's own log.
+
+    The transfer log is the only place the user can see what AutoClip sent
+    out, and a media download is the largest thing it ever sends.
+    """
+    recorded: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        ingest.gateway,
+        "authorize",
+        lambda transfer: Permit(transfer, destination_class="public", allowed=True, reason="test"),
+    )
+    monkeypatch.setattr(
+        ingest.gateway,
+        "record",
+        lambda transfer, outcome, **kwargs: recorded.append((outcome, transfer.url)),
+    )
+    monkeypatch.setattr(
+        ingest,
+        "_probe_and_validate",
+        lambda path: ffmpeg.MediaInfo(
+            path=path,
+            duration_s=12.0,
+            has_video=True,
+            has_audio=True,
+            width=640,
+            height=360,
+            fps=30.0,
+        ),
+    )
+
+    source = ingest.new_youtube_source("https://www.youtube.com/watch?v=abc123")
+    target_dir = ingest.download_target_dir(source.id, IngestSettings())
+
+    class _Process:
+        stdout = iter(())
+
+        def wait(self) -> int:
+            return 0
+
+    def fake_popen(command: list[str], **kwargs: object) -> _Process:
+        (target_dir / "source.mp4").write_bytes(b"not really a video")
+        return _Process()
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+
+    ingest.download_youtube(source, IngestSettings())
+
+    assert recorded == [("ok", source.url)]
