@@ -125,7 +125,7 @@ def download_youtube(
     *,
     on_progress: Callable[[float], None] | None = None,
 ) -> Source:
-    """Download the highest-quality video/audio into the source's raw directory.
+    """Download the source's video/audio into the source's raw directory.
 
     The complete video is written to ``<root>/raw/<source_id>/`` first and only
     then handed to the rest of the pipeline (audio extraction, transcription,
@@ -168,41 +168,7 @@ def download_youtube(
             "upload the file."
         )
 
-    # No height cap or format filter: yt-dlp's default selection is the best
-    # available video plus the best available audio.
-    command = [
-        *_ytdlp_command(),
-        "--newline",
-        "--no-playlist",
-        "--write-info-json",
-        # Keep trying through transient CDN/DNS failures. The default retry
-        # delay is zero, which makes all retries fail instantly during a short
-        # resolver outage, so space them out.
-        "--retries",
-        "50",
-        "--fragment-retries",
-        "50",
-        "--retry-sleep",
-        "5",
-        "--socket-timeout",
-        "30",
-        "--format",
-        "bestvideo*+bestaudio/best",
-        "--output",
-        str(target_dir / "source.%(ext)s"),
-        *yt_dlp_hardening_args(),
-    ]
-    if settings.cookies_from_browser:
-        command += ["--cookies-from-browser", settings.cookies_from_browser]
-    if settings.prefer_youtube_captions:
-        command += [
-            "--write-auto-subs",
-            "--sub-langs",
-            "en.*",
-            "--sub-format",
-            "json3",
-        ]
-    command.append(source.url)
+    command = _download_command(source.url, target_dir, settings)
 
     log.info("Downloading YouTube source %s with yt-dlp.", source.id)
     output: list[str] = []
@@ -293,6 +259,52 @@ def ingest_youtube(
         settings,
         on_progress=on_progress,
     )
+
+
+def _download_command(url: str, target_dir: Path, settings: IngestSettings) -> list[str]:
+    """Build the yt-dlp command line used for one download.
+
+    The format selector comes from ``ingest.ytdlp_format`` rather than being
+    hard-coded, so the size of a download is the user's decision. The default
+    caps the video at 1080p: the best available stream of a long video is
+    routinely several gigabytes larger than the pipeline needs, and a 1440p60
+    stream of a four-hour recording is a multi-gigabyte download of material
+    that is thrown away as soon as it is cut into clips.
+    """
+    command = [
+        *_ytdlp_command(),
+        "--newline",
+        "--no-playlist",
+        "--write-info-json",
+        # Keep trying through transient CDN/DNS failures. The default retry
+        # delay is zero, which makes all retries fail instantly during a short
+        # resolver outage, so space them out.
+        "--retries",
+        "50",
+        "--fragment-retries",
+        "50",
+        "--retry-sleep",
+        "5",
+        "--socket-timeout",
+        "30",
+        "--format",
+        settings.ytdlp_format,
+        "--output",
+        str(target_dir / "source.%(ext)s"),
+        *yt_dlp_hardening_args(),
+    ]
+    if settings.cookies_from_browser:
+        command += ["--cookies-from-browser", settings.cookies_from_browser]
+    if settings.prefer_youtube_captions:
+        command += [
+            "--write-auto-subs",
+            "--sub-langs",
+            "en.*",
+            "--sub-format",
+            "json3",
+        ]
+    command.append(url)
+    return command
 
 
 def _ytdlp_command() -> list[str]:
