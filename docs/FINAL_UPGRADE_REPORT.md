@@ -857,7 +857,7 @@ behalf.
 | **The installation and upgrade guide** | `docs/M5-INSTALLATION.md` |
 | **This report** | `docs/FINAL_UPGRADE_REPORT.md` |
 | The Instagram API evaluation | `docs/INSTAGRAM-API-EVALUATION.md` |
-| The original requirements matrix | `docs/ORIGINAL_REQUIREMENTS-MATRIX.md` → `docs/ORIGINAL_REQUIREMENTS_MATRIX.md` |
+| The original requirements matrix | `docs/ORIGINAL_REQUIREMENTS_MATRIX.md` — **INCOMPLETE**, blocked on the missing source material |
 | The missing-source search record | `docs/original/MANIFEST.md` |
 | The baseline CI evidence | `docs/baseline-ci-evidence.md` |
 | The performance baseline (M0, untouched) | `docs/performance-baseline.md`, `docs/BENCHMARK-BASELINE.json` |

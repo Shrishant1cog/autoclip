@@ -748,7 +748,7 @@ Everything in this table was read out of the `source.info.json` sidecar that the
 | **Test ID** | AT-E-03 |
 | **User input** | Wait for the download, then open the source |
 | **Expected** | The source row carries the title, the channel, the duration, the frame size and the frame rate of the media that actually arrived |
-| **Actual** | `title="BACK AT IT AGAIN IN THE VICE CITY!!!! | NO PROMOTIONS"`, `channel="CarryisLive"`, `duration_s=14410.118095`, `width=640`, `height=360`, `fps=30.0`, `filename="source.mp4"` — all read out of the `yt-dlp` sidecar and confirmed against the file with `ffprobe` |
+| **Actual** | `title="BACK AT IT AGAIN IN THE VICE CITY!!!! \| NO PROMOTIONS"`, `channel="CarryisLive"`, `duration_s=14410.118095`, `width=640`, `height=360`, `fps=30.0`, `filename="source.mp4"` — all read out of the `yt-dlp` sidecar and confirmed against the file with `ffprobe` |
 | **Result** | **VERIFIED** |
 | **Screenshot** | n/a |
 | **Logs** | — |
