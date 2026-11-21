@@ -449,7 +449,7 @@ cause and its fix.
 | 30 | `f1cbe81` | **success** | green on all six jobs. The whole M5.2 documentation tree | — | — |
 | **31** | `f190e9a` | **success** | green on all six jobs ([run 44944459562](https://github.com/Shrishant1cog/autoclip/actions/runs/44944459562)). The whole M5.3 tree — the four M5.3 code commits and the documentation, together. `2b5935d` was not pushed on its own, so **this** is the run that first exercised the defect-13 fix on every CI job | — | — |
 | **32** | `56553ec` | **success** | green on all six jobs ([run 44949264565](https://github.com/Shrishant1cog/autoclip/actions/runs/44949264565)). The two documentation fixes a cross-reference check found in the evidence itself. One run in between was **cancelled** by the concurrency group when the next commit was pushed, with five of six jobs already green: a cancellation, not a failure | — | — |
-| **33** | `6c2f9e0` | **success** | green on all six jobs ([run 44950193899](https://github.com/Shrishant1cog/autoclip/actions/runs/44950193899)). The last commit that changes anything but the run history — the table stops here deliberately, because a commit that records a run is itself run by CI | — | — |
+| **33** | `6c2f9e0` | **success** | green on all six jobs ([run 44950193899](https://github.com/Shrishant1cog/autoclip/actions/runs/44950193899)). The last run that proves the M5.3 content — the table stops here deliberately, because a commit that records a run is itself run by CI | — | — |
 
 **Both failures were reproduced before they were fixed.** Run 19 was reproduced on a Linux
 environment with no keyring backend, and run 20 was reproduced with a 320 KB filter list — the

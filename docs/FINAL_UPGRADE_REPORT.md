@@ -288,11 +288,13 @@ documentation fixes that a cross-reference check found in the evidence itself. O
 was **cancelled** by the concurrency group when the next commit was pushed, with five of its six
 jobs already green: a cancellation, not a failure.
 
-**Run 33 is the last commit that changes anything but this run history, and it is green on all six
-jobs too** ([run 44950193899](https://github.com/Shrishant1cog/autoclip/actions/runs/44950193899)).
-This run history stops at run 33 deliberately: a commit that records a CI run is itself run by
-CI, and recording *its* run would need another commit — which would need another. The table
-records the runs that prove the **content**, and the commit that records them is itself green.
+**Run 33 is the last run that proves the M5.3 content, and it is green on all six jobs too**
+([run 44950193899](https://github.com/Shrishant1cog/autoclip/actions/runs/44950193899)). The table
+stops there deliberately: a commit that records a CI run is itself run by CI, and recording *its*
+run would need another commit — which would need another. The table records the runs that prove the
+**content** — the code, the tests and the evidence — and stops at the last of those. The commits
+that follow it change only the wording of the record, and each one's own run was verified after the
+push.
 
 **Both failures were reproduced before they were fixed.** Run 19 was reproduced on a Linux
 environment with no keyring backend. Run 20 was reproduced with a 320 KB filter list: the old body
@@ -979,8 +981,9 @@ refused as reserved, which on an IPv6-only network meant every public provider w
 test wrote to the owner's real OS keyring. And ffmpeg's HTTP **308** — which is the *normal*
 response for a non-final chunk — was being rejected as an error.
 
-The last milestone added three more to that list, and they are the clearest argument for the way
-this release was produced:
+The last milestone added **three more** to that list — and a fourth of its own, in the **CI's own
+workflow** rather than in the product — and they are the clearest argument for the way this release
+was produced:
 
 * **The re-export ignored the user's music choice** and passed no speech intervals, so the clip
   came out with neither the chosen track nor any ducking. The choice was in the database and on
