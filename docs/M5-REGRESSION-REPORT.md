@@ -196,7 +196,9 @@ rather than failed.
 > run, so a reader who opens the Actions page for the branch finds the same numbering. The whole
 > table was read back against the API to confirm that, and the M5.3 rows needed correcting: the
 > evidence-correction commit's run was **cancelled** and so it **took a number of its own**, which
-> pushed the runs after it up by one.
+> pushed the runs after it up by one. The numbering is also the **repository's**, not the branch's:
+> runs **1, 2 and 3** are on `main` — all three failures, before this branch existed — and **run 4
+> is this branch's first workflow run**, which is where the table starts.
 
 **The table below is the run history as it stands at the M5.3 commit.** It is a record, and it
 grows; the claim that matters is the one under it, which does not go stale.
@@ -250,10 +252,8 @@ table.
 > it reports. Each one's own run was verified after the push and is green, and the branch's history
 > can be read directly from GitHub, where the run numbers are the same ones used here.
 
-**Every run on this branch since the two failures was green.** Two of the runs failed, and **both
-failures were real defects** — not flakes, and neither was explained away. Five runs were cancelled
-by a newer push.
-**Both failures were real defects**, not flakes, and neither was explained away:
+**Every run on this branch since the two failures either passed or was cancelled by a newer push.**
+Five runs were cancelled, two failed, and the rest passed.
 
 * **Run 19** was a **product** defect — a test that wrote to the owner's real OS credential store.
   The symptom appeared only on Linux because Linux has no keyring backend; the cause was present

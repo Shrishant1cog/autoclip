@@ -458,7 +458,8 @@ environment with no keyring backend, and run 20 was reproduced with a 320 KB fil
 old body fails it, the new body passes it, and a build without the `ass` filter still fails the
 new body. A failure that is only fixed in CI is a failure that comes back.
 
-**Every run on this branch since those two failures was green.**
+**Every run on this branch since those two failures either passed or was cancelled by a newer
+push.**
 
 ### 13.2 Thirteen product defects, found by running the application
 

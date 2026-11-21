@@ -37,7 +37,7 @@ double stands in for the same code path the real service would take — but "the
 | **New runtime dependencies** | **Zero.** The whole upgrade was built on the dependency set the project already had. |
 | **Schema** | v14 → **v27**, 19 → **32 live tables**, thirteen migrations, no user data destroyed |
 | **API surface** | 18 routers / 108 routes → **21 routers / 162 routes** |
-| **CI** | **Every run on this branch since the two failures was green.** Two of the runs failed — both were real defects, diagnosed and fixed rather than explained away — and five were cancelled by a newer push. The release run is green on all six jobs, on all four platforms. See §4.1. |
+| **CI** | **Every run on this branch since the two failures either passed or was cancelled by a newer push.** Two of the runs failed — both were real defects, diagnosed and fixed rather than explained away — and five were cancelled by a newer push. The release run is green on all six jobs, on all four platforms. See §4.1. |
 | **Defects found by running the application** | **13 product defects** and **1 defect in the CI workflow itself**, all fixed, all guarded by tests that fail without the fix. See §4.2. |
 | **Open security findings** | **0** high, **0** medium, **0** low. 4 residual risks documented, 5 things not checked — all in §6. |
 
@@ -250,13 +250,18 @@ missing or wrong.
 ### 4.1 The CI runs on this branch
 
 The run history is release evidence, not noise. **Every run on this branch since the two failures
-was green.** The two that failed were **real defects** — one in the product, one in the CI itself.
-Neither was a flake, and neither was explained away. Five runs were cancelled by a newer push.
+either passed or was cancelled by a newer push.** The two that failed were **real defects** — one
+in the product, one in the CI itself. Neither was a flake, and neither was explained away. Five
+runs were cancelled by a newer push.
 
 **The table below is the run history as it stands at the M5.3 commit.** It is a record, and it
 grows; the claim that matters is the one above it, which does not go stale. The numbers are
 **GitHub's own** — each workflow run's `run_number` — so a reader who opens the Actions page for
 the branch finds the same numbering.
+
+> **The numbering is the repository's, not the branch's.** Runs **1, 2 and 3** are on `main` — all
+> three failures, before this branch existed — and **run 4 is this branch's first workflow run**.
+> The table starts there.
 
 | Runs | Result | What happened |
 |---|---|---|
