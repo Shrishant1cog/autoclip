@@ -1355,10 +1355,8 @@ class PipelineRunner:
                 words=words,
                 style=clip_style,
                 ratio=ratio,
-                speech_intervals=(
-                    timeline.relative_slice(clip.start_s, clip.end_s)
-                    if timeline is not None
-                    else []
+                speech_intervals=speech_timeline.ducking_intervals(
+                    timeline, clip.start_s, clip.end_s
                 ),
                 layout=composition.layout if composition else None,
             )

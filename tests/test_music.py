@@ -477,9 +477,28 @@ def test_the_timeline_drives_the_ducking_when_it_is_available() -> None:
 
 
 def test_without_a_timeline_the_compressor_is_still_the_fallback() -> None:
+    """No timeline at all means the ducking keys on the audio instead."""
+    settings = ExportSettings(music_track="bed.mp3", music_ducking=True)
+    mixed = export.build_mixed_audio_filtergraph(settings, "C:/x/bed.mp3", 5.0, None)
+    assert "sidechaincompress" in mixed.filter_complex
+
+
+def test_a_timeline_with_no_speech_does_not_duck_at_all() -> None:
+    """A timeline that found no speech means the bed plays at full level.
+
+    This is not the same answer as "there is no timeline". The compressor
+    fallback exists for a timeline that failed; a timeline that succeeded
+    and found nothing knows that this clip has no talking, and the bed
+    should not be pulled down by whatever else the source contains.
+    """
     settings = ExportSettings(music_track="bed.mp3", music_ducking=True)
     mixed = export.build_mixed_audio_filtergraph(settings, "C:/x/bed.mp3", 5.0, [])
-    assert "sidechaincompress" in mixed.filter_complex
+
+    assert "sidechaincompress" not in mixed.filter_complex
+    assert "volume=volume=" not in mixed.filter_complex
+    # The bed is still mixed in, at full level.
+    assert "amix=inputs=2" in mixed.filter_complex
+    assert "[1:a]atrim" in mixed.filter_complex
 
 
 #: The leading bracketed labels of one filter chain — its inputs.
@@ -552,7 +571,9 @@ def test_every_graph_is_well_formed_for_any_ffmpeg(ducking: bool, intervals: lis
 def test_the_sidechain_fallback_splits_the_speech_it_keys_on() -> None:
     """The compressor needs its own copy of the speech."""
     settings = ExportSettings(music_track="bed.mp3", music_ducking=True)
-    mixed = export.build_mixed_audio_filtergraph(settings, "C:/x/bed.mp3", 5.0, [])
+    # None is "there is no timeline to follow", which is what puts the
+    # compressor in the graph at all.
+    mixed = export.build_mixed_audio_filtergraph(settings, "C:/x/bed.mp3", 5.0, None)
 
     assert "asplit=2" in mixed.filter_complex
     # The key and the mix input are different labels.

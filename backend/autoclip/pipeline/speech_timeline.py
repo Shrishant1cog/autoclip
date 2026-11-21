@@ -51,6 +51,7 @@ __all__ = [
     "SpeechInterval",
     "SpeechTimeline",
     "build_timeline",
+    "ducking_intervals",
     "merge_intervals",
     "speech_frames",
 ]
@@ -257,6 +258,34 @@ class SpeechTimeline:
 # --------------------------------------------------------------------------
 # Merging
 # --------------------------------------------------------------------------
+
+
+def ducking_intervals(
+    timeline: SpeechTimeline | None, start_s: float, end_s: float
+) -> list[SpeechInterval] | None:
+    """The intervals the music bed should duck against, for one clip.
+
+    The three answers are kept apart, because they mean different things:
+
+    * **None** — there is no timeline to follow. Either it was never built,
+      or it found no speech anywhere in the source, so it knows nothing.
+      The caller falls back to keying the ducking on the audio itself.
+    * **An empty list** — the timeline was consulted and it found no speech
+      **in this clip**. There is nothing to duck under, so the bed plays at
+      full level. This is not the same answer as the one above, and
+      collapsing the two is how a clip with no talking ends up with its
+      music pulled down by whatever else the source happens to contain.
+    * **A non-empty list** — the speech in this clip, measured from the
+      clip's own first frame.
+
+    The fallback exists for a timeline that failed, not for a timeline that
+    succeeded and found nothing. The webcam layout already works this way —
+    it emphasises speech when there is some and does not when there is
+    none — and the music is supposed to agree with it.
+    """
+    if timeline is None or not timeline.intervals:
+        return None
+    return timeline.relative_slice(start_s, end_s)
 
 
 def merge_intervals(

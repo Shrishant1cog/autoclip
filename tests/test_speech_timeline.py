@@ -27,6 +27,7 @@ from autoclip.pipeline.speech_timeline import (
     SpeechInterval,
     SpeechTimeline,
     build_timeline,
+    ducking_intervals,
     envelope_points,
     merge_intervals,
     speech_frames,
@@ -291,6 +292,40 @@ def test_a_relative_slice_stays_inside_the_clip():
 def test_density_is_the_share_of_speech():
     timeline = SpeechTimeline(intervals=[_interval(0, 1000)], duration_s=4.0)
     assert timeline.density() == pytest.approx(0.25)
+
+
+# --------------------------------------------------------------------------
+# The ducking contract
+# --------------------------------------------------------------------------
+
+
+def test_no_timeline_means_the_ducking_has_to_work_it_out():
+    """None means there is nothing to follow."""
+    assert ducking_intervals(None, 0.0, 10.0) is None
+
+
+def test_a_timeline_that_found_nothing_means_the_same():
+    """A timeline with no intervals at all knows nothing, either."""
+    timeline = SpeechTimeline(intervals=[], duration_s=10.0)
+    assert ducking_intervals(timeline, 0.0, 10.0) is None
+
+
+def test_a_timeline_with_no_speech_in_this_clip_is_an_empty_list():
+    """An empty list is an answer: there is nothing to duck under.
+
+    This is not the same answer as "there is no timeline". The timeline
+    exists and found speech — just not in this clip — so the bed should
+    play at full level rather than being keyed on the audio.
+    """
+    timeline = SpeechTimeline(intervals=[_interval(0, 1000)], duration_s=30.0)
+    assert ducking_intervals(timeline, 10.0, 20.0) == []
+
+
+def test_the_speech_in_the_clip_is_measured_from_the_clip():
+    timeline = SpeechTimeline(intervals=[_interval(62_000, 63_000)], duration_s=120.0)
+    relative = ducking_intervals(timeline, 60.0, 70.0)
+    assert relative is not None
+    assert [(i.start_ms, i.end_ms) for i in relative] == [(2000, 3000)]
 
 
 def test_the_envelope_drops_under_speech_and_recovers_after_it():

@@ -76,9 +76,19 @@ class ExportRequest:
     burn_captions: bool = True
     #: The speech intervals inside this clip, in clip-relative milliseconds.
     #: They come from the shared speech timeline, so the music ducking and the
-    #: webcam layout agree on when someone is speaking. Empty means "no
-    #: timeline", and the ducking falls back to keying on the audio itself.
-    speech_intervals: list[SpeechInterval] = field(default_factory=list)
+    #: webcam layout agree on when someone is speaking.
+    #:
+    #: The three states are different answers, and the difference matters:
+    #:
+    #: * **None** — there is no timeline to follow, so the ducking falls back
+    #:   to keying on the audio itself.
+    #: * **An empty list** — the timeline was consulted and found no speech
+    #:   in this clip, so the bed is not ducked at all.
+    #: * **A non-empty list** — the speech in this clip.
+    #:
+    #: ``speech_timeline.ducking_intervals()`` produces the right one of the
+    #: three; use it rather than slicing the timeline by hand.
+    speech_intervals: list[SpeechInterval] | None = None
     #: The planned composition. None means "no webcam layout", which is the
     #: plain crop path this project has always used.
     layout: LayoutPath | None = None
@@ -595,7 +605,7 @@ def build_mixed_audio_filtergraph(
             input_args=music_args,
         )
 
-    if speech_intervals:
+    if speech_intervals is not None:
         # The timeline drives the ducking: an explicit envelope on the bed.
         filters = build_ducking_filters(
             speech_intervals,
@@ -614,6 +624,25 @@ def build_mixed_audio_filtergraph(
                 map="[aout]",
                 input_args=music_args,
             )
+
+        # The timeline was consulted and found no speech in this clip. There
+        # is nothing to duck under, so the bed plays at full level — the
+        # same graph the ducking-off path builds.
+        #
+        # This is not the same answer as "there is no timeline". A timeline
+        # that was never built knows nothing, and falls back to the
+        # compressor below; a timeline that found nothing knows that this
+        # clip has no talking, and the bed should not be pulled down by
+        # whatever else the source happens to contain.
+        complex_filter = (
+            f"{speech};{bed}[bed];"
+            f"[sp][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]"
+        )
+        return MixedAudio(
+            filter_complex=complex_filter,
+            map="[aout]",
+            input_args=music_args,
+        )
 
     # No timeline: fall back to keying the ducking on the audio itself.
     #

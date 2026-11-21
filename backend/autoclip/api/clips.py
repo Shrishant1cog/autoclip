@@ -294,10 +294,14 @@ async def export_clip(clip_id: str, payload: ExportRequestIn) -> ExportOut:
     # The shared speech timeline, sliced to this clip. It is what the music
     # bed ducks against, so the bed and the webcam agree on when someone is
     # speaking.
+    #
+    # `ducking_intervals` keeps three answers apart: no timeline at all (the
+    # ducking falls back to keying on the audio), a timeline that found no
+    # speech in this clip (the bed is not ducked), and the speech itself.
+    # Passing a plain empty list would collapse the first two, and a clip
+    # with no talking would have its music pulled down by the source.
     timeline = await asyncio.to_thread(_speech_timeline_for, workspace)
-    speech_intervals = (
-        timeline.relative_slice(clip.start_s, clip.end_s) if timeline is not None else []
-    )
+    speech_intervals = speech_timeline_module.ducking_intervals(timeline, clip.start_s, clip.end_s)
 
     request = export_module.ExportRequest(
         source=Path(source.path),

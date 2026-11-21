@@ -567,6 +567,36 @@ class TestClipExportHonoursTheUsersMusic:
         # own first frame — the renderer counts from there.
         assert [(i.start_ms, i.end_ms) for i in intervals] == [(10_000, 15_000)]
 
+    def test_a_timeline_with_no_speech_in_this_clip_is_not_a_missing_timeline(
+        self, client: TestClient, job: Job, rendered: list
+    ) -> None:
+        """An empty slice and an absent timeline are different answers.
+
+        The timeline exists and found speech — just not in this clip. The
+        renderer has to be told "there is nothing to duck under", which is
+        not the same as "there is no timeline, work it out from the audio".
+        """
+        from autoclip.pipeline.runner import JobWorkspace
+        from autoclip.pipeline.speech_timeline import SpeechInterval, SpeechTimeline
+
+        SpeechTimeline(
+            intervals=[SpeechInterval(start_ms=10_000, end_ms=12_000, source="vad")],
+            duration_s=180.0,
+        ).save(JobWorkspace(job.id).speech_timeline)
+
+        self._export(client, job)
+
+        # The clip runs from 60s to 100s, and the only interval is at 10s.
+        assert rendered[0]["request"].speech_intervals == []
+
+    def test_no_timeline_at_all_is_reported_as_none(
+        self, client: TestClient, job: Job, rendered: list
+    ) -> None:
+        """With no timeline the renderer is told to key on the audio itself."""
+        self._export(client, job)
+
+        assert rendered[0]["request"].speech_intervals is None
+
     def test_a_blocked_licence_is_a_clean_error(
         self, client: TestClient, job: Job, track: str
     ) -> None:

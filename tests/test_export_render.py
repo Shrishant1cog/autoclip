@@ -944,7 +944,7 @@ class TestMusicBedRender:
             tmp_path / "flat.mp4",
             bed,
             tmp_path,
-            intervals=[],
+            intervals=None,
             ducking=False,
         )
 
@@ -965,13 +965,13 @@ class TestMusicBedRender:
     def test_the_sidechain_fallback_still_renders(
         self, spoken_source, bed, tmp_path, initialised_db: int
     ) -> None:
-        """With no timeline the graph falls back to the compressor."""
+        """With no timeline at all the graph falls back to the compressor."""
         destination = self._export(
             spoken_source,
             tmp_path / "sidechain.mp4",
             bed,
             tmp_path,
-            intervals=[],
+            intervals=None,
         )
 
         assert destination.exists()
