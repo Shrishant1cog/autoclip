@@ -217,6 +217,42 @@ def test_overlapping_captions_are_reported() -> None:
     assert "overlap" in timing.detail
 
 
+def test_a_word_the_recogniser_stretched_is_not_a_fault() -> None:
+    """The caption's lifetime is the renderer's business, not the recogniser's.
+
+    A real Hindi clip had one word the recogniser held for 7.8 seconds, and
+    the caption inherited that. The renderer now bounds how long a caption is
+    held, so the caption is short and the diagnostic — which measures the
+    caption that was rendered — has nothing to report.
+    """
+    report = diagnostics.diagnose_clip(
+        None,
+        clip_id="c1",
+        words=_words((0.0, 0.3), (0.4, 0.7), (0.8, 8.6)),
+        start_s=0.0,
+        end_s=10.0,
+    )
+
+    timing = next(d for d in report.diagnostics if d.name == "caption_timing")
+    assert timing.ok is True
+    assert "held on screen too long" not in timing.detail
+
+
+def test_the_longest_caption_is_measured_on_the_rendered_captions() -> None:
+    report = diagnostics.diagnose_clip(
+        None,
+        clip_id="c1",
+        words=_words((0.0, 0.3), (0.4, 8.6)),
+        start_s=0.0,
+        end_s=10.0,
+    )
+
+    timing = next(d for d in report.diagnostics if d.name == "caption_timing")
+    assert "longest caption" in timing.measured
+    # The stretched word is bounded, so the caption is not held for 8.2s.
+    assert "8.20s" not in timing.measured
+
+
 # -- crop safety ------------------------------------------------------------
 
 

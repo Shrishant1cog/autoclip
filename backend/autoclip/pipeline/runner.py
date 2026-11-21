@@ -1483,6 +1483,7 @@ class PipelineRunner:
                 crop_path=crop_path,
                 require_audio=self.source.has_audio,
                 duration_tolerance_s=validate.DURATION_TOLERANCE_S,
+                caption_style=self.settings.export.caption_style,
             )
         except Exception:  # noqa: BLE001 - diagnostics never fail an export
             log.warning("Could not measure clip %s.", clip.id, exc_info=True)

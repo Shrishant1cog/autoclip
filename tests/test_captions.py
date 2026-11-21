@@ -66,6 +66,112 @@ class TestGrouping:
         assert groups[0].end == pytest.approx(0.8 + 0.32, abs=0.01)
 
 
+class TestCaptionLifetime:
+    """A caption is read, not watched.
+
+    Whisper's word timings are alignment estimates, and one of them can be
+    stretched across seconds of silence. A real Hindi clip produced a caption
+    held on screen for 7.8 seconds, and a four-word cue for 12.6 — long after
+    the words had been read.
+
+    The caption's lifetime is the renderer's business, not the recogniser's:
+    the text is still shown, but it does not sit on screen through a stretch
+    of silence the recogniser mis-measured.
+    """
+
+    #: The words of the clip that was flagged, in clip-relative seconds. The
+    #: last one is the stretched one: a single word held for 7.84 seconds.
+    STRETCHED = [
+        ("ने,", 9.08, 9.42),
+        ("नहीं,", 9.64, 11.76),
+        ("साइड", 11.76, 13.62),
+        ("में", 13.81, 20.65),
+    ]
+
+    def _words(self) -> list[Word]:
+        return words_from(self.STRETCHED)
+
+    def test_a_stretched_word_is_not_held_on_screen_for_long(self) -> None:
+        style = captions.get_style("bold_pop")
+
+        spans = captions.caption_spans(self._words(), style)
+
+        assert spans
+        assert all(stop - begin <= captions.MAX_CAPTION_S + 1e-6 for begin, stop in spans)
+
+    def test_the_rendered_events_are_bounded(self) -> None:
+        """The ASS that gets burned in — not just the helper that describes it."""
+        style = captions.get_style("bold_pop")
+
+        subs = captions.build_ass(self._words(), style, width=1080, height=1920)
+
+        limit = pysubs2.make_time(s=captions.MAX_CAPTION_S)
+        assert subs.events
+        assert all(event.end - event.start <= limit for event in subs.events)
+
+    def test_every_preset_is_bounded(self) -> None:
+        """The group styles hold a whole cue at once, so they need the bound too."""
+        words = self._words()
+
+        for key in captions.PRESETS:
+            style = captions.get_style(key)
+            subs = captions.build_ass(words, style, width=1080, height=1920)
+
+            limit = pysubs2.make_time(s=captions.MAX_CAPTION_S)
+            assert all(event.end - event.start <= limit for event in subs.events), key
+
+    def test_the_srt_sidecar_is_bounded(self) -> None:
+        words = self._words()
+
+        groups = captions.group_words(words, max_words=8)
+
+        assert all(group.end - group.start <= captions.MAX_CAPTION_S + 1e-6 for group in groups)
+
+    def test_every_word_is_still_captioned(self) -> None:
+        """Bounding the caption must not drop any of the words."""
+        words = self._words()
+
+        groups = captions.group_words(words, max_words=8)
+
+        captioned = [w.text for group in groups for w in group.words]
+        assert captioned == [w.text for w in words]
+
+    def test_a_group_breaks_when_it_would_cover_too_long(self) -> None:
+        """The stretched word does not drag the words before it with it."""
+        words = self._words()
+
+        groups = captions.group_words(words, max_words=8)
+
+        # "में" starts well after the first word, so it gets its own cue
+        # rather than being held on screen with the three before it.
+        assert len(groups) > 1
+        assert groups[0].words[-1].text != "में"
+
+    def test_normal_captions_are_not_split(self) -> None:
+        """A caption of four ordinary words still reads as one caption."""
+        words = words_from(
+            [("one", 0.0, 0.3), ("two", 0.4, 0.7), ("three", 0.8, 1.1), ("four", 1.2, 1.5)]
+        )
+
+        groups = captions.group_words(words, max_words=4)
+
+        assert len(groups) == 1
+        assert groups[0].text == "one two three four"
+
+    def test_the_spans_agree_with_the_rendered_events(self) -> None:
+        """The diagnostic measures the captions that are actually drawn."""
+        style = captions.get_style("bold_pop")
+        words = self._words()
+
+        spans = captions.caption_spans(words, style)
+        subs = captions.build_ass(words, style, width=1080, height=1920)
+
+        assert len(spans) == len(subs.events)
+        for (begin, stop), event in zip(spans, subs.events, strict=True):
+            assert event.start == pysubs2.make_time(s=round(begin, 3))
+            assert event.end == pysubs2.make_time(s=round(stop, 3))
+
+
 class TestColour:
     def test_hex_converts_to_rgb(self) -> None:
         colour = captions.hex_to_ass("#FFE500")

@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import ffmpeg
+from . import captions, ffmpeg
 from .reframe.croppath import CropPath, FaceRect
 from .transcript import Word
 
@@ -58,9 +58,6 @@ BLACK_MIN_S = 0.2
 #: Two clips overlap by more than this fraction of the shorter one and
 #: they are duplicates.
 OVERLAP_LIMIT = 0.5
-
-#: A caption that runs past the end of its word by more than this is late.
-CAPTION_TOLERANCE_S = 0.25
 
 #: How far a crop keyframe may sit from a face observation and still be
 #: compared with it. The crop planner samples faces several times a second,
@@ -398,11 +395,23 @@ def _missing_audio(path: Path, required: bool) -> Diagnostic:
 # --------------------------------------------------------------------------
 
 
-def _caption_timing(words: list[Word], start_s: float, end_s: float) -> Diagnostic:
+def _caption_timing(
+    words: list[Word],
+    start_s: float,
+    end_s: float,
+    caption_style: str = captions.DEFAULT_STYLE,
+) -> Diagnostic:
     """How well the captions line up with the words they are captions of.
 
-    Measured three ways: words that fall outside the clip, words whose
-    caption runs long, and words that overlap the next one.
+    Measured two ways: words that fall outside the clip, and captions that
+    overlap the next one.
+
+    How long a caption is held is not a fault here — the renderer bounds it
+    (``captions.MAX_CAPTION_S``), so the longest caption is reported as a
+    measurement rather than counted as a problem. It is measured on the
+    caption as the viewer sees it, not on the recogniser's timing: a word the
+    recogniser stretched across seconds of silence produces a short caption,
+    and the measurement has to agree with what was burned into the export.
     """
     if not words:
         return Diagnostic(
@@ -413,17 +422,18 @@ def _caption_timing(words: list[Word], start_s: float, end_s: float) -> Diagnost
         )
 
     outside = [w for w in words if w.start < start_s - 1e-6 or w.end > end_s + 1e-6]
-    late = [w for w in words if w.end - w.start > CAPTION_TOLERANCE_S * 6]
     overlaps = 0
     for previous, current in zip(words, words[1:], strict=False):
         if current.start < previous.end - 1e-6:
             overlaps += 1
 
+    style = captions.get_style(caption_style)
+    spans = captions.caption_spans(words, style)
+    longest = max((stop - begin for begin, stop in spans), default=0.0)
+
     problems = []
     if outside:
         problems.append(f"{len(outside)} word(s) fall outside the clip")
-    if late:
-        problems.append(f"{len(late)} word(s) are held on screen too long")
     if overlaps:
         problems.append(f"{overlaps} caption(s) overlap the next one")
 
@@ -431,7 +441,7 @@ def _caption_timing(words: list[Word], start_s: float, end_s: float) -> Diagnost
         "caption_timing",
         "Caption timing",
         ok=not problems,
-        measured=f"{len(words)} words, {overlaps} overlap(s)",
+        measured=(f"{len(words)} words, {overlaps} overlap(s), longest caption {longest:.2f}s"),
         detail="; ".join(problems),
     )
 
@@ -613,6 +623,7 @@ def diagnose_clip(
     crop_path: CropPath | None = None,
     require_audio: bool = True,
     duration_tolerance_s: float = 0.75,
+    caption_style: str = captions.DEFAULT_STYLE,
 ) -> DiagnosticsReport:
     """Measure one clip and report what was found.
 
@@ -626,7 +637,7 @@ def diagnose_clip(
     """
     diagnostics: list[Diagnostic] = []
 
-    diagnostics.append(_caption_timing(words or [], start_s, end_s))
+    diagnostics.append(_caption_timing(words or [], start_s, end_s, caption_style))
     diagnostics.append(_crop_safety(crop_path, source_size))
     diagnostics.append(_duplicate(clips or [], clip_id))
 

@@ -30,6 +30,16 @@ DEFAULT_MAX_WORDS = 4
 #: A pause longer than this ends a caption group regardless of word count.
 DEFAULT_MAX_GAP_S = 0.4
 
+#: The longest a caption is ever held on screen.
+#:
+#: A caption is read, not watched: once the text has been read, holding it on
+#: screen is noise. Whisper's word timings are alignment estimates, and one of
+#: them can be stretched across seconds of silence — a real Hindi clip
+#: produced a caption held on screen for 7.8 seconds, and a four-word cue for
+#: 12.6. The caption's own lifetime is bounded here rather than inherited
+#: from the recogniser's timing.
+MAX_CAPTION_S = 2.5
+
 #: Reference canvas. Styles are authored against this and scaled to the real
 #: output size, so a preset looks identical at 9:16, 1:1, and 16:9.
 REFERENCE_HEIGHT = 1920
@@ -184,6 +194,8 @@ def get_style(key: str) -> CaptionStyle:
 @dataclass
 class CaptionGroup:
     words: list[Word] = field(default_factory=list)
+    #: The longest this caption may stay on screen. See :data:`MAX_CAPTION_S`.
+    max_duration_s: float = MAX_CAPTION_S
 
     @property
     def start(self) -> float:
@@ -191,7 +203,15 @@ class CaptionGroup:
 
     @property
     def end(self) -> float:
-        return self.words[-1].end if self.words else 0.0
+        """When the caption leaves the screen.
+
+        A caption is never held for longer than ``max_duration_s``, however
+        long the recogniser said its last word lasted. The text is still
+        shown — it is the *waiting* that is cut short.
+        """
+        if not self.words:
+            return 0.0
+        return min(self.words[-1].end, self.start + self.max_duration_s)
 
     @property
     def text(self) -> str:
@@ -203,13 +223,20 @@ def group_words(
     *,
     max_words: int = DEFAULT_MAX_WORDS,
     max_gap_s: float = DEFAULT_MAX_GAP_S,
+    max_duration_s: float = MAX_CAPTION_S,
 ) -> list[CaptionGroup]:
     """Split words into caption-sized groups.
 
-    Breaks on three signals, in priority order: sentence-ending punctuation, a
-    pause longer than ``max_gap_s``, and the word-count ceiling. Punctuation
+    Breaks on four signals, in priority order: sentence-ending punctuation, a
+    pause longer than ``max_gap_s``, the word-count ceiling, and a caption
+    that would cover more than ``max_duration_s`` of the clip. Punctuation
     first means a caption rarely spans two sentences, which reads badly even
     when the timing is correct.
+
+    The duration ceiling is what keeps a caption from covering a long stretch
+    of the clip: a recogniser that stretches one word across several seconds
+    would otherwise stretch the whole caption with it, and the words that
+    came after it would never be captioned at all.
     """
     groups: list[CaptionGroup] = []
     current: list[Word] = []
@@ -217,19 +244,20 @@ def group_words(
     for index, word in enumerate(words):
         if current:
             gap = word.start - current[-1].end
-            if gap > max_gap_s or len(current) >= max_words:
-                groups.append(CaptionGroup(words=current))
+            too_long = word.start - current[0].start > max_duration_s
+            if gap > max_gap_s or len(current) >= max_words or too_long:
+                groups.append(CaptionGroup(words=current, max_duration_s=max_duration_s))
                 current = []
 
         current.append(word)
 
         is_last = index == len(words) - 1
         if word.ends_sentence and not is_last:
-            groups.append(CaptionGroup(words=current))
+            groups.append(CaptionGroup(words=current, max_duration_s=max_duration_s))
             current = []
 
     if current:
-        groups.append(CaptionGroup(words=current))
+        groups.append(CaptionGroup(words=current, max_duration_s=max_duration_s))
 
     return [g for g in groups if g.words]
 
@@ -304,12 +332,60 @@ def _text_of(word: Word, style: CaptionStyle) -> str:
 
 
 def _event(start_s: float, end_s: float, text: str, offset: float) -> pysubs2.SSAEvent:
+    start_s, end_s = _caption_span(start_s, end_s)
     return pysubs2.SSAEvent(
         start=pysubs2.make_time(s=max(0.0, start_s - offset)),
         end=pysubs2.make_time(s=max(0.0, end_s - offset)),
         text=text,
         style=STYLE_NAME,
     )
+
+
+def _caption_span(start_s: float, end_s: float) -> tuple[float, float]:
+    """The on-screen time of one caption, bounded.
+
+    No caption is held for longer than :data:`MAX_CAPTION_S`, whatever the
+    recogniser said about the length of its words. This is the one place the
+    bound is applied, so the renderer and the diagnostic agree on what the
+    viewer sees.
+    """
+    return start_s, min(end_s, start_s + MAX_CAPTION_S)
+
+
+def caption_spans(words: list[Word], style: CaptionStyle) -> list[tuple[float, float]]:
+    """When each caption is on screen, in the order the renderer draws them.
+
+    This is the single source of the caption timing: the ASS builder and the
+    diagnostic both read it, so the diagnostic measures the captions that are
+    actually burned into the export rather than the recogniser's opinion of
+    how long its words lasted.
+    """
+    groups = group_words(words, max_words=style.max_words)
+    spans: list[tuple[float, float]] = []
+
+    for group in groups:
+        if style.animation == "scale" and style.accent:
+            for index in range(len(group.words)):
+                spans.append(_word_span(group, index))
+        else:
+            spans.append(_caption_span(group.start, group.end))
+
+    return spans
+
+
+def _word_span(group: CaptionGroup, index: int) -> tuple[float, float]:
+    """The on-screen time of one word's caption inside its group.
+
+    A word is held until the next one starts, so the caption does not blink
+    out between two words of the same phrase.
+    """
+    word = group.words[index]
+    if index + 1 < len(group.words):
+        following = group.words[index + 1]
+        end = max(word.end, following.start)
+    else:
+        end = group.end
+    return _caption_span(word.start, end)
 
 
 def _static_event(group: CaptionGroup, style: CaptionStyle, offset: float) -> pysubs2.SSAEvent:
@@ -349,7 +425,7 @@ def _per_word_events(
     scale = style.scale_percent
     events: list[pysubs2.SSAEvent] = []
 
-    for active, word in enumerate(group.words):
+    for active, _word in enumerate(group.words):
         rendered: list[str] = []
         for index, other in enumerate(group.words):
             text = _text_of(other, style)
@@ -358,11 +434,8 @@ def _per_word_events(
             else:
                 rendered.append(text)
 
-        # Hold the last word until the group ends so the caption doesn't blink
-        # out early when a word's measured end precedes the next word's start.
-        end = word.end if active + 1 < len(group.words) else group.end
-        next_start = group.words[active + 1].start if active + 1 < len(group.words) else end
-        events.append(_event(word.start, max(end, next_start), " ".join(rendered), offset))
+        start, end = _word_span(group, active)
+        events.append(_event(start, end, " ".join(rendered), offset))
 
     return events
 
@@ -387,10 +460,11 @@ def write_srt(path: Path, words: list[Word], *, time_offset_s: float = 0.0) -> P
     """Write a plain .srt sidecar — for platforms that want an upload-time file."""
     subs = pysubs2.SSAFile()
     for group in group_words(words, max_words=8):
+        start, end = _caption_span(group.start, group.end)
         subs.events.append(
             pysubs2.SSAEvent(
-                start=pysubs2.make_time(s=max(0.0, group.start - time_offset_s)),
-                end=pysubs2.make_time(s=max(0.0, group.end - time_offset_s)),
+                start=pysubs2.make_time(s=max(0.0, start - time_offset_s)),
+                end=pysubs2.make_time(s=max(0.0, end - time_offset_s)),
                 text=group.text,
             )
         )

@@ -471,6 +471,10 @@ async def clip_diagnostics(clip_id: str) -> dict:
         ),
         crop_path=crop_path,
         require_audio=bool(source.has_audio) if source else True,
+        # The caption style the export was actually rendered with, so the
+        # measurement describes the file on disk rather than whatever the
+        # settings say today.
+        caption_style=latest.style or captions_module.DEFAULT_STYLE,
     )
     result = report.to_dict()
     await asyncio.to_thread(store.update_clip, clip_id, diagnostics=result)
