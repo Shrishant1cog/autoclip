@@ -225,6 +225,14 @@ grows; the claim that matters is the one under it, which does not go stale.
 | 29 | `a907805` | Security: a load-balanced public host is not a DNS rebinding | **success** — all six jobs green. The whole M5.2 code tree: the transfer log, the crop-safety measurement and the URL policy |
 | 30 | `f1cbe81` | docs: M5.2 — the real four-hour ingest, and four more defects | **success** — all six jobs green. The whole M5.2 documentation tree |
 | 31 | `f190e9a` | docs: M5.3 — the complete ten-minute pipeline, and five more defects | **success** — all six jobs green — [run 44944459562](https://github.com/Shrishant1cog/autoclip/actions/runs/44944459562). The whole M5.3 tree — the four M5.3 code commits and the documentation, together. `2b5935d` (the defect-13 fix) was **not** pushed on its own, so **this** is the run that first exercised it on all six CI jobs |
+| 32 | `56553ec` | docs: M5.3 — two broken references in the evidence | **success** — all six jobs green — [run 44949264565](https://github.com/Shrishant1cog/autoclip/actions/runs/44949264565). The final M5.3 tree |
+
+**Run 32 is the run that proves the final tree.** Run 31 was the first to exercise the defect-13
+fix on every CI job, and run 32 is the last commit on the branch — the two documentation fixes
+that a cross-reference check found in the evidence itself. **Both** are green on all six jobs.
+One run in between (44948642080, `f9fad75`) was **cancelled** by the concurrency group when the
+next commit was pushed, with five of its six jobs already green — a cancellation, not a failure,
+and the sixth (Windows) was cancelled mid-run rather than failed.
 
 **Every run on this branch since the two failures was green.** Two of the runs failed, and **both
 failures were real defects** — not flakes, and neither was explained away. Four runs were cancelled

@@ -448,6 +448,7 @@ cause and its fix.
 | **29** | `a907805` | **success** | green on all six jobs. The whole M5.2 code tree: the transfer log, the crop-safety measurement and the URL policy | — | — |
 | 30 | `f1cbe81` | **success** | green on all six jobs. The whole M5.2 documentation tree | — | — |
 | **31** | `f190e9a` | **success** | green on all six jobs ([run 44944459562](https://github.com/Shrishant1cog/autoclip/actions/runs/44944459562)). The whole M5.3 tree — the four M5.3 code commits and the documentation, together. `2b5935d` was not pushed on its own, so **this** is the run that first exercised the defect-13 fix on every CI job | — | — |
+| **32** | `56553ec` | **success** | green on all six jobs ([run 44949264565](https://github.com/Shrishant1cog/autoclip/actions/runs/44949264565)). The final M5.3 commit — the two documentation fixes a cross-reference check found in the evidence itself. One run in between was **cancelled** by the concurrency group when the next commit was pushed, with five of six jobs already green: a cancellation, not a failure | — | — |
 
 **Both failures were reproduced before they were fixed.** Run 19 was reproduced on a Linux
 environment with no keyring backend, and run 20 was reproduced with a 320 KB filter list — the
