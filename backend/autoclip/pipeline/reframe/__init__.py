@@ -27,6 +27,7 @@ from .croppath import (
     CropKeyframe,
     CropPath,
     CropSegment,
+    FaceRect,
     Strategy,
     centre_crop,
     target_crop_size,
@@ -174,7 +175,18 @@ def build_crop_path(
         len(segments),
         ", ".join(s.strategy.value for s in segments),
     )
-    return CropPath(source_width=source_w, source_height=source_h, segments=segments)
+    # The faces the plan was built around travel with the plan. They are the
+    # only face rectangles that belong to this clip, in this clip's time base;
+    # anything measured elsewhere cannot say whether *this* crop kept the face.
+    faces = [
+        FaceRect(t=o.t, x=o.left, y=o.top, width=o.width, height=o.height) for o in observations
+    ]
+    return CropPath(
+        source_width=source_w,
+        source_height=source_h,
+        segments=segments,
+        faces=faces,
+    )
 
 
 def _clip_relative_turns(

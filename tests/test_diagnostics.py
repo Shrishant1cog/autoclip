@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 from autoclip.db.models import Clip
 from autoclip.pipeline import diagnostics, intent
-from autoclip.pipeline.reframe.croppath import CropKeyframe, CropPath, CropSegment
+from autoclip.pipeline.reframe.croppath import CropKeyframe, CropPath, CropSegment, FaceRect
 from autoclip.pipeline.transcript import Word
 
 # --------------------------------------------------------------------------
@@ -220,7 +220,15 @@ def test_overlapping_captions_are_reported() -> None:
 # -- crop safety ------------------------------------------------------------
 
 
-def _crop(*, x: int = 0, y: int = 0, width: int = 320, height: int = 240) -> CropPath:
+def _crop(
+    *,
+    x: int = 0,
+    y: int = 0,
+    width: int = 320,
+    height: int = 240,
+    faces: list[FaceRect] | None = None,
+    keyframe_t: float = 0.0,
+) -> CropPath:
     return CropPath(
         source_width=320,
         source_height=240,
@@ -230,9 +238,10 @@ def _crop(*, x: int = 0, y: int = 0, width: int = 320, height: int = 240) -> Cro
                 end_s=2.0,
                 width=width,
                 height=height,
-                keyframes=[CropKeyframe(t=0.0, x=x, y=y)],
+                keyframes=[CropKeyframe(t=keyframe_t, x=x, y=y)],
             )
         ],
+        faces=faces or [],
     )
 
 
@@ -265,9 +274,14 @@ def test_a_crop_that_cuts_through_the_face_is_reported() -> None:
     report = diagnostics.diagnose_clip(
         None,
         clip_id="c1",
-        crop_path=_crop(x=30, y=30, width=100, height=100),
+        crop_path=_crop(
+            x=30,
+            y=30,
+            width=100,
+            height=100,
+            faces=[FaceRect(t=0.0, x=10.0, y=10.0, width=50.0, height=50.0)],
+        ),
         source_size=(320, 240),
-        face_rect=(10.0, 10.0, 50.0, 50.0),
     )
 
     safety = next(d for d in report.diagnostics if d.name == "crop_safety")
@@ -279,13 +293,107 @@ def test_a_crop_that_holds_the_whole_face_is_safe() -> None:
     report = diagnostics.diagnose_clip(
         None,
         clip_id="c1",
-        crop_path=_crop(x=0, y=0, width=320, height=240),
+        crop_path=_crop(
+            x=0,
+            y=0,
+            width=320,
+            height=240,
+            faces=[FaceRect(t=0.0, x=10.0, y=10.0, width=50.0, height=50.0)],
+        ),
         source_size=(320, 240),
-        face_rect=(10.0, 10.0, 50.0, 50.0),
     )
 
     safety = next(d for d in report.diagnostics if d.name == "crop_safety")
     assert safety.ok is True
+
+
+def test_a_face_from_another_moment_is_not_compared_with_this_crop() -> None:
+    """A face measured elsewhere says nothing about this crop.
+
+    The crop plan for a clip is planned around the faces in *that* clip, at
+    the times the crop is at. A rectangle measured at another moment — the
+    webcam region the detector found once for the whole source, for
+    instance — must not be compared with it: that is how a clip with no
+    face in it at all gets reported as cutting through one.
+    """
+    report = diagnostics.diagnose_clip(
+        None,
+        clip_id="c1",
+        crop_path=_crop(
+            x=30,
+            y=0,
+            width=100,
+            height=240,
+            keyframe_t=10.0,
+            faces=[FaceRect(t=0.0, x=0.0, y=20.0, width=80.0, height=120.0)],
+        ),
+        source_size=(320, 240),
+    )
+
+    safety = next(d for d in report.diagnostics if d.name == "crop_safety")
+    assert safety.ok is True
+    assert "face" not in safety.detail
+
+
+def test_a_clip_with_no_face_is_not_reported_as_cutting_one() -> None:
+    report = diagnostics.diagnose_clip(
+        None,
+        clip_id="c1",
+        crop_path=_crop(x=30, y=0, width=100, height=240),
+        source_size=(320, 240),
+    )
+
+    safety = next(d for d in report.diagnostics if d.name == "crop_safety")
+    assert safety.ok is True
+    assert "no face tracked" in safety.measured
+
+
+def test_the_face_is_matched_to_the_crop_by_time() -> None:
+    """The face that matters is the one at the keyframe's own moment.
+
+    The face is clear of the crop at t=0 and inside it at t=1.0. A check
+    that ignored time would have to call one of them wrong; the right
+    answer is that the crop at t=1.0 is fine and the crop at t=0 is not.
+    """
+    path = CropPath(
+        source_width=320,
+        source_height=240,
+        segments=[
+            CropSegment(
+                start_s=0.0,
+                end_s=2.0,
+                width=100,
+                height=240,
+                keyframes=[CropKeyframe(t=1.0, x=100, y=0)],
+            )
+        ],
+        faces=[FaceRect(t=1.0, x=120.0, y=20.0, width=50.0, height=120.0)],
+    )
+
+    report = diagnostics.diagnose_clip(
+        None,
+        clip_id="c1",
+        crop_path=path,
+        source_size=(320, 240),
+    )
+
+    safety = next(d for d in report.diagnostics if d.name == "crop_safety")
+    assert safety.ok is True
+    assert "1 face(s) tracked" in safety.measured
+
+
+def test_a_crop_that_leaves_the_frame_is_reported_even_without_a_face() -> None:
+    """An older crop plan, with no faces recorded, still gets checked."""
+    report = diagnostics.diagnose_clip(
+        None,
+        clip_id="c1",
+        crop_path=_crop(x=300, width=100),
+        source_size=(320, 240),
+    )
+
+    safety = next(d for d in report.diagnostics if d.name == "crop_safety")
+    assert safety.ok is False
+    assert "leaves the frame" in safety.detail
 
 
 def test_a_crop_planned_for_another_frame_size_is_reported() -> None:

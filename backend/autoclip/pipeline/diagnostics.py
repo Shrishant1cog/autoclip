@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from . import ffmpeg
-from .reframe.croppath import CropPath
+from .reframe.croppath import CropPath, FaceRect
 from .transcript import Word
 
 log = logging.getLogger(__name__)
@@ -61,6 +61,13 @@ OVERLAP_LIMIT = 0.5
 
 #: A caption that runs past the end of its word by more than this is late.
 CAPTION_TOLERANCE_S = 0.25
+
+#: How far a crop keyframe may sit from a face observation and still be
+#: compared with it. The crop planner samples faces several times a second,
+#: so half a second is loose enough for a smoothed keyframe and tight enough
+#: that a face from a different moment is never mistaken for the one in the
+#: shot.
+FACE_MATCH_TOLERANCE_S = 0.5
 
 #: Every measurement this module makes, in the order the specification
 #: lists them. The list is the contract: a measurement that is not here
@@ -429,16 +436,33 @@ def _caption_timing(words: list[Word], start_s: float, end_s: float) -> Diagnost
     )
 
 
+def _subject_face_at(faces: list[FaceRect], t: float) -> FaceRect | None:
+    """The largest face seen within half a second of ``t``.
+
+    The largest face is the subject: when several are on screen the crop is
+    planned around the one that matters, and a smaller face at the edge of
+    the frame may legitimately be cut.
+    """
+    near = [face for face in faces if abs(face.t - t) <= FACE_MATCH_TOLERANCE_S]
+    if not near:
+        return None
+    return max(near, key=lambda face: face.width * face.height)
+
+
 def _crop_safety(
     crop_path: CropPath | None,
     source_size: tuple[int, int] | None,
-    face_rect: tuple[float, float, float, float] | None,
 ) -> Diagnostic:
     """Whether the crop stays inside the frame, and keeps the face.
 
     Two things are checked: the crop window never leaves the source, and
     it does not cut through a face that was detected. Both are facts
     about numbers, not judgements about the picture.
+
+    The face is the one the crop plan was built around, at the moment the
+    crop is at. A rectangle measured somewhere else — a webcam region found
+    once for the whole source, say — says nothing about this crop, and
+    comparing the two reports failures that never happened.
     """
     if crop_path is None:
         return Diagnostic(
@@ -461,6 +485,10 @@ def _crop_safety(
 
     problems: list[str] = []
     measured = f"{len(crop_path.segments)} segment(s)"
+    if crop_path.faces:
+        measured += f", {len(crop_path.faces)} face(s) tracked"
+    else:
+        measured += ", no face tracked"
 
     for segment in crop_path.segments:
         if segment.width <= 0 or segment.height <= 0:
@@ -479,31 +507,32 @@ def _crop_safety(
                 problems.append("the crop leaves the frame at the bottom")
                 break
 
-    if face_rect is not None:
-        fx, fy, fw, fh = face_rect
-        face_right = fx + fw
-        face_bottom = fy + fh
-        for segment in crop_path.segments:
-            for keyframe in segment.keyframes:
-                crop_right = keyframe.x + segment.width
-                crop_bottom = keyframe.y + segment.height
-                overlaps = (
-                    keyframe.x < face_right
-                    and crop_right > fx
-                    and keyframe.y < face_bottom
-                    and crop_bottom > fy
-                )
-                contains = (
-                    keyframe.x <= fx
-                    and keyframe.y <= fy
-                    and crop_right >= face_right
-                    and crop_bottom >= face_bottom
-                )
-                if overlaps and not contains:
-                    problems.append("the crop cuts through the detected face")
-                    break
-            if problems:
+    for segment in crop_path.segments:
+        for keyframe in segment.keyframes:
+            face = _subject_face_at(crop_path.faces, keyframe.t)
+            if face is None:
+                continue
+            crop_right = keyframe.x + segment.width
+            crop_bottom = keyframe.y + segment.height
+            face_right = face.x + face.width
+            face_bottom = face.y + face.height
+            overlaps = (
+                keyframe.x < face_right
+                and crop_right > face.x
+                and keyframe.y < face_bottom
+                and crop_bottom > face.y
+            )
+            contains = (
+                keyframe.x <= face.x
+                and keyframe.y <= face.y
+                and crop_right >= face_right
+                and crop_bottom >= face_bottom
+            )
+            if overlaps and not contains:
+                problems.append("the crop cuts through the detected face")
                 break
+        if problems:
+            break
 
     return Diagnostic(
         "crop_safety",
@@ -582,7 +611,6 @@ def diagnose_clip(
     expected_size: tuple[int, int] | None = None,
     source_size: tuple[int, int] | None = None,
     crop_path: CropPath | None = None,
-    face_rect: tuple[float, float, float, float] | None = None,
     require_audio: bool = True,
     duration_tolerance_s: float = 0.75,
 ) -> DiagnosticsReport:
@@ -590,11 +618,16 @@ def diagnose_clip(
 
     Nothing here raises: a diagnostic that cannot be measured says so
     and moves on, because a missing measurement is not a broken render.
+
+    There is no ``face_rect`` argument, and that is deliberate. A face
+    rectangle only says anything about a crop if it was measured for the
+    same clip, at the same moment, in the same coordinates — so the crop
+    plan carries its own faces and the check uses those.
     """
     diagnostics: list[Diagnostic] = []
 
     diagnostics.append(_caption_timing(words or [], start_s, end_s))
-    diagnostics.append(_crop_safety(crop_path, source_size, face_rect))
+    diagnostics.append(_crop_safety(crop_path, source_size))
     diagnostics.append(_duplicate(clips or [], clip_id))
 
     if path is None or not path.is_file():

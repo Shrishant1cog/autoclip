@@ -6,6 +6,7 @@ jitter suppression, no interpolation across cuts, and correct crop geometry.
 
 from __future__ import annotations
 
+import json
 import math
 
 import pytest
@@ -303,6 +304,66 @@ class TestSerialisation:
         target = path.save(tmp_path / "crop.json")
 
         assert croppath.CropPath.load(target).duration_s == 12.0
+
+    def test_the_faces_travel_with_the_crop_path(self, tmp_path) -> None:
+        """The crop plan carries the faces it was built around.
+
+        A face rectangle only says something about a crop when it was
+        measured for the same clip, in the same coordinates, at the same
+        moments. Keeping them with the plan is what lets the quality
+        diagnostics check the crop against the face that is actually in
+        the shot, instead of against a rectangle found somewhere else.
+        """
+        original = croppath.CropPath(
+            source_width=1920,
+            source_height=1080,
+            segments=[
+                CropSegment(
+                    start_s=0.0,
+                    end_s=5.0,
+                    width=606,
+                    height=1080,
+                    keyframes=[CropKeyframe(0.0, 100.0, 0.0)],
+                    strategy=Strategy.TRACK,
+                )
+            ],
+            faces=[croppath.FaceRect(t=0.0, x=120.0, y=40.0, width=80.0, height=90.0)],
+        )
+
+        restored = croppath.CropPath.load(original.save(tmp_path / "crop.json"))
+
+        assert len(restored.faces) == 1
+        assert restored.faces[0].x == 120.0
+        assert restored.faces[0].width == 80.0
+
+    def test_an_older_crop_path_without_faces_still_loads(self, tmp_path) -> None:
+        """A plan written before faces were recorded must still be readable."""
+        target = tmp_path / "crop.json"
+        target.write_text(
+            json.dumps(
+                {
+                    "source_width": 320,
+                    "source_height": 240,
+                    "segments": [
+                        {
+                            "start_s": 0.0,
+                            "end_s": 2.0,
+                            "width": 100,
+                            "height": 240,
+                            "keyframes": [{"t": 0.0, "x": 0, "y": 0}],
+                            "strategy": "general",
+                            "zoom": 0.0,
+                            "fit": False,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        restored = croppath.CropPath.load(target)
+
+        assert restored.faces == []
 
 
 class TestTracking:

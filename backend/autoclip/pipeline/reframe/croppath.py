@@ -57,6 +57,24 @@ class CropKeyframe:
 
 
 @dataclass
+class FaceRect:
+    """A face seen at one moment, in source-pixel coordinates.
+
+    ``t`` is clip-relative — the same time base as the crop keyframes — so a
+    face can be matched to the crop window that was planned around it. That
+    matters: a face rectangle measured at one moment says nothing about a
+    crop at another, and comparing the two is how a diagnostic ends up
+    reporting a face that was never in the shot.
+    """
+
+    t: float
+    x: float
+    y: float
+    width: float
+    height: float
+
+
+@dataclass
 class CropSegment:
     start_s: float
     end_s: float
@@ -96,6 +114,11 @@ class CropPath:
     source_width: int
     source_height: int
     segments: list[CropSegment] = field(default_factory=list)
+    #: The faces the plan was built around, in source-pixel coordinates and
+    #: clip-relative time. Empty when no face was found — the plan then says
+    #: so, rather than leaving a stale rectangle from somewhere else to be
+    #: compared against.
+    faces: list[FaceRect] = field(default_factory=list)
 
     @property
     def duration_s(self) -> float:
@@ -106,6 +129,7 @@ class CropPath:
             "source_width": self.source_width,
             "source_height": self.source_height,
             "segments": [{**asdict(s), "strategy": s.strategy.value} for s in self.segments],
+            "faces": [asdict(f) for f in self.faces],
         }
 
     @classmethod
@@ -129,6 +153,7 @@ class CropPath:
             source_width=data["source_width"],
             source_height=data["source_height"],
             segments=segments,
+            faces=[FaceRect(**f) for f in data.get("faces", [])],
         )
 
     def save(self, path: Path) -> Path:

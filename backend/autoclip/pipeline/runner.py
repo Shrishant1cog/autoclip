@@ -1466,19 +1466,6 @@ class PipelineRunner:
         composition = compositions.get(clip.id)
         crop_path = composition.crop_path if composition else None
 
-        face_rect: tuple[float, float, float, float] | None = None
-        try:
-            stored = layout_store.get_source_layout(self.source.id)
-        except Exception:  # noqa: BLE001 - a missing record is not a failure
-            stored = None
-        if stored is not None and stored.has_detection:
-            face_rect = (
-                stored.detected_x,
-                stored.detected_y,
-                stored.detected_width,
-                stored.detected_height,
-            )
-
         try:
             report = diagnostics.diagnose_clip(
                 destination,
@@ -1494,7 +1481,6 @@ class PipelineRunner:
                     else None
                 ),
                 crop_path=crop_path,
-                face_rect=face_rect,
                 require_audio=self.source.has_audio,
                 duration_tolerance_s=validate.DURATION_TOLERANCE_S,
             )
