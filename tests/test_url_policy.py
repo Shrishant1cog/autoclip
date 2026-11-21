@@ -241,6 +241,69 @@ def test_url_18_rebinding_aborts():
         _policy().resolve("https://flip.example/", resolver=flaky)
 
 
+def test_a_load_balanced_host_is_not_treated_as_a_rebinding():
+    """A host that answers with a different set of *public* addresses is fine.
+
+    ``graph.facebook.com`` hands out a rotating subset of its own edge
+    addresses, so the application's own Instagram publishing was refused
+    with *"DNS for graph.facebook.com changed between lookups … refusing a
+    possible rebinding"*. Both answers were public, so neither could reach
+    anything the policy does not already allow; refusing them buys no
+    security and breaks a legitimate publish.
+    """
+    answers = iter([["93.184.216.34"], ["93.184.216.35", "93.184.216.36"]])
+
+    def round_robin(_host: str) -> list[str]:
+        return next(answers)
+
+    assert _policy().resolve("https://round-robin.example/", resolver=round_robin) == [
+        "93.184.216.34"
+    ]
+
+
+def test_a_load_balanced_host_is_classified_as_public():
+    """The same host, seen through the classifier the gateway actually uses."""
+    answers = iter([["57.144.52.141"], ["57.144.54.141", "57.144.56.141"]])
+
+    def round_robin(_host: str) -> list[str]:
+        return next(answers)
+
+    assert _policy().classify_url("https://graph.facebook.com/", resolver=round_robin) == "public"
+
+
+def test_a_host_that_moves_from_public_to_loopback_is_refused():
+    """Moving inward is the attack; moving sideways is a load balancer."""
+    answers = iter([["93.184.216.34"], ["127.0.0.1"]])
+
+    def flip(_host: str) -> list[str]:
+        return next(answers)
+
+    with pytest.raises(_policy().UrlRejected):
+        _policy().resolve("https://flip.example/", resolver=flip)
+
+
+def test_a_host_that_moves_to_a_forbidden_address_is_refused():
+    """The second answer held the cloud metadata address."""
+    answers = iter([["93.184.216.34"], ["169.254.169.254"]])
+
+    def flip(_host: str) -> list[str]:
+        return next(answers)
+
+    with pytest.raises(_policy().UrlRejected):
+        _policy().resolve("https://flip.example/", resolver=flip)
+
+
+def test_the_unit_suite_never_resolves_a_real_host():
+    """No unit test may depend on the internet.
+
+    The policy resolves twice on purpose, so a test that reached the network
+    did two lookups — and a load-balanced host answers differently on each
+    one. That is exactly how the Instagram test came to be refused.
+    """
+    with pytest.raises(OSError):
+        _policy()._default_resolver("graph.facebook.com")
+
+
 # --------------------------------------------------------------------------
 # URL-19 .. URL-20: consent
 # --------------------------------------------------------------------------

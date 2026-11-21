@@ -1,7 +1,7 @@
 """Shared pytest fixtures.
 
 The central concern here is isolation: nothing in the test suite may touch the
-user's real ``~/.autoclip`` directory or their real OS keyring.
+user's real ``~/.autoclip`` directory, their real OS keyring, or the network.
 """
 
 from __future__ import annotations
@@ -17,6 +17,30 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from autoclip import config, db, paths, system  # noqa: E402
+from autoclip.security import urlpolicy  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def no_real_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the real resolver unavailable to every test.
+
+    The URL policy resolves a host **twice** on purpose, so a test that
+    reached the network did two lookups — and a load-balanced host answers
+    with a different set of addresses on each one. ``graph.facebook.com``
+    does exactly that, and the application's own Instagram test was refused
+    because of it: *"DNS for graph.facebook.com changed between lookups …
+    refusing a possible rebinding"*.
+
+    A unit test must not depend on the internet, or on which addresses a
+    third party happens to be serving. The tests that care about resolution
+    inject their own resolver; the ones that do not should not be paying for
+    a lookup they do not use.
+    """
+
+    def refuse(host: str) -> list[str]:
+        raise OSError(f"the test suite does not resolve {host}")
+
+    monkeypatch.setattr(urlpolicy, "_default_resolver", refuse)
 
 
 @pytest.fixture(autouse=True)

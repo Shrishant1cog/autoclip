@@ -27,7 +27,9 @@ feature has a legitimate reason to fetch it.
 The subtle part is not the classification, it is *when* it is evaluated. A
 single check at the start of a request is not enough, so :func:`fetch_checked`
 re-checks every redirect hop, and :func:`resolve` performs the resolution twice
-and refuses the request if the answer changed — a cheap DNS-rebinding guard.
+and refuses the request if the second answer moved *inwards* — a cheap
+DNS-rebinding guard. A host that answers with a different set of public
+addresses is a load balancer rather than an attack, and is allowed.
 """
 
 from __future__ import annotations
@@ -60,12 +62,22 @@ class UrlClass(StrEnum):
     PUBLIC = "public"
 
 
+#: How far each class can reach, used to decide whether a changed DNS answer
+#: is a rebinding attempt or just a load balancer. The higher the number, the
+#: more inward the answer went.
+_CLASS_RANK = {
+    UrlClass.PUBLIC: 0,
+    UrlClass.PRIVATE: 1,
+    UrlClass.LOOPBACK: 2,
+}
+
+
 class UrlRejected(ValueError):
     """A URL may not be contacted at all.
 
     Raised for schemes other than HTTP(S), for link-local and unspecified
     addresses, for a redirect that leaves the permitted class or downgrades
-    the scheme, and for a host whose DNS answer changes mid-request.
+    the scheme, and for a host whose DNS answer moves inward mid-request.
     """
 
 
@@ -254,16 +266,45 @@ def _addresses_for(host: str, resolver: Resolver) -> list[str]:
 # --------------------------------------------------------------------------
 
 
+def _worst_class(addresses: Iterable[str]) -> UrlClass | None:
+    """The most inward class among ``addresses``.
+
+    Loopback beats private beats public, the same order the classifier uses:
+    the address that can reach the most is the one that decides.
+
+    ``None`` means the answer contains an address that may not be contacted
+    at all — link-local, unspecified, multicast or reserved — so the caller
+    refuses it rather than ranking it.
+    """
+    worst = UrlClass.PUBLIC
+    for address in addresses:
+        try:
+            found = _classify_ip(address)
+        except UrlRejected:
+            return None
+        if _CLASS_RANK[found] > _CLASS_RANK[worst]:
+            worst = found
+    return worst
+
+
 def resolve(url: str, *, resolver: Resolver | None = None) -> list[str]:
     """Return the IP literals ``url``'s host resolves to.
 
-    The resolution is performed **twice**. A host that answers with one address
-    and then a different one is the classic DNS-rebinding attack — the check
-    that passed and the connection that gets made are not the same request — so
-    a mismatch is refused rather than resolved in favour of the first answer.
+    The resolution is performed **twice**, because a host that answers with
+    one address and then a different one is the classic DNS-rebinding attack
+    — the check that passed and the connection that gets made are not the
+    same request.
 
-    An unresolvable host is not an error here; :func:`classify_url` treats it as
-    public. A *changing* answer is an error.
+    What matters is not *which* addresses answered but **where they can
+    reach**. An answer that moved *inwards* — public on the first lookup,
+    private or loopback on the second — is a rebinding and is refused. An
+    answer that moved between two **public** addresses is a load balancer:
+    ``graph.facebook.com`` hands out a rotating subset of its own edge
+    addresses, and refusing that would break a legitimate publish for no
+    security gain at all.
+
+    An unresolvable host is not an error here; :func:`classify_url` treats it
+    as public. An answer that moved inward is an error.
     """
     _, host = _host_of(url)
 
@@ -282,11 +323,24 @@ def resolve(url: str, *, resolver: Resolver | None = None) -> list[str]:
     lookup = resolver or _default_resolver
     first = lookup(host)
     second = lookup(host)
-    if sorted(first) != sorted(second):
-        raise UrlRejected(
-            f"DNS for {host} changed between lookups ({first} then {second}); "
-            "refusing a possible rebinding"
-        )
+
+    first_class = _worst_class(first)
+    second_class = _worst_class(second)
+
+    # A first answer that is not allowed at all is refused by the classifier
+    # itself, with a message about the address. The rebinding rule does not
+    # apply to it.
+    if first_class is not None:
+        if second_class is None:
+            raise UrlRejected(
+                f"DNS for {host} changed between lookups ({first} then {second}); "
+                "the new answer contains an address that may not be contacted"
+            )
+        if _CLASS_RANK[second_class] > _CLASS_RANK[first_class]:
+            raise UrlRejected(
+                f"DNS for {host} changed between lookups ({first} then {second}); "
+                "refusing a possible rebinding"
+            )
     return first
 
 
