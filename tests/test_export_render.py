@@ -380,6 +380,42 @@ class TestLayoutRender:
             ],
         )
 
+    def _stacked_in_two_stretches(
+        self, *, speech_spans: list[tuple[float, float]] | None = None
+    ) -> LayoutPath:
+        """The same layout, split into two stretches of the clip."""
+        strip = LayoutSlot(x=0, y=0, width=1080, height=768)
+        gameplay = LayoutSlot(x=0, y=768, width=1080, height=1152)
+        return LayoutPath(
+            source_width=SOURCE_W,
+            source_height=SOURCE_H,
+            output_width=1080,
+            output_height=1920,
+            segments=[
+                LayoutSegment(
+                    start_s=0.0,
+                    end_s=2.5,
+                    variant=LayoutVariant.ABOVE,
+                    gameplay_slot=gameplay,
+                    webcam_slot=strip,
+                    webcam_strip=strip,
+                    gameplay_source=Rect(x=134.0, y=0.0, width=1012.0, height=720.0),
+                    webcam_source=Rect(x=CAM_X, y=CAM_Y + 9, width=CAM_W, height=242),
+                ),
+                LayoutSegment(
+                    start_s=2.5,
+                    end_s=5.0,
+                    variant=LayoutVariant.ABOVE,
+                    gameplay_slot=gameplay,
+                    webcam_slot=strip,
+                    webcam_strip=strip,
+                    gameplay_source=Rect(x=134.0, y=0.0, width=1012.0, height=720.0),
+                    webcam_source=Rect(x=CAM_X, y=CAM_Y + 9, width=CAM_W, height=242),
+                    speech_spans=speech_spans or [],
+                ),
+            ],
+        )
+
     def _corner(self) -> LayoutPath:
         slot = LayoutSlot(x=756, y=32, width=292, height=224)
         return LayoutPath(
@@ -511,6 +547,59 @@ class TestLayoutRender:
 
         quiet = _region_signature(destination, 0.3, 0, 0, 1080, 768)
         talking = _region_signature(destination, 2.0, 0, 0, 1080, 768)
+
+        assert quiet != talking
+
+    def test_the_speech_emphasis_renders_in_a_later_stretch(
+        self, marked_source, words, tmp_path
+    ) -> None:
+        """The emphasis follows the clip's own clock, not each stretch's.
+
+        The speech stretches are written against the clip's timeline. When the
+        webcam crop was applied to each stretch separately, the stretch's own
+        clock was used instead, so the webcam only grew in the first stretch
+        of the clip and never in the rest of it.
+        """
+        crop_path = CropPath(
+            source_width=SOURCE_W,
+            source_height=SOURCE_H,
+            segments=[
+                CropSegment(
+                    start_s=0.0,
+                    end_s=2.5,
+                    width=674,
+                    height=720,
+                    keyframes=[CropKeyframe(0.0, 303.0, 0.0)],
+                    strategy=Strategy.TRACK,
+                ),
+                CropSegment(
+                    start_s=2.5,
+                    end_s=5.0,
+                    width=674,
+                    height=720,
+                    keyframes=[CropKeyframe(2.5, 303.0, 0.0)],
+                    strategy=Strategy.TRACK,
+                ),
+            ],
+        )
+        destination = tmp_path / "emphasis-later.mp4"
+
+        export.export_clip(
+            make_request(
+                marked_source,
+                destination,
+                crop_path,
+                words,
+                layout=self._stacked_in_two_stretches(speech_spans=[(3.0, 4.5)]),
+                burn_captions=False,
+            ),
+            work_dir=tmp_path / "work",
+        )
+
+        # Both moments are in the second stretch: one before the speech
+        # stretch starts, one inside it.
+        quiet = _region_signature(destination, 2.7, 0, 0, 1080, 768)
+        talking = _region_signature(destination, 4.0, 0, 0, 1080, 768)
 
         assert quiet != talking
 

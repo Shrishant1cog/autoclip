@@ -53,6 +53,43 @@ class TestFilterPathEscaping:
         assert ffmpeg.escape_filter_value("Arial:Bold") == "Arial\\:Bold"
 
 
+class TestCommandLineLength:
+    """Windows refuses a command line longer than 32,767 characters.
+
+    The operating system's own error says "the filename or extension is too
+    long", which points at the wrong thing: it is usually the filter graph.
+    """
+
+    def test_a_command_that_fits_is_accepted(self) -> None:
+        command = ["ffmpeg", "-i", "source.mp4", "-filter_complex", "x" * 1000]
+
+        ffmpeg.check_command_line_length(command, limit=32_767)
+
+    def test_an_over_long_command_is_refused_before_ffmpeg_runs(self) -> None:
+        command = ["ffmpeg", "-i", "source.mp4", "-filter_complex", "x" * 40_000]
+
+        with pytest.raises(ffmpeg.FFmpegError) as caught:
+            ffmpeg.check_command_line_length(command, limit=32_767)
+
+        assert "too long" in str(caught.value)
+        assert "32,767" in str(caught.value)
+
+    def test_the_limit_is_the_platform_s_own(self) -> None:
+        import os
+
+        expected = 32_767 if os.name == "nt" else None
+
+        assert ffmpeg.command_line_limit() == expected
+
+    def test_the_length_counts_every_argument(self) -> None:
+        command = ["ffmpeg", "-i", "source.mp4"]
+
+        # Two arguments and a trailing space each.
+        assert ffmpeg.command_line_length(command) == len("ffmpeg ") + len("-i ") + len(
+            "source.mp4 "
+        )
+
+
 class TestRelativeFilterWorkspace:
     """The escaping-free path used for real renders."""
 

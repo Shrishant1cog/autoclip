@@ -324,36 +324,36 @@ def _webcam_branch(
 
     The trims mirror the gameplay's, so the webcam stays in step with the
     clip even when the crop path has several segments.
+
+    The crop and the scale are applied once, to the joined webcam stream,
+    rather than to every segment. They are per-frame operations, so the
+    picture is the same — but the filter graph no longer grows with the
+    number of segments, and the emphasis expression is evaluated against the
+    clip's own timeline, which is the timeline the speech stretches are
+    written in.
     """
     webcam = composition.webcam_slot
     if webcam is None:
         return []
 
     parts: list[str] = []
-    labels: list[str] = []
-    crop = _webcam_crop_filter(composition)
-
-    for index, segment in enumerate(segments):
-        label = f"w{index}"
-        labels.append(f"[{label}]")
-
-        if len(segments) == 1:
-            source_label = web_source
-        else:
-            source_label = f"[ws{index}]"
-            parts.append(
-                f"{web_source}trim=start={segment.start_s:.4f}:end={segment.end_s:.4f},"
-                f"setpts=PTS-STARTPTS{source_label}"
-            )
-
-        parts.append(
-            f"{source_label}{crop},scale={webcam.width}:{webcam.height}:flags=lanczos[{label}]"
-        )
 
     if len(segments) == 1:
-        parts.append("[w0]null[laycam]")
+        current = web_source
     else:
-        parts.append(f"{''.join(labels)}concat=n={len(segments)}:v=1:a=0[laycam]")
+        labels: list[str] = []
+        for index, segment in enumerate(segments):
+            label = f"ws{index}"
+            labels.append(f"[{label}]")
+            parts.append(
+                f"{web_source}trim=start={segment.start_s:.4f}:end={segment.end_s:.4f},"
+                f"setpts=PTS-STARTPTS[{label}]"
+            )
+        parts.append(f"{''.join(labels)}concat=n={len(segments)}:v=1:a=0[wcat]")
+        current = "[wcat]"
+
+    crop = _webcam_crop_filter(composition)
+    parts.append(f"{current}{crop},scale={webcam.width}:{webcam.height}:flags=lanczos[laycam]")
     return parts
 
 
@@ -381,6 +381,12 @@ def _webcam_crop_filter(composition: Composition) -> str:
     factor = f"(1+{composition.gain:.4f}*({speech}))"
     width = f"floor({source_w}/{factor}/2)*2"
     height = f"floor({source_h}/{factor}/2)*2"
+    # The offset is spelled out rather than taken from `out_w`, because ffmpeg
+    # does not update `out_w` when the width is an expression: it would keep
+    # the window still while somebody is speaking. The speech expression is
+    # therefore written out four times here — once for the width, once for
+    # the height, and once in each offset. That is affordable because the
+    # crop is built once for the whole clip, not once per segment.
     crop_x = f"{x}+({source_w}-{width})/2"
     crop_y = f"{y}+({source_h}-{height})/2"
     return f"crop=w='{width}':h='{height}':x='{crop_x}':y='{crop_y}'"

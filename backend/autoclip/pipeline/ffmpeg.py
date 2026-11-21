@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -32,6 +33,12 @@ from ..security.urlpolicy import ffmpeg_protocol_whitelist
 log = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[float], None]
+
+#: Windows refuses a command line longer than this. The limit belongs to
+#: CreateProcess, not to ffmpeg, and the error it raises — "the filename or
+#: extension is too long" — names the wrong thing: it is usually the filter
+#: graph that is too long.
+WINDOWS_COMMAND_LINE_LIMIT = 32_767
 
 
 class FFmpegError(RuntimeError):
@@ -558,6 +565,56 @@ def relative_filter_workspace(subtitle_path: Path, fonts_dir: Path) -> tuple[Pat
     return workspace, staged_subtitles.name, staged_fonts.name
 
 
+def command_line_length(command: Sequence[str]) -> int:
+    """The length of a command line, as the operating system counts it.
+
+    Every argument is followed by a space, which is what CreateProcess sees
+    when it refuses a command that is too long.
+    """
+    return sum(len(str(argument)) + 1 for argument in command)
+
+
+def command_line_limit() -> int | None:
+    """The longest command line this platform accepts, or None if it has no limit.
+
+    Windows is the only platform with one worth knowing about: CreateProcess
+    refuses anything longer than :data:`WINDOWS_COMMAND_LINE_LIMIT`
+    characters. POSIX systems take the argument vector as it is.
+    """
+    return WINDOWS_COMMAND_LINE_LIMIT if os.name == "nt" else None
+
+
+def check_command_line_length(command: Sequence[str], *, limit: int | None = None) -> None:
+    """Refuse a command line the platform cannot run, and say why.
+
+    A filtergraph can grow without bound — one more crop segment, one more
+    stretch of speech — and Windows will not run a command line longer than
+    :data:`WINDOWS_COMMAND_LINE_LIMIT` characters. The operating system's own
+    error says "the filename or extension is too long", which points at the
+    wrong thing entirely, so the check happens here where the message can
+    name the real cause.
+
+    ``limit`` overrides the platform's limit; it is there so the check can be
+    exercised on every platform.
+    """
+    if limit is None:
+        limit = command_line_limit()
+    if limit is None:
+        return
+
+    length = command_line_length(command)
+    if length <= limit:
+        return
+
+    platform = "Windows" if os.name == "nt" else "this platform"
+    raise FFmpegError(
+        f"The ffmpeg command is too long for {platform}: {length:,} characters, "
+        f"and the limit is {limit:,}. The clip has more segments or stretches "
+        "of speech than one command line can carry.",
+        command=command,
+    )
+
+
 def run(
     args: Sequence[str],
     *,
@@ -601,6 +658,8 @@ def run(
     command += list(args)
 
     log.debug("ffmpeg %s", " ".join(command[1:]))
+
+    check_command_line_length(command)
 
     started = time.monotonic()
     try:
