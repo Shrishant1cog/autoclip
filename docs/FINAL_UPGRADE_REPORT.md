@@ -37,7 +37,7 @@ double stands in for the same code path the real service would take — but "the
 | **New runtime dependencies** | **Zero.** The whole upgrade was built on the dependency set the project already had. |
 | **Schema** | v14 → **v27**, 19 → **32 live tables**, thirteen migrations, no user data destroyed |
 | **API surface** | 18 routers / 108 routes → **21 routers / 162 routes** |
-| **CI** | **Every run on this branch since the two failures was green.** Two of the runs failed — both were real defects, diagnosed and fixed rather than explained away — and four were cancelled by a newer push. The release run is green on all six jobs, on all four platforms. See §4.1. |
+| **CI** | **Every run on this branch since the two failures was green.** Two of the runs failed — both were real defects, diagnosed and fixed rather than explained away — and five were cancelled by a newer push. The release run is green on all six jobs, on all four platforms. See §4.1. |
 | **Defects found by running the application** | **13 product defects** and **1 defect in the CI workflow itself**, all fixed, all guarded by tests that fail without the fix. See §4.2. |
 | **Open security findings** | **0** high, **0** medium, **0** low. 4 residual risks documented, 5 things not checked — all in §6. |
 
@@ -251,15 +251,17 @@ missing or wrong.
 
 The run history is release evidence, not noise. **Every run on this branch since the two failures
 was green.** The two that failed were **real defects** — one in the product, one in the CI itself.
-Neither was a flake, and neither was explained away. Four runs were cancelled by a newer push.
+Neither was a flake, and neither was explained away. Five runs were cancelled by a newer push.
 
 **The table below is the run history as it stands at the M5.3 commit.** It is a record, and it
-grows; the claim that matters is the one above it, which does not go stale.
+grows; the claim that matters is the one above it, which does not go stale. The numbers are
+**GitHub's own** — each workflow run's `run_number` — so a reader who opens the Actions page for
+the branch finds the same numbering.
 
 | Runs | Result | What happened |
 |---|---|---|
-| 4, 5, 7–13, 15–17, **22**, **23**, **24**, **25**, **26**, **27**, **28**, **29**, **30**, **31**, **32**, **33** | **success** | green |
-| 6, 14, 18, **21** | **cancelled** | each superseded by a newer push — the concurrency group cancelled the older run |
+| 4, 5, 7–13, 15–17, **22**, **23**, **24**, **25**, **26**, **27**, **28**, **29**, **30**, **31**, **33**, **34**, **35** | **success** | green |
+| 6, 14, 18, **21**, **32** | **cancelled** | each superseded by a newer push — the concurrency group cancelled the older run |
 | **19** (`4cf309b`) | **failure** | the Ubuntu legs failed in **Unit tests**; Windows and macOS passed the same tests. A test wrote to the owner's real OS keyring. On Linux there is no keyring backend, so the token was never stored and the assertion could not hold — the test passed on Windows and macOS *because those machines had a real keyring to write to*. Fixed by `94c6d9c`, an **autouse** isolation fixture so no test can reach the owner's credential store |
 | **20** (`94c6d9c`) | **failure** | the Ubuntu py3.12 leg failed at *"Verify ffmpeg can burn subtitles"*. The check piped the ffmpeg filter list into `grep -q`; `grep -q` exits at the match, the producer gets **SIGPIPE**, and GitHub's `set -o pipefail` turns that into a failed step. The runner's ffmpeg 8 has a filter list large enough to fill the pipe, so CI reported that an ffmpeg **with** the `ass` filter did not have one — the job log shows `printf: Broken pipe` and then the `ass` filter listed on the very next line. **Corrected, not removed**: the check now matches with bash's own pattern matching and never pipes, and a build genuinely without the filter still fails it |
 
@@ -282,19 +284,24 @@ it is green on all six jobs too**
 `2b5935d`, the defect-13 fix, was **not** pushed on its own, so **that** is the run that first
 exercised it on every CI job.
 
-**Run 32 is green on all six jobs too**
-([run 44949264565](https://github.com/Shrishant1cog/autoclip/actions/runs/44949264565)) — the two
-documentation fixes that a cross-reference check found in the evidence itself. One run in between
-was **cancelled** by the concurrency group when the next commit was pushed, with five of its six
-jobs already green: a cancellation, not a failure.
+**Run 32 was cancelled** — the evidence-correction commit (`f9fad75`) was superseded by the next
+push, with five of its six jobs already green: a cancellation, not a failure.
 
-**Run 33 is the last run that proves the M5.3 content, and it is green on all six jobs too**
-([run 44950193899](https://github.com/Shrishant1cog/autoclip/actions/runs/44950193899)). The table
-stops there deliberately: a commit that records a CI run is itself run by CI, and recording *its*
-run would need another commit — which would need another. The table records the runs that prove the
-**content** — the code, the tests and the evidence — and stops at the last of those. The commits
-that follow it change only the wording of the record, and each one's own run was verified after the
-push.
+**Run 33 is green on all six jobs too**
+([run 44949264565](https://github.com/Shrishant1cog/autoclip/actions/runs/44949264565)) — the two
+documentation fixes that a cross-reference check found in the evidence itself, and the tree that
+carries run 32's corrections with it.
+
+**Run 34 and run 35 are green on all six jobs too**
+([run 44950193899](https://github.com/Shrishant1cog/autoclip/actions/runs/44950193899) and
+[run 44951500363](https://github.com/Shrishant1cog/autoclip/actions/runs/44951500363)) — the final
+CI run, and then the run history itself.
+
+**Run 35 is the last run in the table, and the table stops there deliberately:** a commit that
+records a CI run is itself run by CI, and recording *its* run would need another commit — which
+would need another. The commits after it change **the record**, not the content it reports; each
+one's own run was verified after the push and is green, and the branch's history can be read
+directly from GitHub, where the run numbers are the same ones used here.
 
 **Both failures were reproduced before they were fixed.** Run 19 was reproduced on a Linux
 environment with no keyring backend. Run 20 was reproduced with a 320 KB filter list: the old body

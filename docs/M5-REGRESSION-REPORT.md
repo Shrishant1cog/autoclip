@@ -189,10 +189,16 @@ lint/type/unit/render steps, `frontend` (`npm ci` + `npm run build`), and `docke
 image, run it, poll `GET /api/health`).
 
 `concurrency: cancel-in-progress: true` means a newer push cancels the run for an older commit.
-Four runs were cancelled for exactly that reason, and that is why they are marked cancelled
+Five runs were cancelled for exactly that reason, and that is why they are marked cancelled
 rather than failed.
 
-**The table below is the run history as it stood at the release commit.** It is a record, and it
+> **The run numbers in this table are GitHub's own.** They are the `run_number` of each workflow
+> run, so a reader who opens the Actions page for the branch finds the same numbering. The whole
+> table was read back against the API to confirm that, and the M5.3 rows needed correcting: the
+> evidence-correction commit's run was **cancelled** and so it **took a number of its own**, which
+> pushed the runs after it up by one.
+
+**The table below is the run history as it stands at the M5.3 commit.** It is a record, and it
 grows; the claim that matters is the one under it, which does not go stale.
 
 | Run | Commit | Title | Result |
@@ -225,23 +231,27 @@ grows; the claim that matters is the one under it, which does not go stale.
 | 29 | `a907805` | Security: a load-balanced public host is not a DNS rebinding | **success** — all six jobs green. The whole M5.2 code tree: the transfer log, the crop-safety measurement and the URL policy |
 | 30 | `f1cbe81` | docs: M5.2 — the real four-hour ingest, and four more defects | **success** — all six jobs green. The whole M5.2 documentation tree |
 | 31 | `f190e9a` | docs: M5.3 — the complete ten-minute pipeline, and five more defects | **success** — all six jobs green — [run 44944459562](https://github.com/Shrishant1cog/autoclip/actions/runs/44944459562). The whole M5.3 tree — the four M5.3 code commits and the documentation, together. `2b5935d` (the defect-13 fix) was **not** pushed on its own, so **this** is the run that first exercised it on all six CI jobs |
-| 32 | `56553ec` | docs: M5.3 — two broken references in the evidence | **success** — all six jobs green — [run 44949264565](https://github.com/Shrishant1cog/autoclip/actions/runs/44949264565). The tree with the two documentation fixes a cross-reference check found in the evidence itself |
-| 33 | `6c2f9e0` | docs: M5.3 — the final CI run | **success** — all six jobs green — [run 44950193899](https://github.com/Shrishant1cog/autoclip/actions/runs/44950193899). The last run that proves the M5.3 **content** — the code, the tests and the evidence |
+| 32 | `f9fad75` | docs: M5.3 — the evidence read back against the database | **cancelled** — superseded by run 33, with five of its six jobs already green. A cancellation, not a failure; the Windows job was cancelled mid-run rather than failed |
+| 33 | `56553ec` | docs: M5.3 — two broken references in the evidence | **success** — all six jobs green — [run 44949264565](https://github.com/Shrishant1cog/autoclip/actions/runs/44949264565). The tree with the two documentation fixes a cross-reference check found in the evidence itself, and the tree that carries the evidence corrections of run 32 |
+| 34 | `6c2f9e0` | docs: M5.3 — the final CI run | **success** — all six jobs green — [run 44950193899](https://github.com/Shrishant1cog/autoclip/actions/runs/44950193899) |
+| 35 | `3f95ac0` | docs: M5.3 — run 33 is green, and the run history stops here | **success** — all six jobs green — [run 44951500363](https://github.com/Shrishant1cog/autoclip/actions/runs/44951500363). The last run in the table. The subject's *"run 33"* is **run 34** under the numbering used here — the commit was written before the numbering was corrected, and a commit's subject cannot be changed without rewriting history |
 
-**Runs 31, 32 and 33 are green on all six jobs.** Run 31 was the first to exercise the defect-13
-fix on every CI job; run 32 is the tree with the two documentation fixes; run 33 is the last run
-that proves the M5.3 content. One run in between (44948642080, `f9fad75`) was **cancelled** by the
-concurrency group when the next commit was pushed, with five of its six jobs already green — a
-cancellation, not a failure, and the sixth (Windows) was cancelled mid-run rather than failed.
+**Runs 31, 33, 34 and 35 are green on all six jobs, and run 32 was cancelled.** Run 31 was the
+first to exercise the defect-13 fix on every CI job. Run 32 is the evidence-correction commit —
+it was **cancelled** by the concurrency group when the next commit was pushed, with five of its
+six jobs already green: a cancellation, not a failure, and the sixth (Windows) was cancelled
+mid-run rather than failed. Run 33 is the tree with the two documentation fixes, and it carries
+run 32's corrections with it. Run 34 records the final CI run, and run 35 is the last run in the
+table.
 
 > **Why this table stops here.** A commit that records a CI run is itself run by CI, and
 > recording *its* run would need another commit — which would need another. The table therefore
-> records the runs that prove the **content** of each increment — the code, the tests and the
-> evidence — and stops at the last of those. The commits that follow it change only the wording of
-> the record; each one's own run was verified after the push, and none of them needs a row here.
+> stops at the last run recorded in it; the commits after it change **the record**, not the content
+> it reports. Each one's own run was verified after the push and is green, and the branch's history
+> can be read directly from GitHub, where the run numbers are the same ones used here.
 
 **Every run on this branch since the two failures was green.** Two of the runs failed, and **both
-failures were real defects** — not flakes, and neither was explained away. Four runs were cancelled
+failures were real defects** — not flakes, and neither was explained away. Five runs were cancelled
 by a newer push.
 **Both failures were real defects**, not flakes, and neither was explained away:
 
