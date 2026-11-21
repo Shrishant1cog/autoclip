@@ -377,23 +377,25 @@ would have failed the format step before reaching the tests — which is consist
   independently, and "multiple accounts" currently means "one token displayed twice".
 - **D15 — the formatter gate is broken on a clean checkout** (above).
 
-**Since the baseline (through M5.1).** The table above is the *M0 baseline* and is deliberately left
+**Since the baseline (through M5.2).** The table above is the *M0 baseline* and is deliberately left
 as it was measured. The current state is recorded per milestone in `docs/UPGRADE-LEDGER.md`; at
-the end of M5.1 it is:
+the end of M5.2 it is:
 
-| Gate | At M0 (baseline) | At M5 (release) | At M5.1 |
-|---|---|---|---|
-| Unit selection — `-m "not slow and not golden and not e2e"` | 672 passed | **1,263 passed**, 61 deselected | **1,270 passed**, 69 deselected |
-| Render selection — `-m "slow and not golden and not e2e"` | (included above) | **37 passed**, 1,287 deselected | **45 passed**, 1,294 deselected |
-| **Total in the two CI selections** | **672** | **1,300** | **1,315** |
-| Local full suite (Windows, excluding the e2e collection) | — | **1,300 passed** | **1,315 passed**, 534.88 s |
-| `xfail` markers | 26 (the SSRF suite) | **0** | **0** |
-| `ruff check .` | clean | **clean** | **clean** |
-| `ruff format --check .` | **FAILED** — 38 of 147 files unformatted | **clean** — 226 files already formatted | **clean** — 227 files already formatted |
-| `ruff` version | unpinned (`>=0.7`) | **pinned at `0.17.5`** (`pyproject.toml:89`) — committed as `4cf309b`, which closes **D15** and **T2** | unchanged |
-| mypy | 14 errors in 10 files | **10 errors in 8 files** (tolerated by `continue-on-error`) | **10 errors in 8 files** — unchanged |
-| Frontend `tsc -b && vite build` | not run locally at audit time | **green**, run locally and in CI | unchanged — no frontend file was touched |
-| Docker build + health smoke | not run locally at audit time | **not run locally** — Docker is not installed on this machine; the CI `docker` job builds the image and smoke-tests `GET /api/health` | unchanged |
+| Gate | At M0 (baseline) | At M5 (release) | At M5.1 | At M5.2 |
+|---|---|---|---|---|
+| Unit selection — `-m "not slow and not golden and not e2e"` | 672 passed | **1,263 passed**, 61 deselected | **1,270 passed**, 69 deselected | **1,285 passed**, 69 deselected |
+| Render selection — `-m "slow and not golden and not e2e"` | (included above) | **37 passed**, 1,287 deselected | **45 passed**, 1,294 deselected | **45 passed**, 1,309 deselected |
+| **Total in the two CI selections** | **672** | **1,300** | **1,315** | **1,330** |
+| Local full suite (Windows, excluding the e2e collection) | — | **1,300 passed** | **1,315 passed**, 534.88 s | **1,330 passed**, 499.52 s |
+| `xfail` markers | 26 (the SSRF suite) | **0** | **0** | **0** |
+| `ruff check .` | clean | **clean** | **clean** | **clean** |
+| `ruff format --check .` | **FAILED** — 38 of 147 files unformatted | **clean** — 226 files already formatted | **clean** — 227 files already formatted | **clean** — 227 files already formatted |
+| `ruff` version | unpinned (`>=0.7`) | **pinned at `0.17.5`** (`pyproject.toml:89`) — committed as `4cf309b`, which closes **D15** and **T2** | unchanged | unchanged |
+| mypy | 14 errors in 10 files | **10 errors in 8 files** (tolerated by `continue-on-error`) | **10 errors in 8 files** — unchanged | **10 errors in 8 files** — unchanged |
+| Frontend `tsc -b && vite build` | not run locally at audit time | **green**, run locally and in CI | unchanged — no frontend file was touched | unchanged — no frontend file was touched |
+| Docker build + health smoke | not run locally at audit time | **not run locally** — Docker is not installed on this machine; the CI `docker` job builds the image and smoke-tests `GET /api/health` | unchanged | unchanged |
+| Real-media ingest | not run | not run | not run | **run twice on the complete file** — 684,877,097 B at 360p and 5,529,989,793 B at the default 1080p |
+| Real-media pipeline | 24 e2e tests on a 180 s segment | **done** on a real segment | unchanged | **done again** on a real 180 s segment cut from a real four-hour download, with a real local model |
 
 **The M5.1 column, against the M5 column.** M5.1 added **one test file** and **15 tests**: the
 eight-case ducking matrix (`tests/test_ducking_matrix.py`, 8 tests), four unit tests for the
@@ -401,10 +403,20 @@ tri-state `ducking_intervals()` helper, two API-boundary contract tests and one 
 **+7 in the unit selection and +8 in the render selection**, because the matrix is eight real
 renders.
 
-**The Linux leg was reproduced on the M5.1 tree too**, before the commit was pushed — WSL,
-ffmpeg 7.0.2, Python 3.12.16, the same Python as the Ubuntu py3.12 leg. The counts are
-**identical** on both platforms: 1,270 in the unit selection and 45 in the render selection, with
-`ruff check` and `ruff format --check` clean on both.
+**The M5.2 column, against the M5.1 column.** M5.2 added **no new test file** and **15 tests**,
+because every one of its four guards belongs to a file that already existed: **+4** in
+`tests/test_ingest.py`, **+5** in `tests/test_diagnostics.py`, **+2** in `tests/test_reframe.py`
+and **+5** in `tests/test_url_policy.py`. **+15 in the unit selection and +0 in the render
+selection** — none of the four defects needed a render, which is the point: they were statements
+about the application's behaviour in the world, not about how a frame is composed.
+
+**The Linux leg was reproduced on the M5.2 tree too**, before the commit was pushed — WSL,
+ffmpeg 7.0.2, Python 3.12.16, the same Python as the Ubuntu py3.12 leg, and from the **exact
+committed tree** (`git archive` of `a907805`), so what was tested was what was committed. The
+unit selection is **1,285 passed** — identical to Windows — and a **212-test ffmpeg-sensitive
+selection** covering the ducking matrix's real renders, the render tests, the music tests and the
+four M5.2 guard files passed in **193.04 s**, with `ruff check` and `ruff format --check` clean on
+both platforms.
 
 **The ruff pin is the point of this row.** The baseline's format failure was not a style
 preference: with no version pinned, the gate was evaluated against whatever ruff CI happened to
@@ -425,6 +437,8 @@ cause and its fix.
 | **20** | `94c6d9c` | **failure** | the Ubuntu **py3.12** leg failed at step 7, *"Verify ffmpeg can burn subtitles"*. Ubuntu py3.11, macOS, Windows and Docker all passed | **The check itself was wrong.** It piped the ffmpeg filter list into `grep -q`. `grep -q` exits at the first match, the producer then gets **SIGPIPE**, and GitHub runs bash steps with `set -o pipefail`, which turns that broken pipe into a failed step. The Ubuntu runner's ffmpeg 8 has a filter list large enough to fill the pipe, so CI reported that an ffmpeg **with** the `ass` filter did not have one — the job log shows `printf: Broken pipe` and then the `ass` filter listed on the very next line | the check now matches the list with bash's own pattern matching and never pipes. **The check was corrected, not removed**: a build genuinely without the `ass` filter still fails it |
 | 21 | `64d253d` | **cancelled** | superseded by run 22 | — | — |
 | 22, 23, 24, 25, 26 | `cbcbe1c`, `ab9052e`, `2931059`, `822143e`, `b59605b` | **success** | green on all six jobs — the four backend legs, the frontend build, and the Docker image with its health smoke test | — | — |
+| 27, 28 | `d8db47f`, `066bbf6` | **success** | green on all six jobs. Run 28 is the first M5.2 code commit — the configured yt-dlp format | — | — |
+| **29** | `a907805` | **success** | green on all six jobs. The whole M5.2 code tree: the transfer log, the crop-safety measurement and the URL policy | — | — |
 
 **Both failures were reproduced before they were fixed.** Run 19 was reproduced on a Linux
 environment with no keyring backend, and run 20 was reproduced with a 320 KB filter list — the
@@ -433,9 +447,9 @@ new body. A failure that is only fixed in CI is a failure that comes back.
 
 **Every run on this branch since those two failures was green.**
 
-### 13.2 Four product defects, found by running the application
+### 13.2 Eight product defects, found by running the application
 
-The full-suite gates were green while the application was broken. These four defects were found
+The full-suite gates were green while the application was broken. These defects were found
 by **running the application and its gates**, not by reading the code, and each is now guarded by
 a test that fails without the fix.
 
@@ -445,6 +459,10 @@ a test that fails without the fix.
 | 2 | The timeline-driven ducking filtergraph was malformed — an output label in the middle of the bed's chain — and ffmpeg refused the whole graph | the export failing, with ffmpeg's own stderr in the response | 3 real-render tests in `tests/test_export_render.py::TestMusicBedRender`; **2 of the 3 fail without the fix** |
 | 3 | The sidechain fallback consumed one filter output twice, which **ffmpeg 9 accepts and ffmpeg 7 refuses** | the Linux CI leg, reproduced locally on ffmpeg 7.0.2 | the same 3 render tests, plus a **structural** check in `tests/test_music.py` that no filter output is consumed twice and no filter follows an output label — version-independent, so it catches the defect on any ffmpeg |
 | 4 | **An empty speech timeline was indistinguishable from no timeline at all**, so a clip with no talking fell back to keying the ducking on the audio and the music was pulled down by whatever else the source contained | the **no-speech** case of the eight-case ducking matrix, at M5.1 | `tests/test_ducking_matrix.py::test_no_speech_means_no_ducking` — **fails without the fix**, at a measured ratio of 0.915 against a flat render — plus 4 unit tests for `ducking_intervals()` and 2 for the API boundary |
+| 5 | **`ingest.ytdlp_format` was dead.** The download hard-coded `bestvideo*+bestaudio/best`, so a four-hour live stream came down at 1440p60 — **12.54 GiB** — instead of the 1080p the configuration's own comment promises | the **real ingest** of a four-hour YouTube live recording, at M5.2 | 3 tests in `tests/test_ingest.py`; **2 of the 3 fail without the fix** (`assert 'height<=1080' in 'bestvideo*+bestaudio/best'`) |
+| 6 | **The yt-dlp download was authorised but never written to the transfer log**, so `EGRESS-INVENTORY.md` E11's claim that it is *logged* was false, and the largest thing AutoClip ever sends left the machine with nothing in the user's own log | reading *Settings → External processing* after a **5.52 GB** download: **0 rows** | `tests/test_ingest.py::test_the_download_is_recorded_in_the_transfer_log` — **fails without the fix** (`assert [] == [('ok', ...)]`) |
+| 7 | **The crop-safety diagnostic compared a per-clip crop against the whole-source webcam region** and called it *"the detected face"*, so it reported *"the crop cuts through the detected face"* on a clip that tracks the face perfectly, and on a clip with **no face in it at all** | the application's own diagnostics on two real clips of a real stream | 5 tests in `tests/test_diagnostics.py` and 2 in `tests/test_reframe.py`; the time-matching test **fails without the fix** |
+| 8 | **The URL policy refused any host whose two DNS answers were not the same set of addresses**, so a legitimate load-balanced host — `graph.facebook.com` — was treated as a DNS-rebinding attack and the publish was refused | the **full-suite gate**, as a flaky failure in the Instagram publishing tests, which passes alone and fails in a full run | 2 tests in `tests/test_url_policy.py` **fail without the fix**; 3 more assert that the rebinding protection still holds, and 1 asserts the unit suite never resolves a real hostname |
 
 **Defect 3 is the one that would have shipped.** It rendered on the machine the code was written
 on and would have failed on the CI runners and on every user with an ffmpeg older than 9. It was
@@ -457,6 +475,26 @@ a source carrying its own loud music — but the contract was violated at the AP
 webcam layout already treated an empty timeline as "no emphasis" without falling back. The fix
 keeps the three answers apart: no timeline (`None`), a timeline that found no speech in this clip
 (`[]`), and the speech itself.
+
+**Defects 5 and 6 were found by pointing the application at a real four-hour recording.** The
+metadata said 4:00:10 and the configuration said 1080p; the download was 12.54 GiB at 1440p60 and
+the transfer log was empty afterwards. Neither was visible to a unit test, because both were
+statements about the application's behaviour in the world rather than about its internals.
+
+**Defect 7 was a measurement that lied, in both directions.** The crop-safety check was handed the
+webcam region the detector found once for the **whole recording** and called it the face, then
+compared it with a **per-clip** crop. MediaPipe's own observations show the first clip tracking the
+real face through all 51 samples inside the clip, and the second clip containing **no face at all** —
+and the diagnostic reported both as cutting through a face.
+
+**Defect 8 was a security control that was too strict to be true.** The rebinding guard compared
+two DNS answers as **sets of addresses**, so it refused any host that did not answer with
+byte-identical lists. `graph.facebook.com` hands out a rotating subset of its own edge addresses.
+Both answers were public, so neither could reach anything the policy does not already allow — but
+a legitimate Instagram publish was refused for no security gain. The guard now compares the
+**class** of the two answers, and a public → private or public → loopback move is still refused.
+The unit suite also no longer resolves real hostnames, which is what made the failure look like a
+flake in the first place.
 
 ---
 

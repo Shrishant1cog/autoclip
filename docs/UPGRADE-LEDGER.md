@@ -22,6 +22,7 @@ milestone `In progress` and is reported as such.
 | M4b — Instagram | **Complete** | 14/15 gate items done; 126 tests across the M4b area passing; the live Instagram path is **Unverified (external)** — no authorised Meta credentials were supplied |
 | M5 — Audit and release | **Complete** | 10/10 gate items done; **1,300 tests** passing; the application exercised through its real UI on real media; **3 product defects and 1 CI defect found and fixed**; the release run green on all six CI jobs; the live external paths remain **Unverified (external)** |
 | **M5.1 — Ducking matrix** (post-release increment, 2026-11-21) | **Complete** | The last closeable PARTIAL matrix row (**MUS-31**) closed as **eight real renders**; **1,315 tests** passing; **a fourth product defect found and fixed** (an empty speech timeline was indistinguishable from no timeline); the matrix is now **110 Implemented · 9 Partial · 1 Blocked · 9 N/A**; the M5 verdict is unchanged and v0.1.0 is still gated on K1 |
+| **M5.2 — Real ingest** (post-release increment, 2026-11-21) | **Complete** | The application pointed at a **real four-hour YouTube live recording** and run through the **real ingest path** — twice, at 360p and at the product's default 1080p; the pipeline exercised on real segments cut from that same file, with a real local model; **1,330 tests** passing; **four more product defects found and fixed** (the configured format was dead, the download was never logged, the crop-safety measurement lied, and a load-balanced host was mistaken for a DNS rebinding); the matrix is **unchanged** at 110 · 9 · 1 · 9; the M5 verdict is unchanged and v0.1.0 is still gated on K1 |
 
 ---
 
@@ -557,6 +558,82 @@ exactly as M5 recorded them. M5.1 closed one row and changed nothing else.
 
 ---
 
+## M5.2 — The real four-hour recording
+
+**Status: Complete.** A second post-release increment, dated **2026-11-21**, on the same branch. The
+branch is untagged and **v0.1.0 is still gated on K1**, the reframe golden set, so this did not
+change the M5 verdict — it changed the **evidence base** and the **defect count**.
+
+**What it did.** Every earlier milestone tested AutoClip against **doubles**: a fake provider, a
+synthetic clip, a stubbed filesystem. M5.2 pointed the application at a **real four-hour YouTube
+live recording** and ran it through the **real ingest path**.
+
+**The source.** `https://www.youtube.com/live/l-oEKLu4Y3w` — *"BACK AT IT AGAIN IN THE VICE CITY!!!
+| NO PROMOTIONS"*, channel **CarryisLive**, uploaded **2026-11-19**, **4:00:10** long,
+**4,032,307 views**, public, no age limit, a **Hindi** audio track with ASR captions, and a best
+stream of **2560×1440p60** AV01 + Opus — **12.54 GiB**.
+
+> **Rights.** This is a third-party creator's stream with no rights confirmation. It was used for
+> **technical acceptance only**. Nothing produced from it was published anywhere, and it is not a
+> release artefact.
+
+**What ran.**
+
+| Run | What | Result |
+|---|---|---|
+| **Ingest 1** | The full 4:00:10 file at 360p | **684,877,097 B**, 640×360, 30 fps, 14410.118 s |
+| **Ingest 2** | The full 4:00:10 file at the **product's default** | Format **399+140** (1920×1080@60, `av01.0.09M.08` + `mp4a.40.2` @ 129.471 kbps), **5,529,989,793 B**, 14410.048 s |
+| **Ingest 3** | The full file at 360p muxed, after defect 6 was fixed | Format 18, **844,513,587 B**, and **exactly one** transfer-log row: `operation=media_download`, `provider=yt-dlp`, `destination_class=public`, `outcome=ok`, `duration_ms=175578` |
+| **Pipeline** | A **real 180 s segment cut from that same downloaded file**, through every stage, with a **real local model** | **done** in **1,136 s**: prepare 10 s → transcribe 432 s (284 words, `hi`) → highlights 342 s → creative 242 s → reframe 20 s → export 90 s |
+| **Output** | Two real clips and two real exports | `the-biggest-challenge-in-making-money_9x16.mp4` (h264 1080×1920, 30 fps, AAC stereo 48 kHz, 26.97 s) and `why-nobody-tells-you-this-about-scaling_9x16.mp4` (24.97 s), each with a `.srt` sidecar in Devanagari |
+
+**The model was a real Ollama** (`llama3.1:8b` at `127.0.0.1:11434`), so no hosted credential was
+spent, and transcription was pinned to `engine=local`, whisper `small`, `compute_type=int8`,
+language auto-detected as `hi`.
+
+**The four-hour pipeline was not run, and the reason is measured.** Transcription took **432 s per
+180 s** on this four-core laptop, so the full recording would have needed roughly **16 hours** of
+transcription alone, before the highlight stage's own ~7.5 hours. The **ingest** of the complete
+file was exercised twice; the **pipeline** was exercised on real segments cut from that same
+downloaded file. Recorded as **NOT APPLICABLE** with the arithmetic attached, not quietly passed.
+
+### The four defects it found
+
+| # | Defect | Fix | Guard |
+|---|---|---|---|
+| 5 | `ingest.ytdlp_format` was **dead** — the download hard-coded `bestvideo*+bestaudio/best`, so a four-hour stream came down at 1440p60 — **12.54 GiB** — instead of the 1080p the configuration's own comment promises | `_download_command()` builds the command in one place and the selector comes from the settings. After the fix: **399+140 — 1920×1080@60** | 3 tests in `tests/test_ingest.py`; **2 fail without the fix** |
+| 6 | The yt-dlp download was authorised but **never written to the transfer log**, so `EGRESS-INVENTORY.md` E11's claim that it is *logged* was false, and the largest thing AutoClip ever sends left the machine with nothing in the user's own log | `gateway.record(...)` on refusal, on a failed launch, on a failed download and on success, with the duration | 1 test in `tests/test_ingest.py`; **fails without the fix** (`assert [] == [('ok', ...)]`) |
+| 7 | The crop-safety diagnostic compared a **per-clip** crop against the **whole-source webcam region** and called it *"the detected face"*, so it reported *"the crop cuts through the detected face"* on a clip that tracks the face perfectly, and on a clip with **no face in it at all** | `CropPath.faces` carries `FaceRect(t, x, y, width, height)` in source pixels and clip-relative time; `_crop_safety` matches each keyframe to the face nearest it **in time**; `diagnose_clip` loses the `face_rect` parameter **entirely**, so the mistake cannot be made again by accident | 5 tests in `tests/test_diagnostics.py` + 2 in `tests/test_reframe.py`; the time-matching one **fails without the fix** |
+| 8 | The URL policy refused **any** host whose two DNS answers were not the same set, so `graph.facebook.com` — a load-balanced host — was treated as a DNS-rebinding attack and the publish was refused | The rebinding guard compares the **class** of the two answers, not the exact set: a move **inwards** is still refused, a move between two public addresses is allowed. The unit suite also no longer resolves real hostnames | 2 tests in `tests/test_url_policy.py` **fail without the fix**; 3 assert the protection still holds |
+
+### Decisions taken in M5.2
+
+| Decision | Why | Where recorded |
+|---|---|---|
+| **M5.2 is a post-release increment, not a change of verdict** | The branch is untagged and v0.1.0 is gated on K1, so the M5 documents are live branch documents and may be updated in place — but every change is dated and recorded here | `docs/UPGRADE-LEDGER.md`, `docs/upgrade-audit.md` §13 |
+| **The ingest path was exercised on the complete file; the pipeline was exercised on real segments cut from it** | Transcription measured at ~432 s per 180 s, so the complete recording would have taken ~16 h on this machine. Splitting the claim this way keeps both claims true, and the arithmetic is attached rather than asserted | `docs/M5-APPLICATION-TESTING.md` AT-E-11, `docs/FINAL_UPGRADE_REPORT.md` §4.4 |
+| **The crop-safety defect was fixed by removing the parameter, not by fixing the comparison** | A face rectangle measured elsewhere says nothing about a crop. Removing `face_rect` from `diagnose_clip` closes the **class** of the mistake, the same way the autouse keyring fixture closed the class at M5 | `backend/autoclip/pipeline/diagnostics.py`, `docs/M5-APPLICATION-TESTING.md` §M5.2 |
+| **The rebinding guard compares classes, not addresses** | Both answers were public, so neither could reach anything the policy does not already allow. The refusal bought no security and broke a legitimate publish to **Meta's own Graph API host**. A move **inwards** — public → private, loopback, or forbidden — is still refused | `backend/autoclip/security/urlpolicy.py`, `docs/M5-SECURITY-REVIEW.md` §S2 |
+| **The zero-clip re-run was recorded as a model-quality observation, not a defect** | The two runs transcribed differently (**284** against **243** words) and the model's candidates all failed the 20–90 s duration refinement. The application's own Review screen explains the outcome; the pipeline did what it says it does | `docs/M5-APPLICATION-TESTING.md` §M5.2 |
+| **Nothing derived from the source was published** | The source is a third-party creator's stream. This increment is technical acceptance only | `docs/M5-APPLICATION-TESTING.md`, `docs/FINAL_UPGRADE_REPORT.md` §4.4 |
+
+### Residuals carried out of M5.2
+
+Unchanged from M5 and M5.1 — **the live external paths, the reframe golden set, the missing original
+requirements, the re-export's missing webcam composition, the un-exercised multi-speaker path, the
+absent local Docker, the missing dependency audit, and mypy's 10 errors** all carry forward
+exactly as before. M5.2 closed no matrix row and opened none.
+
+**Three new residuals, stated rather than buried:**
+
+| # | Residual |
+|---|---|
+| R1 | **The complete four-hour pipeline was not run** — only its ingest, and then the pipeline on real segments. The claim is about the ingest path and about the pipeline on segments, **not** about the complete recording end to end. |
+| R2 | **The pipeline was exercised with local models only** — a local Ollama model and local whisper. The hosted-LLM paths remain unverified for the reason they always were: no authorised credential was supplied. |
+| R3 | **yt-dlp's own secondary requests remain a residual** — the manifest, the CDN and the page assets are fetched by yt-dlp, not by AutoClip, so AutoClip cannot re-classify each hop. This is **GOV-17** and it is still **Partial**, needing a Lane B controlled test. |
+
+---
+
 ## Change log
 
 | Date | Commit(s) | Change |
@@ -614,4 +691,12 @@ exactly as M5 recorded them. M5.1 closed one row and changed nothing else.
 | 2026-11-21 | `822143e` | docs — four runs were cancelled, not three; the run table is framed as a record that grows |
 | 2026-11-21 | `294c274` | M5.1 — the ducking answer is tri-state: no timeline, a timeline that found no speech in this clip, or the speech itself. `ducking_intervals()` produces the right one of the three, and the API and the pipeline both call it. Guarded by the eight-case ducking matrix (`tests/test_ducking_matrix.py`), whose **no-speech** case fails without the fix |
 | 2026-11-21 | `b59605b` | M5.1 — the documentation: the matrix recount (110 Implemented · 9 Partial), the ledger's M5.1 section, the audit's fourth defect and the new gate column, the regression and performance reports, the security review and the final report |
+| 2026-11-21 | `d8db47f` | docs — the M5.1 tree is green on all six CI jobs |
+| 2026-11-21 | `066bbf6` | M5.2 — the configured yt-dlp format is the one that is used: the download command is built in one place, `_download_command`, and the selector comes from the settings. A real four-hour ingest had produced **12.54 GiB at 1440p60** where the configuration said 1080p. Guarded by 3 tests; **2 fail without the fix** |
+| 2026-11-21 | `5574a8d` | M5.2 — the download is written to the transfer log: recorded on refusal, on a failed launch, on a failed download and on success, with the duration. `EGRESS-INVENTORY.md` E11's claim that it is *logged* was false, and a **5.52 GB** download had left **0 rows** in the user's own log. Guarded by 1 test that fails without the fix |
+| 2026-11-21 | CI run 28 | The `066bbf6` tree is **green on all six jobs** |
+| 2026-11-21 | `78f1781` | M5.2 — the crop-safety check measures the clip's own face: the crop plan carries the faces it was built around, in source pixels and in the clip's own time base, and the check matches each keyframe to the face nearest it **in time**. `diagnose_clip` loses the `face_rect` parameter **entirely**. The old rule reported failures on two real clips — one tracking the face perfectly, one with no face at all. Guarded by 7 tests |
+| 2026-11-21 | `a907805` | M5.2 — a load-balanced public host is not a DNS rebinding: the guard compares the **class** of the two DNS answers, not the exact set of addresses, so `graph.facebook.com` is no longer refused while a move **inwards** still is. The unit suite also no longer resolves real hostnames. Found by the full-suite gate as a flaky failure; **2 tests fail without the fix** and 3 assert the protection still holds |
+| 2026-11-21 | CI run 29 | The whole M5.2 code tree (`a907805`) is **green on all six jobs** |
+| 2026-11-21 | M5.2 docs | The M5.2 evidence: the ledger's M5.2 section, the audit's gate table and its eight-defect table, the regression and performance reports, the security review's re-verified S2, the matrix's GOV-14 evidence, the application-testing record and the final report's §4.4 |
 | 2026-11-21 | CI run 26 | The M5.1 tree is **green on all six jobs** — the four backend legs (Ubuntu 3.11, Ubuntu 3.12, macOS 3.12, Windows 3.12), the frontend build, and the Docker image with its health smoke test |

@@ -153,14 +153,15 @@ the machine.
 
 | Field | Value |
 |---|---|
-| Component | `pipeline/ingest.py:download` (`command.append(source.url)` at `:180`) |
+| Component | `pipeline/ingest.py:download_youtube` (the command is built by `_download_command`, which appends the URL at `:322`) |
 | Destination | Whatever the user-supplied URL points at, **plus every host yt-dlp itself chooses** (manifest, CDN, page assets) — **public, unclassified** |
 | Data | An HTTP GET of the page and media; the response is the video |
 | Trigger | A YouTube source is processed |
-| Consent | The user supplied the URL, but the *set of destinations* is not known in advance. Classified and logged (M0.5); a private destination is refused outright. |
+| Consent | The user supplied the URL, but the *set of destinations* is not known in advance. Classified and logged; a private destination is refused outright. **M5.2 correction:** this row claimed the download was *logged* from M0.5 onwards, and that claim was **false** — the transfer was authorised through the gateway and then dropped without a record. It is now recorded on refusal, on a failed launch, on a failed download and on success, with the duration. |
 | Validation | The URL is classified through the gateway before yt-dlp runs: scheme, every resolved address (IPv4 and IPv6), and the class. A private or link-local destination is refused. **M0.5 residual:** yt-dlp's own secondary requests (manifest, CDN, page assets) are made by yt-dlp and cannot be re-classified hop by hop; proxies are disabled (`--proxy ""`) and the boundary classification is enforced. A Lane B controlled test is still required before the secondary-request surface can be called verified. |
 | Proxy | yt-dlp's proxy is disabled explicitly (`yt_dlp_hardening_args()` → `--proxy ""`), so `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` cannot redirect the fetch. |
 | Failure | Classified by yt-dlp stderr patterns; partial files are kept between attempts |
+| **Verified at M5.2** | On a real **844 MB** download of a four-hour YouTube live recording, the log holds **exactly one** row: `operation=media_download`, `provider=yt-dlp`, `destination=https://www.youtube.com/live/l-oEKLu4Y3w` (the query string stripped), `destination_class=public`, `outcome=ok`, `duration_ms=175578`, `occurred_at=2026-11-21T10:37:39Z`. The **5.52 GB** download that exposed the defect had left **0 rows**. |
 
 ### E12 — MediaPipe model download
 

@@ -1,6 +1,9 @@
 # AutoClip — Security Review (M5)
 
 **Reviewed:** 2026-11-20, against `feature/upgrade-u0-u10` at `4cf309b`.
+**Re-verified at M5.1:** 2026-11-21 — §S2 and §S7 re-checked against the M5.1 tree.
+**Re-verified at M5.2:** 2026-11-21 — the rebinding guard itself was corrected, and a new finding
+was raised and closed. See **§3a** and the S2 amendment.
 **Reviewer:** the upgrade itself (this is the M5 refresh of `docs/SECURITY-AUDIT.md`, which was
 the M0 audit).
 **Scope:** every external transfer, the URL-fetch path, credential handling, local API exposure,
@@ -18,16 +21,22 @@ checked.
 
 ## 1. Summary
 
-| | M0 | M5 |
-|---|---|---|
-| Findings raised | 7 (2 high, 3 medium, 2 low) | 7 |
-| Closed | 0 | **7** — 6 with no residual, 1 with a documented residual |
-| Open at M5 | 7 | **0** |
-| New findings raised at M5 | — | **2** (both closed in the same milestone) |
-| Residual risks documented, not claimed | 1 (yt-dlp secondary requests) | 4 |
+| | M0 | M5 | M5.2 |
+|---|---|---|---|
+| Findings raised | 7 (2 high, 3 medium, 2 low) | 7 | 7 |
+| Closed | 0 | **7** — 6 with no residual, 1 with a documented residual | **7** |
+| Open at M5 | 7 | **0** | **0** |
+| New findings raised | — | **2** (both closed in the same milestone) | **3** (all closed; M5.2-01 in §3a) |
+| Residual risks documented, not claimed | 1 (yt-dlp secondary requests) | 4 | 4 |
 
 No finding is closed on the strength of a comment, a docstring or a plan. Each is closed on a
 **test** or on a **source read** that names the code.
+
+**One security control was itself defective at M5.2**, and it is recorded as **M5.2-01** in §3a:
+the DNS-rebinding guard compared the two DNS answers as byte-identical **sets of addresses**, so it
+refused a legitimate load-balanced host — **Meta's own Graph API host**. Both answers were public,
+so the refusal bought no security and broke the feature. The guard now compares the **class** of
+the two answers, and a public → private or public → loopback move is still refused.
 
 ---
 
@@ -57,18 +66,41 @@ retrying against another external provider.
 ### S2 — HIGH — Unvalidated URL fetch; no post-redirect or DNS re-validation
 
 **Status after M0.5: CLOSED at the boundary AutoClip controls; one residual documented.
-Re-verified at M5, and the residual grew one named gap: NAT64.**
+Re-verified at M5, and the residual grew one named gap: NAT64. Re-verified again at M5.2, after
+the rebinding guard itself was corrected — see the amendment below.**
 
 `backend/autoclip/security/urlpolicy.py` classifies a URL's scheme and every resolved address
 (IPv4 and IPv6, including IPv4-mapped and CGNAT forms), refuses loopback/link-local/private targets
 per the policy, re-classifies every redirect hop, refuses scheme downgrades, bounds the redirect
-chain, and resolves twice — the answer must match immediately before the connection, which is the
-rebinding guard.
+chain, and resolves twice — the answer must not move *inwards* immediately before the connection,
+which is the rebinding guard.
 
 **M5 re-verification — the NAT64 finding (M5-01, below).** M4b found that `api.elevenlabs.io`
 resolves to `64:ff9b::2208:b8bf` on an IPv6-only network, and that Python's `ipaddress` marks the
 whole `64:ff9b::/32` prefix as reserved. The policy was refusing every public provider. The fix
 extracts the embedded IPv4 per RFC 6052 (and RFC 8215's local-use prefix) and classifies *that*.
+
+**M5.2 re-verification — the rebinding guard was too strict, and that was a defect.** The guard
+compared the two DNS answers as **sets of addresses**, so it refused any host that did not answer
+with byte-identical lists. `graph.facebook.com` — Meta's own Graph API host — answers with a
+rotating subset of its own edge addresses, so a legitimate publish was refused with *"DNS for
+graph.facebook.com changed between lookups … refusing a possible rebinding"*. **Both answers were
+public**, so neither could reach anything the policy does not already allow; the refusal bought no
+security and broke the feature.
+
+The guard now compares the **class** of the two answers, not the exact addresses:
+
+| First answer | Second answer | Verdict | Why |
+|---|---|---|---|
+| public | public (a different set) | **allowed** | A load balancer, not an attack. The request can only reach a public address |
+| public | private | **refused** | The rebinding attack. The connection could land inside the network the user did not name |
+| public | loopback | **refused** | The same, one level further in |
+| public | link-local / reserved | **refused** | An address that may not be contacted at all |
+| private | public | **allowed** | The *first* answer classifies the destination as private, so consent is required anyway — the request cannot become more privileged than the check allowed |
+
+**The protection was not weakened.** A public → private or public → loopback move is still refused,
+and the refusal is still a refusal rather than a warning. The fix removes only the case where the
+answer stayed public and merely changed which public address it named.
 
 **Residual (documented, not claimed):** yt-dlp's own secondary requests — the manifest, the CDN,
 the page assets — are made by yt-dlp, not by AutoClip, so AutoClip cannot re-classify each hop. The
@@ -76,7 +108,9 @@ controls applied are yt-dlp's own: proxies are disabled (`--proxy ""`), retries 
 URL is classified up front. A Lane B controlled test against a redirecting host is still required
 before the secondary-request surface can be called verified.
 
-**Evidence:** `tests/test_url_policy.py` (34 cases, all passing, zero `xfail` markers).
+**Evidence:** `tests/test_url_policy.py` (39 cases, all passing, zero `xfail` markers), including
+the five added at M5.2 — two that fail without the rebinding-guard fix and three that assert the
+protection still holds.
 
 ### S3 — MEDIUM — FFmpeg ran without a protocol whitelist
 
@@ -232,6 +266,51 @@ depended on it could not hold. The fix was reproduced on a Linux environment bef
 
 ---
 
+## 3a. Findings raised at M5.2
+
+### M5.2-01 — LOW — The rebinding guard was too strict, and broke a legitimate publish
+
+**Where:** `backend/autoclip/security/urlpolicy.py:resolve`.
+
+**What happened.** The guard resolved the host **twice** — correctly, to defeat DNS rebinding — and
+then required the two answers to be **byte-identical sets of addresses**. `graph.facebook.com` —
+Meta's own Graph API host — answers with a **rotating subset of its own edge addresses**, so a
+legitimate Instagram publish was refused with *"DNS for graph.facebook.com changed between lookups …
+refusing a possible rebinding"*.
+
+**Why it is not simply "allow any change".** The set comparison was the whole point of the
+double-resolution: a host that answers with a public address and then a private one is the
+rebinding attack, and the connection would land inside the network the user did not name. Loosening
+the comparison without replacing it would have removed the protection.
+
+**The fix replaces the comparison, not the check.** The guard now compares the **class** of the two
+answers:
+
+| First answer | Second answer | Verdict |
+|---|---|---|
+| public | public (a different set) | **allowed** — a load balancer; the request can only reach a public address |
+| public | private | **refused** — the rebinding attack |
+| public | loopback | **refused** |
+| public | link-local / reserved | **refused** — an address that may not be contacted at all |
+| private | public | **allowed** — the first answer classifies the destination as private, so consent is required anyway; the request cannot become more privileged than the check allowed |
+
+**The protection was not weakened.** A public → private or public → loopback move is still refused,
+and the refusal is still a refusal rather than a warning. The fix removes only the case where the
+answer stayed public and merely changed **which** public address it named.
+
+**How it was found.** The **full-suite gate**, as a **flaky failure**: **1,324 passed, 1 failed**,
+in a test that passes when run alone. The cause was two things at once — the product defect above,
+and a test that stubbed `httpx` but not the resolver, so a unit test was reaching the **real DNS**.
+A unit test must not depend on the internet, or on which addresses a third party happens to be
+serving.
+
+**Status: CLOSED** (commit `a907805`). **Evidence:** `tests/test_url_policy.py` — 39 cases, zero
+`xfail` markers. Two of the new tests **fail without the fix**; three assert that the protection
+still holds (public → private, public → loopback, public → forbidden); one asserts that the unit
+suite resolves no real hostname.
+
+---
+
 ## 4. The new subsystems, reviewed
 
 ### 4.1 The music library (M1)
@@ -351,6 +430,17 @@ R2–R5 are the **same** limitation in four places: the code path is exercised a
 the live path is recorded as Unverified (external). That is recorded rather than glossed over, and
 the release assessment in `docs/FINAL_UPGRADE_REPORT.md` carries it.
 
+**M5.2 did not close any residual, and did not add one.** The four live paths remain unverified for
+the same reason — no authorised credential was supplied. **R1** is unchanged: the yt-dlp secondary
+requests are still made by yt-dlp, and a Lane B controlled test is still what would close it.
+
+**What M5.2 changed on this page is the *evidence*, not the residuals.** The yt-dlp download — the
+largest transfer AutoClip makes — was previously authorised and then dropped without a record, so
+`docs/EGRESS-INVENTORY.md` E11's claim that it was *logged* was **false**. It is now true, and it
+was verified on a real 844 MB download: **exactly one** log row, `outcome=ok`,
+`duration_ms=175578`. The transfer log is the user's own record of what left the machine, and the
+largest transfer was missing from it.
+
 ---
 
 ## 7. What was **not** checked
@@ -372,6 +462,15 @@ does not.
 - **The Docker image itself.** Docker is not installed on this machine, so the image was not built
   or scanned locally. The CI `docker` job builds it and smoke-tests `GET /api/health` on every
   push; the result is recorded in `docs/M5-REGRESSION-REPORT.md`.
+- **A live redirecting host.** The rebinding guard was corrected at M5.2 (M5.2-01), but the
+  corrected guard has only been exercised against **injected resolvers**. A Lane B controlled test
+  against a real host that redirects — and against a host that genuinely rebinds — is still what
+  would settle the behaviour end to end. The automated evidence says the guard's *rule* is right;
+  it does not say what a real hostile resolver does over the wire.
+- **The unit suite's own hermeticity, beyond DNS.** The M5.2 change made the suite resolve **no**
+  real hostname, which closed the specific flake that hid M5.2-01. It did **not** make the suite
+  hermetic against every network path: an outbound HTTP call made by a test would still reach the
+  internet. A blanket outbound-block would be the stronger guarantee and was not built.
 
 ---
 
@@ -380,7 +479,8 @@ does not.
 **No open high or medium findings. No open low findings.**
 
 The seven M0 findings are closed on evidence rather than on intent, with one documented residual
-(yt-dlp's secondary requests). Two findings were raised and closed inside M5. The four live-integration
-paths remain **Unverified (external)** because the credentials for them were never supplied — that
-is a statement about the environment, not about the code, and it is carried into the release
-assessment rather than being written down as "done".
+(yt-dlp's secondary requests). Two findings were raised and closed inside M5, and a third
+(M5.2-01 — the rebinding guard was too strict) was raised and closed at M5.2. The four
+live-integration paths remain **Unverified (external)** because the credentials for them were never
+supplied — that is a statement about the environment, not about the code, and it is carried into
+the release assessment rather than being written down as "done".

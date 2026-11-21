@@ -18,7 +18,7 @@ Node 24.21.0.
 | **Encoder output** | **Byte-identical.** The 5 s 1080×1920 reference encode is 3,691,703 bytes at both M0 and M5 — the same number, to the byte. The encoder did not change. |
 | **Migration cost** | +13 migrations, **+0.5%** on a fresh migrate (239.47 ms → 240.61 ms). |
 | **Cold import** | **Slower.** 93 → 132 `autoclip` modules; the controlled same-session comparison is 1,462 ms → 2,400 ms median. This is a one-time server-start cost and it is explained in §3. |
-| **Suite wall clock** | 193.77 s for 672 tests at M0 → 270.59 s for 1,263 tests at M5. Per test, that is **0.288 s → 0.214 s** — the suite got *faster per test* while nearly doubling in size. |
+| **Suite wall clock** | 193.77 s for 672 tests at M0 → 270.59 s for 1,263 tests at M5 → **499.52 s for 1,330 tests at M5.2**. Per test, the M5 unit selection went **0.288 s → 0.214 s** — the suite got *faster per test* while nearly doubling in size. **No speed-up is claimed at M5.2**: the whole-suite number moved by machine load, not by code. |
 
 **Nothing in this report is a claim of improvement that was not measured.** Where a number moved the
 wrong way, it is reported the wrong way.
@@ -198,3 +198,77 @@ repeatable. The real-media evidence is the Lane C run, and it is recorded in
 
 That run is a **technical acceptance** run. The source is a third-party recording with no rights
 confirmation, so nothing produced from it is published anywhere.
+
+---
+
+## 7. The M5.2 amendment — real media, measured
+
+**2026-11-21.** M5.2 pointed the application at a **real four-hour YouTube live recording** and ran
+it through the **real ingest path**. That produced the first real-media timings in this project,
+and two of them change what is known.
+
+### What was measured
+
+| Measurement | Value | Note |
+|---|---|---|
+| **Download, 360p** | **684,877,097 B in ~1 min** | ≈ **3.5 MB/s** on this machine's connection |
+| **Download, 360p muxed** | **844,513,587 B in 175.578 s** | The duration recorded in the transfer log — ≈ **4.8 MB/s** |
+| **Download, 1080p (the product default)** | **5,529,989,793 B** (5.52 GB) | The whole four-hour file. **This is the number that exposed defect 5** — the configured 1080p cap was dead, and the download was 12.54 GiB at 1440p60 before the fix |
+| **Transcription, 180 s of real Hindi speech** | **432 s** | whisper `small`, `compute_type=int8`, CPU only. ≈ **2.4× real time** |
+| **Highlight detection, 180 s** | **342 s** | Real local model (`llama3.1:8b` over Ollama) |
+| **Creative planning** | **242 s** | The same model, with the schema repair retry |
+| **Reframe** | **20 s** | MediaPipe face tracking over the segment |
+| **Export** | **90 s** | Two real 1080×1920 exports, with burnt captions |
+| **The whole segment pipeline** | **1,136 s** (19 min) | For 180 s of source. **≈ 6.3× real time** |
+
+### The number that decides what was and was not run
+
+**Transcription measured at ~432 s per 180 s of speech.** The full four-hour recording is
+**14,410 s**, so the transcription alone would have taken roughly **16 hours** on this four-core
+laptop — before the highlight stage, which costs **342 s per 180 s** and would have added about
+**7.5 hours** of its own.
+
+That is why the **ingest path** was exercised on the **complete** file (twice) and the **pipeline**
+was exercised on **real segments cut from that same downloaded file**. It is a measured constraint,
+not a shortcut, and it is recorded as **NOT APPLICABLE** in the evidence table with the arithmetic
+attached.
+
+### What it changes in this report
+
+- **P7 is now partly answered.** Transcription time on real media was **not** measured against a
+  pre-upgrade baseline — that half still stands, because there is no M0 counterpart to compare it
+  with. But the absolute figure is now known: **432 s per 180 s** on CPU, and **1,136 s** for a
+  180 s segment end to end.
+- **P6 is now partly answered.** yt-dlp's **download** time was measured twice (**175.578 s** for
+  844 MB, ≈ 3.5–4.8 MB/s). Its *import* time — the metadata and manifest fetches — was not
+  measured separately, so P6 stays open.
+- **P4 is still open.** Peak memory, CPU and GPU during a real render were not sampled. The M5.2
+  run was long and real, but it was not instrumented for resources.
+
+### The suite, at M5.2
+
+| | M0 | M5 | M5.1 | M5.2 |
+|---|---|---|---|---|
+| Mandatory suite (CI selection 1) | 672 passed in 193.77 s | **1,263 passed, 61 deselected in 270.59 s** | **1,270 passed, 69 deselected in 249.81 s** | **1,285 passed, 69 deselected** |
+| Render suite (CI selection 2) | (not separated) | **37 passed, 1,287 deselected in 232.47 s** | **45 passed, 1,294 deselected in 299.24 s** | **45 passed, 1,309 deselected** |
+| Whole suite, one invocation | 672 passed in 193.77 s | **1,300 passed in 709.11 s** | **1,315 passed in 534.88 s** | **1,330 passed in 499.52 s** |
+
+**The M5.2 whole-suite number is the fastest of the three** — **499.52 s** for 1,330 tests — but
+that is **machine load, not a speed-up**: the run was made with the two application instances
+still running, and the wall clock of a shared four-core machine moves by tens of seconds for
+reasons that have nothing to do with the code. The honest reading is **unchanged per test**, and
+no claim of improvement is made.
+
+### The Linux leg, re-run at M5.2
+
+The Linux leg was reproduced from the **exact committed tree** (`git archive` of `a907805`), on
+**ffmpeg 7.0.2** — the version that exposed defect 3 — with the `ass` filter confirmed present
+before the renders ran:
+
+| Selection | Result |
+|---|---|
+| Unit selection, Linux | **1,285 passed**, 69 deselected, 48.05 s |
+| ffmpeg-sensitive selection, Linux | **212 passed**, 193.04 s — the ducking matrix's real renders included |
+
+The Windows numbers for the same selections are identical. **A fix that only renders on the
+developer's machine is not a fix**, and this is the leg that proves the opposite.

@@ -73,6 +73,12 @@ audio track, generated locally by `scripts/make_e2e_media.py`. It is real media 
 AAC, a real transcript, real speech — but it is **not** a creator's footage, and nothing here
 claims it is. Lane C's *owner-operated* material was not supplied for this milestone.
 
+> **Amendment — 2026-11-21 (M5.2).** Both substitutions above were removed in the increment
+> recorded further down this file. That run used a **real model** — a local Ollama serving
+> `llama3.1:8b` — and **real media**: a third-party YouTube live recording downloaded by the
+> application's own ingest path. The substitutions above describe the **M5** run, which is what
+> this file's Journeys A–D record. The M5.2 section says exactly what was real and what was not.
+
 ### The environment
 
 | | |
@@ -612,17 +618,324 @@ PART 12 lists the unusual inputs to try. Each was tried against the real applica
    *Blocked — source missing*.
 4. **The model was a local stand-in.** Every plan, reason and answer that came from it is derived
    from the prompt it was handed. The mechanics were exercised; the intelligence was not.
+   *(M5.2 removed this substitution: its run used a real `llama3.1:8b`.)*
 5. **The media was synthetic.** A generated podcast segment with real speech, real H.264 and real
    AAC — not a creator's footage, and nothing here claims it is.
+   *(M5.2 removed this substitution too: its run used a real third-party recording, for technical
+   acceptance only.)*
 6. **The re-export does not rebuild the webcam composition.** The per-clip `LayoutPath` is not
    persisted, so a re-export reuses the cached crop path. Named in AT-B-05.
+7. **The four-hour YouTube source was not run through the whole pipeline.** Its **ingest** was
+   verified in full, twice; the **pipeline** was verified on segments cut from that same file. The
+   measured reason — roughly 16 hours of transcription on this machine — is in AT-E-11.
+8. **The M5.2 run used a local model, not a hosted one.** A real `llama3.1:8b` over Ollama is a
+   real model, but the hosted-LLM paths are still **UNVERIFIED (external)** for the reason they
+   always were: no authorised credential was supplied.
+9. **The M5.2 pipeline was re-run and produced zero clips.** That is **not** a defect and it is
+   not claimed as a pass either. The two runs transcribed differently (**284** against **243**
+   words) and the model's candidates all failed the **20–90 s** duration refinement. The
+   application's own Review screen explains the outcome: *"No clips came back. The model found
+   nothing self-contained enough to stand alone — which is a real answer for some source
+   material, not necessarily a failure."* It is recorded as a **model-quality observation**.
 
 ---
 
-## The three defects this testing found
+## M5.2 — The real YouTube ingest acceptance (2026-11-21)
 
-All three were found by **running the application or its gates**, not by reading the code, and all
-three are covered by tests that fail without the fix.
+**What this section is.** A post-release increment to this file, dated **2026-11-21**, on the same
+branch. It records a run of the real application against a **real, third-party YouTube live
+recording**, supplied by the owner:
+
+```
+https://www.youtube.com/live/l-oEKLu4Y3w?si=c3S4e115hL1-w5XT
+```
+
+> **Rights.** This is another creator's stream. It is used here for **technical acceptance only**.
+> Nothing produced from it was published anywhere, no account was connected, and no hosted
+> credential was spent. It is not a release artefact.
+
+**Two things are different about this evidence, and both are stated up front.**
+
+1. **The model was real.** A local **Ollama** serving **llama3.1:8b** was already running on
+   `127.0.0.1:11434` on this machine, so the highlight stage ran against a genuine model rather
+   than the stand-in used for M5. `active_provider=ollama` builds Ollama directly — there is no
+   provider chain behind it and no hosted credential was spent.
+2. **The media was real.** A four-hour live VOD, downloaded by the application's own ingest path
+   with a real `yt-dlp`, and the pipeline was then run on real segments cut from that same
+   downloaded file.
+
+**What was still not done.** The four-hour source was **not** run through the whole pipeline end to
+end. Transcription measured at about **7 minutes per 180 s** on this four-core laptop, so the full
+recording would have taken roughly **16 hours** of transcription alone. The **ingest path** was
+therefore exercised on the **whole four-hour file** — twice, at two different formats — and the
+**pipeline** was exercised on **real segments cut from that same downloaded file**. That mirrors
+the M5 lane-C pattern, and it is recorded here as a stated limitation rather than glossed over.
+
+### The source, as the internet described it
+
+Everything in this table was read out of the `source.info.json` sidecar that the application's own
+`yt-dlp` run wrote. Nothing was typed in by hand.
+
+| | |
+|---|---|
+| Video id | `l-oEKLu4Y3w` |
+| Title | BACK AT IT AGAIN IN THE VICE CITY!!!! \| NO PROMOTIONS |
+| Channel | CarryisLive (`UC0IWRLai-BAwci_e9MylNGw`) |
+| Duration | 14,410 s — **4:00:10** |
+| Was live | yes (`was_live=true`, `is_live=false`) |
+| Upload date | 2026-11-19 |
+| Views / likes | 4,032,307 / 55,640 |
+| Availability | public, no age limit |
+| Audio track | Hindi (`hi`), with ASR captions offered by YouTube |
+| Best stream offered | 2560×1440 @ 60 fps, AV01 + Opus — **12.54 GiB** |
+
+### Journey E — YouTube ingest
+
+#### AT-E-01 — Paste the URL
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-E-01 |
+| **User input** | `https://www.youtube.com/live/l-oEKLu4Y3w?si=c3S4e115hL1-w5XT`, pasted into the YouTube source field |
+| **Expected** | The application accepts a YouTube URL, registers it immediately, and returns — the download happens in the background, not in the request |
+| **Actual** | `POST /api/sources/youtube` → **201 Created** in one round trip, with a source row (`7dd2d541363f4deb`) whose title was the URL itself. The download had not started yet |
+| **Result** | **VERIFIED** |
+| **Screenshot** | Not captured — this run was driven through the HTTP API the browser uses, not through the screen. The screens were not the subject of this increment |
+| **Logs** | `INFO: 127.0.0.1:55416 - "POST /api/sources/youtube HTTP/1.1" 201 Created` |
+| **Backend evidence** | `sources` row: `type=youtube`, `url=https://www.youtube.com/live/l-oEKLu4Y3w?si=c3S4e115hL1-w5XT`, `duration_s=0.0`, `width=NULL` — a pending row, exactly as documented |
+| **Export inspection** | n/a — nothing has been rendered yet |
+
+#### AT-E-02 — The download happens on the worker, with a real `yt-dlp`
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-E-02 |
+| **User input** | Start a job on that source |
+| **Expected** | The job's prepare stage runs `yt-dlp` against the URL, writes the complete file under `<root>/raw/<source_id>/`, and the source row is then updated with the real metadata |
+| **Actual** | Job `8ff0b14ca11d4091` went `queued → running/prepare`. A real `yt-dlp` process wrote `raw/7dd2d541363f4deb/source.mp4` (844,513,587 B) and a `source.info.json` sidecar. The source row then carried the real metadata — see AT-E-03. **Before the fix**, the same run wrote **no transfer-log row at all**: the transfer log had **0 rows** after a 5.52 GB download, and `docs/EGRESS-INVENTORY.md` E11 claimed the download was *logged*. That was **defect 6** (AT-E-04) |
+| **Result** | **VERIFIED** (after the fix) |
+| **Screenshot** | Not captured — the background worker has no screen |
+| **Logs** | `Downloading YouTube source 7dd2d541363f4deb with yt-dlp.`; the app's own progress event carried the download percentage |
+| **Backend evidence** | `raw/7dd2d541363f4deb/source.mp4` = 844,513,587 B; `raw/7dd2d541363f4deb/source.info.json` = 132,226 B, naming format `18 - 640x360 (360p)`, `avc1.42001E`, `mp4a.40.2` |
+| **Export inspection** | n/a — the ingest produces a source, not an export |
+
+#### AT-E-03 — The source row carries the real metadata
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-E-03 |
+| **User input** | Wait for the download, then open the source |
+| **Expected** | The source row carries the title, the channel, the duration, the frame size and the frame rate of the media that actually arrived |
+| **Actual** | `title="BACK AT IT AGAIN IN THE VICE CITY!!!! | NO PROMOTIONS"`, `channel="CarryisLive"`, `duration_s=14410.118095`, `width=640`, `height=360`, `fps=30.0`, `filename="source.mp4"` — all read out of the `yt-dlp` sidecar and confirmed against the file with `ffprobe` |
+| **Result** | **VERIFIED** |
+| **Screenshot** | n/a |
+| **Logs** | — |
+| **Backend evidence** | The row above, read back through `GET /api/sources/{id}` and out of `autoclip.db` |
+| **Export inspection** | n/a |
+
+#### AT-E-04 — The download appears in the transfer log — **the defect this increment found**
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-E-04 |
+| **User input** | Open *Settings → External processing* after a download |
+| **Expected** | `docs/EGRESS-INVENTORY.md` E11 says the yt-dlp download is *"classified before the fetch; private refused; proxies disabled; **logged**"*. The transfer log is the only place the user can see what left the machine, and a media download is the largest thing AutoClip ever sends |
+| **Actual** | **Before the fix: the log was empty.** After a 5.52 GB download the `egress_log` table had **0 rows**. The URL was classified and the transfer was authorised — it was simply never written. **After the fix**, the same screen shows one row: `operation=media_download`, `provider=yt-dlp`, `destination=https://www.youtube.com/live/l-oEKLu4Y3w` (query stripped), `destination_class=public`, `outcome=ok`, `duration_ms=175578`, `data_summary="A page and its media are fetched from the URL you supplied."` |
+| **Result** | **VERIFIED** (after the fix) — **FAILED** before it |
+| **Screenshot** | Not captured — the transfer log was read through `GET /api/privacy/transfers` and out of the `egress_log` table |
+| **Logs** | — |
+| **Backend evidence** | `egress_log` row: `occurred_at=2026-11-21T10:37:39Z`, `operation=media_download`, `provider=yt-dlp`, `destination_class=public`, `outcome=ok`, `duration_ms=175578` |
+| **Export inspection** | n/a |
+
+#### AT-E-05 — The default download is capped at 1080p — **the defect this increment found**
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-E-05 |
+| **User input** | Start a job on a fresh YouTube source, with the shipped default settings |
+| **Expected** | `ingest.ytdlp_format` defaults to a selector that caps the video at **1080p**, and the application uses **the configured selector** |
+| **Actual** | **Before the fix**, the setting was dead: `download_youtube` hard-coded `--format bestvideo*+bestaudio/best`, so a four-hour stream came down as **format 400 — 2560×1440 @ 60 fps — 12.54 GiB**, larger than the configuration's own comment claims to allow. **After the fix**, the same default selected **format 399 + 140 — 1920×1080 @ 60 fps, AV01 + mp4a 129 kbps — 5,529,989,793 B (5.15 GiB)**, and the source row recorded `width=1920`, `height=1080`, `fps=60.0` |
+| **Result** | **VERIFIED** (after the fix) — **FAILED** before it |
+| **Screenshot** | n/a |
+| **Logs** | `Downloading YouTube source 9b8011d977a64918 with yt-dlp.` |
+| **Backend evidence** | `sources` row `9b8011d977a64918`: `duration_s=14410.048435`, `width=1920`, `height=1080`, `fps=60.0`, `filename=source.mp4`; `source.info.json` naming `399 - 1920x1080 (1080p60)+140 - audio only (medium)`, `av01.0.09M.08`, `mp4a.40.2`, `abr=129.471`, `asr=44100`, `filesize_approx=5519816173` |
+| **Export inspection** | n/a |
+
+#### AT-E-06 — The pipeline runs on real content from that download
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-E-06 |
+| **User input** | Cut a 180 s segment at 300 s out of the downloaded file and hand it to the application as an ordinary upload |
+| **Expected** | The whole pipeline runs for real — `ffmpeg`, faster-whisper, MediaPipe, libass, and a real model choosing the clips |
+| **Actual** | Job `d24c58fe212444bd` finished **`done`**, progress 1.0, in **1,136 s**: prepare 10 s → **transcribe 432 s** → **highlights 342 s** → **creative 242 s** → **reframe 20 s** → **export 90 s**. The transcript held **284 words**, language **`hi`**, and the text is real Devanagari gaming commentary — *"…आगे मार बस कित ते पैसे दे अगे बाई एक तो पैसे कमाना पड़ेगा…"*. The highlight stage ran against **llama3.1:8b** |
+| **Result** | **VERIFIED** |
+| **Screenshot** | n/a — the run was driven through the API |
+| **Logs** | The stage transitions above, read from the job's own progress events |
+| **Backend evidence** | `sources` row `a8224f79edde4239` (180.0 s, 640×360, 30 fps); `work/d24c58fe212444bd/transcript.json` with `language=hi`, `model=small`, `source=whisper`, 284 words, spanning 0.30 s → 153.43 s |
+| **Export inspection** | Two clips and two exports — see AT-E-07 |
+
+#### AT-E-07 — The two clips, and what was rendered
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-E-07 |
+| **User input** | Open the clip list the job produced |
+| **Expected** | The model proposes clips; the app renders each as a 9:16 export with burned captions |
+| **Actual** | Two clips survived the model's own ranking and the boundary refinement: **`2e78863daafc4c6e`** — *"Why nobody tells you this about scaling"*, 0.30 → 25.19 s, score 85; and **`23bb845bc10d453a`** — *"The biggest challenge in making money"*, 96.20 → 123.05 s, score 78, with the hook **"तो पैसे कमाना पड़ेगा"** — the real line from the transcript. Both were rendered |
+| **Result** | **VERIFIED** |
+| **Screenshot** | A frame extracted from each rendered file (not a UI screenshot): `frame-hindi.png` and `frame-scaling.png`. Both show the **facecam crop following the real streamer**, and **burned Devanagari captions** over the gameplay |
+| **Logs** | — |
+| **Backend evidence** | `clips` rows with the titles, hooks, scores and spans above; `exports/d24c58fe212444bd/` holds the two `.mp4` files and two `.srt` sidecars |
+| **Export inspection** | `the-biggest-challenge-in-making-money_9x16.mp4` — h264, **1080×1920**, **30 fps**, AAC stereo **48 kHz**, **26.97 s**, 9,455,424 B. `why-nobody-tells-you-this-about-scaling_9x16.mp4` — h264, **1080×1920**, 30 fps, AAC stereo 48 kHz, **24.97 s**, 6,681,355 B. The `.srt` sidecar for the Hindi clip carries the Devanagari text with timings that match the burned captions |
+
+#### AT-E-08 — The objective measurements — **the second defect this increment found**
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-E-08 |
+| **User input** | Read the clip diagnostics the application produced for each clip |
+| **Expected** | Each measurement says what it measured and whether it passed. A measurement that cannot be made says so rather than pretending |
+| **Actual** | Eight of the nine measurements passed on both clips: caption timing (31 and 78 words, 0 overlaps), duplicate clips (none), export validity, duration, resolution (1080×1920), frame-rate consistency (30.00 fps, 0.0 % spread), black frames (none), audio present (aac), audio clipping (0.000 %). The ninth, **crop safety, failed on both clips** with *"the crop cuts through the detected face"*. **That was a false positive** — see the defect below |
+| **Result** | **VERIFIED** (after the fix) — **FAILED** before it |
+| **Screenshot** | n/a — the diagnostics were read through `GET /api/clips/{id}/diagnostics` |
+| **Logs** | `Clip 2e78863daafc4c6e: 1 diagnostic(s) to look at — Crop safety: the crop cuts through the detected face` |
+| **Backend evidence** | The `diagnostics` JSON stored on each clip row. **The decisive re-measurement:** the stored report is returned as-is by the endpoint, so it was cleared (`diagnostics_json` set to `'{}'` — the column is `NOT NULL`, and the app treats a falsy value as "not measured yet"), the crop paths were rebuilt with the application's own `build_crop_path` (**1 segment; 123 faces / 0 faces**), and the endpoint was called again on a restarted instance. It returned **`ok=True` for both clips**: `crop_safety ok=True measured="1 segment(s), 123 face(s) tracked"` and `crop_safety ok=True measured="1 segment(s), no face tracked"`. The **same** crop paths under the **old** rule still fail with *"the crop cuts through the detected face"* — the only thing that differed is the rule |
+| **Export inspection** | The rendered frames show the streamer's face **fully inside the crop**, and the second clip's window contains **no face at all** |
+
+**The false positive, and what it actually was.** The crop-safety check was handed the
+**source-level webcam region** — the rectangle the detector found once for the whole recording —
+and called it *"the detected face"*. For this stream that rectangle was **185.7 × 252.82 px** around
+an **83.16 px** face, at **0.221 confidence**, with the detector's own reason recorded as
+*"the region held a face for less than half the clip"*. It is a **webcam candidate region**, not a
+face, and it belongs to the **whole recording** rather than to any clip.
+
+Measured against the real media, the failure was demonstrably wrong in both directions:
+
+* On clip `2e78863daafc4c6e` the crop **tracks the real face** — every one of the **51** face
+  observations MediaPipe made inside the clip lies wholly inside the crop window at its own
+  timestamp — and the crop was still reported as cutting it.
+* On clip `23bb845bc10d453a` there is **no face anywhere in the window** — the crop planner fell
+  back to a `general` strategy for exactly that reason — and it was still reported as cutting one.
+
+The fix makes the crop plan carry the **faces it was built around**, in source pixels and in the
+clip's own time base, and the check compares each crop keyframe against the face nearest it **in
+time**. The whole-source rectangle is no longer accepted as a face at all: `diagnose_clip` has no
+`face_rect` argument to pass one in.
+
+#### AT-E-09 — The model's own judgement
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-E-09 |
+| **User input** | Read the two proposed clips and their reasons |
+| **Expected** | The model judges the hook and the payoff; the application keeps its judgement rather than substituting a rule for it |
+| **Actual** | `llama3.1:8b` proposed two clips. The second — *"The biggest challenge in making money"*, score 78 — is a **genuine** selection, and its hook is the real Hindi line from the transcript. The first — *"Why nobody tells you this about scaling"*, score 85 — is **the example from the application's own prompt file**, copied verbatim: `backend/autoclip/prompts/highlight_v1.txt` uses that exact sentence as its illustration of a good hook. **This is recorded as a model-quality observation, not a code defect.** The application deliberately keeps the model's judgement, does not claim to verify the hook, and never rewrites the title to something it can prove |
+| **Result** | **VERIFIED** — the mechanics ran against a real model, and the model's quality was recorded as it was |
+| **Screenshot** | n/a |
+| **Logs** | `Providers proposed 2 raw candidates.` |
+| **Backend evidence** | The two `clips` rows; `backend/autoclip/prompts/highlight_v1.txt` for the example |
+| **Export inspection** | Both clips rendered, as in AT-E-07 |
+
+#### AT-E-10 — Nothing was published
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-E-10 |
+| **User input** | — |
+| **Expected** | The content is a third-party creator's stream. It is used for technical acceptance only, and nothing is published anywhere |
+| **Actual** | **No publish call was made.** No YouTube or Instagram account was connected, no OAuth flow was started, no credential was supplied, and no hosted service was called. The only network destinations in this run were `youtube.com` and its CDNs (the download) and `127.0.0.1:11434` (the local model). The transfer log holds exactly **one** row: the download |
+| **Result** | **VERIFIED** |
+| **Screenshot** | n/a |
+| **Logs** | — |
+| **Backend evidence** | `egress_log` — one row, `operation=media_download`. `youtube_accounts` and `instagram_accounts` — empty |
+| **Export inspection** | The two exported files stay in the scratch home and are deleted with it |
+
+#### AT-E-11 — The four-hour source, through the whole pipeline
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-E-11 |
+| **User input** | Run the pipeline on the complete 4:00:10 recording |
+| **Expected** | The recording is transcribed and turned into clips end to end |
+| **Actual** | **Not run.** Transcription measured at about **7 minutes per 180 s** on this four-core laptop (Intel i5-8279U, 8 GB RAM, no CUDA), so the full recording would have taken roughly **16 hours** of transcription alone, before the highlight stage, which took **342 s for 180 s** of speech on the same machine. The ingest of the complete file **was** exercised, twice, at two different formats (AT-E-02, AT-E-05) |
+| **Result** | **NOT APPLICABLE** — impractical on this machine, for the measured reason above. It is not claimed as verified |
+| **Screenshot** | n/a |
+| **Logs** | — |
+| **Backend evidence** | The two complete downloads, 653 MiB and 5.15 GiB, and their source rows |
+| **Export inspection** | n/a |
+
+#### AT-E-12 — Unusual inputs on the same path
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-E-12 |
+| **User input** | `https://example.com/video.mp4`, and `https://192.168.1.10/stream.m3u8` |
+| **Expected** | The API refuses what is not a YouTube URL, and the URL policy refuses a private network address |
+| **Actual** | Both were refused at the API boundary with **HTTP 400** and the same clear message: *"That is not a YouTube URL."* The second one never reached the egress gateway, because the YouTube check comes first. The private-address refusal inside the download path is covered by the automated suite (`tests/test_url_policy.py`, `tests/test_egress.py`) and was not re-run here |
+| **Result** | **VERIFIED** |
+| **Screenshot** | n/a |
+| **Logs** | `400 Bad Request` on both |
+| **Backend evidence** | `{"detail":"That is not a YouTube URL.","code":"validation","hint":"The request was not valid.","retryable":false}` |
+| **Export inspection** | n/a |
+
+### The gate that found the last defect — a flaky failure, diagnosed
+
+After the M5.2 work was done, the **full-suite gate** failed once: **1,324 passed, 1 failed** in
+1,234.88 s. The failing test was
+`tests/test_instagram.py::test_a_publish_that_dropped_part_of_the_request_is_reported`, and the
+failure was not in the test's subject at all:
+
+```
+autoclip.instagram.errors.InstagramError: Instagram was refused as a destination:
+DNS for graph.facebook.com changed between lookups
+(['57.144.52.141', '57.144.56.141'] then ['57.144.56.141', '57.144.52.141', '57.144.54.141']);
+refusing a possible rebinding
+```
+
+The test **passed when run alone** (7.25 s), which is the signature of a flake. It was not one.
+
+**What was actually happening.** The Instagram publisher routes every request through the egress
+gateway, and the gateway classifies the destination — which means resolving the hostname. The URL
+policy resolves **twice** on purpose, to defeat DNS rebinding, and the check was *"the two answers
+must be the same set of addresses"*. `graph.facebook.com` is a load-balanced host: the two answers
+above are the **same three Facebook edge addresses**, returned in different subsets. Both answers
+were **public**, so neither could reach anything the policy does not already allow — but the strict
+set comparison called it a rebinding and refused the publish.
+
+**Why this was a product defect and not a test artefact.** The same rule applies to every host
+AutoClip publishes to. `graph.facebook.com` is not a corner case; it is Meta's own Graph API
+host. **A legitimate Instagram publish would have been refused intermittently, for no security
+gain.** The fix compares the **class** of the two answers rather than the exact addresses: an
+answer that moved *inwards* — public on the first lookup, private or loopback on the second — is
+the rebinding attack and is still refused; an answer that moved between two public addresses is a
+load balancer and is allowed.
+
+**And why the test was wrong too.** The test's fake Graph API stubbed `httpx` but not the
+resolver, so a unit test was reaching the real DNS — which is both slow and, as above,
+non-deterministic. The whole unit suite now resolves nothing: an autouse fixture in
+`tests/conftest.py` makes the real resolver unavailable, and the tests that care about resolution
+inject their own.
+
+### What M5.2 adds up to
+
+| | |
+|---|---|
+| **The ingest path** | **VERIFIED** against a real four-hour live VOD, twice, at 360p and at the product's default 1080p cap |
+| **The pipeline** | **VERIFIED** on real segments cut from that same downloaded file, with a real local model, producing two real clips and two real exports |
+| **The transfer log** | **VERIFIED** — the download is now in it, which is what `EGRESS-INVENTORY.md` E11 has always claimed |
+| **The default format cap** | **VERIFIED** — 1080p, not 1440p |
+| **The crop-safety measurement** | **VERIFIED** after the fix; it was reporting failures that did not happen |
+| **The publishing destination policy** | **VERIFIED** after the fix; a load-balanced public host is no longer mistaken for a rebinding, and the rebinding protection still holds |
+| **The four-hour pipeline** | **NOT APPLICABLE** — 16 hours of transcription on this machine |
+| **Any publishing** | **NOT APPLICABLE** — out of scope; technical acceptance only |
+
+---
+
+## The defects this testing found
+
+All of them were found by **running the application or its gates**, not by reading the code, and all
+of them are covered by tests that fail without the fix.
 
 > **Amendment — 2026-11-21 (M5.1).** This application run found **three** product defects, and
 > this section records them as they stood at M5. A **fourth product defect** was found afterwards,
@@ -633,11 +946,29 @@ three are covered by tests that fail without the fix.
 > `docs/upgrade-audit.md` §13.2. **Nothing in this section is invalidated by it**; the three
 > defects below remain exactly as measured here.
 
+> **Amendment — 2026-11-21 (M5.2).** The increment recorded above found **three more**: the
+> configured `yt-dlp` format was dead (**defect 5**), the download was never written to the
+> transfer log (**defect 6**), and the crop-safety measurement reported failures that had not
+> happened (**defect 7**). They are in the table below, and the full evidence for each is in the
+> M5.2 section of this file. The three M5 defects remain exactly as measured here.
+
+> **Amendment — 2026-11-21 (M5.2, second pass).** The full-suite gate then found **one more**,
+> and it is a defect in the product rather than in the test: **defect 8**. The URL policy refused
+> any host whose two DNS answers were not the *same set of addresses*, so a legitimate
+> load-balanced host — `graph.facebook.com` hands out a rotating subset of its own edge addresses
+> — was treated as a DNS-rebinding attack and the publish was refused. It was found as a **flaky
+> failure** in the Instagram publishing tests, it was reproduced, it was diagnosed, and it was
+> fixed. Details in the row below and in `docs/FINAL_UPGRADE_REPORT.md` §4.2.
+
 | # | Defect | Found by | Fix | Guard |
 |---|---|---|---|---|
 | 1 | The API export path ignored the user's music preference and the speech-interval ducking. | Clicking *Export this clip* on a clip with a track chosen. | `api/clips.py` resolves the music through the same three-scope precedence the pipeline uses, and hands the renderer the job's speech timeline sliced to the clip. | 7 regression tests in `tests/test_api.py::TestClipExportHonoursTheUsersMusic`; **6 of the 7 fail without the fix**. |
 | 2 | The timeline-driven ducking filtergraph was malformed — a label in the middle of the bed's chain — and ffmpeg refused the whole graph. | The export failing with ffmpeg's own stderr. | The bed chain carries no output label; the label is added where the bed is used. | 3 real-render tests in `tests/test_export_render.py::TestMusicBedRender`; **2 of the 3 fail without the fix**. |
 | 3 | The sidechain fallback consumed one filter output twice, which ffmpeg 9 accepts and ffmpeg 7 refuses. | The Linux CI reproduction leg, on ffmpeg 7.0.2. | The speech is split with `asplit=2` into a mix copy and a key copy, both on the bed's channel layout. | 3 real-render tests, plus a **structural** check in `tests/test_music.py` that no filter output is consumed twice and no filter follows an output label — version-independent, so it catches the defect on any ffmpeg. |
+| 5 | `ingest.ytdlp_format` was dead: the download hard-coded `bestvideo*+bestaudio/best`, so a four-hour stream came down at 1440p60 — 12.54 GiB — instead of the 1080p the configuration's own comment promises. | The real ingest of a four-hour YouTube live recording (AT-E-05). | The command line is built in one place, `_download_command`, and the format selector comes from the settings. | 3 tests in `tests/test_ingest.py`; **2 of the 3 fail without the fix** (`assert 'height<=1080' in 'bestvideo*+bestaudio/best'`). |
+| 6 | The yt-dlp download was authorised but **never written to the transfer log**, so `EGRESS-INVENTORY.md` E11's claim that it is *logged* was false — and the largest thing AutoClip ever sends left the machine with nothing in the user's own log. | Reading *Settings → External processing* after a 5.52 GB download: **0 rows** (AT-E-04). | The transfer is recorded on refusal, on a failed launch, on a failed download and on success, with the duration. | `tests/test_ingest.py::test_the_download_is_recorded_in_the_transfer_log` — **fails without the fix** (`assert [] == [('ok', ...)]`). |
+| 7 | The crop-safety diagnostic compared a **per-clip** crop against the **whole-source webcam region** and called it *"the detected face"*, so it reported *"the crop cuts through the detected face"* on a clip that tracks the face perfectly, and on a clip with **no face in it at all**. | The application's own diagnostics on two real clips of a real stream (AT-E-08). | The crop plan carries the faces it was built around, in source pixels and in the clip's own time base; the check compares each keyframe against the face nearest it **in time**, and `diagnose_clip` no longer accepts a whole-source rectangle as a face. | 5 tests in `tests/test_diagnostics.py` and 2 in `tests/test_reframe.py`; the time-matching test **fails without the fix**. |
+| 8 | The URL policy refused **any** host whose two DNS answers were not the same set of addresses, so a legitimate load-balanced host was treated as a DNS-rebinding attack and the publish was refused: *"DNS for graph.facebook.com changed between lookups … refusing a possible rebinding"*. | The full-suite gate — a **flaky failure** in `tests/test_instagram.py::test_a_publish_that_dropped_part_of_the_request_is_reported`, which passes alone and fails in a full run. | The rebinding guard now compares the **class** of the two answers, not the exact set of addresses: an answer that moved *inwards* (public → private or loopback) is refused, and an answer that moved between two **public** addresses is a load balancer and is allowed. The unit suite also no longer resolves real hostnames. | 2 tests in `tests/test_url_policy.py` **fail without the fix** (a load-balanced host is resolved and classified as public); 3 more assert that the protection still holds (public → loopback, public → a forbidden address, and the existing public → private case), and 1 asserts the suite never touches the network. |
 
 **Defect 3 is the one that would have shipped.** It rendered on the machine the code was written
 on, and it would have failed on the CI runners and on every user with an ffmpeg older than 9. It

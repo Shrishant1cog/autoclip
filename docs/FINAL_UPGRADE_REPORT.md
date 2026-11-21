@@ -2,6 +2,7 @@
 
 **Milestone:** M5 — independent audit and release
 **Amendment:** M5.1 — the ducking matrix and the empty-timeline defect (2026-11-21)
+**Amendment:** M5.2 — the real four-hour ingest, and four more defects (2026-11-21)
 **Branch:** `feature/upgrade-u0-u10`
 **Base commit:** `bf76811` (`feature/autonomous-platform-v2`)
 **Report date:** 2026-11-21
@@ -13,10 +14,10 @@
 
 **Ship it, with the external integrations marked unverified.**
 
-Every milestone from M0 to M5 is complete, and **M5.1** closed the last closeable partial matrix
-row afterwards. The full automated suite is green — **1,315 tests, zero failures, zero skips,
-zero xfails** — and the application was exercised through its real UI against real media, not only
-through unit tests.
+Every milestone from M0 to M5 is complete, and **M5.1** and **M5.2** closed the last closeable
+partial matrix row and then took the application to real media afterwards. The full automated suite
+is green — **1,330 tests, zero failures, zero skips, zero xfails** — and the application was
+exercised through its real UI against real media, not only through unit tests.
 
 The one thing this report will not do is call the live external integrations verified. They were
 not: no authorised ElevenLabs, hosted-LLM, Google or Meta credential was supplied for any part of
@@ -26,15 +27,16 @@ double stands in for the same code path the real service would take — but "the
 
 | | |
 |---|---|
-| **Milestones complete** | **8 of 8** — M0, M0.5, M1, M2, M3, M4a, M4b, M5 — plus **M5.1**, a post-release increment that is not one of the specification's milestones (see the amendment below) |
+| **Milestones complete** | **8 of 8** — M0, M0.5, M1, M2, M3, M4a, M4b, M5 — plus **M5.1** and **M5.2**, post-release increments that are not one of the specification's milestones (see the amendments below) |
 | **Gate items** | 94 across M0–M4b: **91 done**, **1 blocked on the owner**, **2 unverified (external)**. M5's 10 are in §4. |
 | **Feature coverage** | **129 rows**: 110 Implemented · 9 Partial · 1 Blocked · 9 Not Applicable · **0 Missing** |
-| **Tests** | **1,315 passing** — 1,270 in the unit selection, 45 in the render selection — 0 failing, 0 skipped, 0 xfailed, plus 24 real-media e2e tests run against a real source |
+| **Tests** | **1,330 passing** — 1,285 in the unit selection, 45 in the render selection — 0 failing, 0 skipped, 0 xfailed, plus 24 real-media e2e tests run against a real source |
+| **Real-media evidence** | A **real 4-hour live recording** ingested twice (360p, and the product's default 1080p); the pipeline exercised on real segments cut from that same file, with a real local model, producing two real clips and two real exports |
 | **New runtime dependencies** | **Zero.** The whole upgrade was built on the dependency set the project already had. |
 | **Schema** | v14 → **v27**, 19 → **32 live tables**, thirteen migrations, no user data destroyed |
 | **API surface** | 18 routers / 108 routes → **21 routers / 162 routes** |
 | **CI** | **Every run on this branch since the two failures was green.** Two of the runs failed — both were real defects, diagnosed and fixed rather than explained away — and four were cancelled by a newer push. The release run is green on all six jobs, on all four platforms. See §4.1. |
-| **Defects found by running the application** | **4 product defects** and **1 defect in the CI workflow itself**, all fixed, all guarded by tests that fail without the fix. See §4.2. |
+| **Defects found by running the application** | **8 product defects** and **1 defect in the CI workflow itself**, all fixed, all guarded by tests that fail without the fix. See §4.2. |
 | **Open security findings** | **0** high, **0** medium, **0** low. 4 residual risks documented, 5 things not checked — all in §6. |
 
 ### The three conditions attached to the verdict
@@ -60,6 +62,21 @@ eight-case ducking matrix) with eight real renders — and fixed the defect that
 surfaced. **The verdict does not change.** What changed is the matrix (**110 Implemented · 9
 Partial**, was 109 · 10) and the defect count (**four product defects**, was three). See **§4.3**
 for the matrix and the defect, and `docs/UPGRADE-LEDGER.md` for the dated record.
+
+### Amendment — M5.2, 2026-11-21
+
+M5.2 did the thing the specification asked for and the earlier milestones had only approximated:
+it pointed the application at a **real four-hour YouTube live recording** and ran it through the
+**real ingest path**. It found **four more product defects** — the configured download format was
+dead, the download was never written to the transfer log, the crop-safety measurement reported
+failures that had not happened, and the URL policy mistook a load-balanced host for a DNS-rebinding
+attack.
+
+**The verdict does not change.** The matrix is unchanged at **110 Implemented · 9 Partial · 1
+Blocked · 9 Not Applicable · 0 Missing** — no row was closed and none was opened. What changed is
+the **defect count** (four → **eight**), the **test count** (1,315 → **1,330**), and the **evidence
+base**: the ingest path and the pipeline are now verified against real media, not only against
+doubles. See **§4.4**, and `docs/M5-APPLICATION-TESTING.md` for the per-journey record.
 
 ---
 
@@ -187,7 +204,7 @@ missing or wrong.
 
 | # | Deliverable | Where | State |
 |---|---|---|---|
-| 1 | Complete regression report | `docs/M5-REGRESSION-REPORT.md` | Done — 9 gates, 1,315 tests, the CI run history |
+| 1 | Complete regression report | `docs/M5-REGRESSION-REPORT.md` | Done — 9 gates, 1,330 tests, the CI run history |
 | 2 | Security review | `docs/M5-SECURITY-REVIEW.md` | Done — S1–S7 re-verified, 2 new findings, 4 residuals, 5 things not checked |
 | 3 | Performance report | `docs/M5-PERFORMANCE-REPORT.md` | Done — M0 vs M5, plus a like-for-like control on the base commit |
 | 4 | Feature acceptance matrix | `docs/feature-coverage-matrix.md` | Done — 129 rows, recounted by script |
@@ -204,12 +221,12 @@ The run history is release evidence, not noise. **Every run on this branch since
 was green.** The two that failed were **real defects** — one in the product, one in the CI itself.
 Neither was a flake, and neither was explained away. Four runs were cancelled by a newer push.
 
-**The table below is the run history as it stands at the M5.1 commit.** It is a record, and it
+**The table below is the run history as it stands at the M5.2 commit.** It is a record, and it
 grows; the claim that matters is the one above it, which does not go stale.
 
 | Runs | Result | What happened |
 |---|---|---|
-| 4, 5, 7–13, 15–17, **22**, **23**, **24**, **25**, **26** | **success** | green |
+| 4, 5, 7–13, 15–17, **22**, **23**, **24**, **25**, **26**, **27**, **28**, **29** | **success** | green |
 | 6, 14, 18, **21** | **cancelled** | each superseded by a newer push — the concurrency group cancelled the older run |
 | **19** (`4cf309b`) | **failure** | the Ubuntu legs failed in **Unit tests**; Windows and macOS passed the same tests. A test wrote to the owner's real OS keyring. On Linux there is no keyring backend, so the token was never stored and the assertion could not hold — the test passed on Windows and macOS *because those machines had a real keyring to write to*. Fixed by `94c6d9c`, an **autouse** isolation fixture so no test can reach the owner's credential store |
 | **20** (`94c6d9c`) | **failure** | the Ubuntu py3.12 leg failed at *"Verify ffmpeg can burn subtitles"*. The check piped the ffmpeg filter list into `grep -q`; `grep -q` exits at the match, the producer gets **SIGPIPE**, and GitHub's `set -o pipefail` turns that into a failed step. The runner's ffmpeg 8 has a filter list large enough to fill the pipe, so CI reported that an ffmpeg **with** the `ass` filter did not have one — the job log shows `printf: Broken pipe` and then the `ass` filter listed on the very next line. **Corrected, not removed**: the check now matches with bash's own pattern matching and never pipes, and a build genuinely without the filter still fails it |
@@ -221,14 +238,17 @@ The Ubuntu py3.12 leg, which had failed twice, now passes.
 **Run 26 is the M5.1 tree, and it is green on all six jobs too** — the same six jobs, with the
 eight-case ducking matrix in the render selection.
 
+**Run 29 is the whole M5.2 code tree, and it is green on all six jobs** — the same six jobs, with
+the ingest, the crop-safety and the URL-policy guards in the unit selection.
+
 **Both failures were reproduced before they were fixed.** Run 19 was reproduced on a Linux
 environment with no keyring backend. Run 20 was reproduced with a 320 KB filter list: the old body
 fails it, the new body passes it, and a no-`ass` build still fails the new body. A failure that is
 only fixed in CI is a failure that comes back.
 
-### 4.2 Four product defects, found by running the application
+### 4.2 Eight product defects, found by running the application
 
-The full-suite gates were green while the application was broken. These four defects were found
+The full-suite gates were green while the application was broken. These defects were found
 by **running the application and its gates**, not by reading the code, and each is now guarded by a
 test that fails without the fix.
 
@@ -238,6 +258,10 @@ test that fails without the fix.
 | 2 | The timeline-driven ducking filtergraph was **malformed** — an output label in the middle of the bed's chain — and ffmpeg refused the whole graph | the export failing, with ffmpeg's own stderr in the response | the bed chain carries no output label; the label is added where the bed is used | 3 real-render tests in `tests/test_export_render.py::TestMusicBedRender`; **2 of the 3 fail without the fix** |
 | 3 | The sidechain fallback consumed one filter output **twice**, which **ffmpeg 9 accepts and ffmpeg 7 refuses** | the Linux CI leg, reproduced locally on ffmpeg 7.0.2 | the speech is split with `asplit=2` into a mix copy and a key copy, both on the bed's channel layout | the same 3 render tests, plus a **structural** check in `tests/test_music.py` that no filter output is consumed twice and no filter follows an output label — version-independent, so it catches the defect on any ffmpeg |
 | 4 | **An empty speech timeline was indistinguishable from no timeline at all**, so a clip with no talking fell back to keying the ducking on the audio — and the music was pulled down by whatever else the source contained | the **no-speech** case of the eight-case ducking matrix, at M5.1 | `speech_timeline.ducking_intervals()` keeps the three answers apart: no timeline (`None`), a timeline that found no speech in this clip (`[]`), and the speech itself. `[]` means the bed is not ducked at all | `tests/test_ducking_matrix.py::test_no_speech_means_no_ducking` — **fails without the fix**, at a measured ratio of 0.915 against a flat render — plus 4 unit tests for the helper and 2 for the API boundary |
+| 5 | **`ingest.ytdlp_format` was dead.** The download hard-coded `bestvideo*+bestaudio/best`, so a four-hour live stream came down at 1440p60 — **12.54 GiB** — instead of the 1080p the configuration's own comment promises | the **real ingest** of a four-hour YouTube live recording, at M5.2 | the command line is built in one place, `_download_command`, and the format selector comes from the settings | 3 tests in `tests/test_ingest.py`; **2 of the 3 fail without the fix** (`assert 'height<=1080' in 'bestvideo*+bestaudio/best'`) |
+| 6 | **The yt-dlp download was authorised but never written to the transfer log**, so `EGRESS-INVENTORY.md` E11's claim that it is *logged* was false, and the largest thing AutoClip ever sends left the machine with nothing in the user's own log | reading *Settings → External processing* after a **5.52 GB** download: **0 rows** | the transfer is recorded on refusal, on a failed launch, on a failed download and on success, with the duration | `tests/test_ingest.py::test_the_download_is_recorded_in_the_transfer_log` — **fails without the fix** (`assert [] == [('ok', ...)]`) |
+| 7 | **The crop-safety diagnostic compared a per-clip crop against the whole-source webcam region** and called it *"the detected face"*, so it reported *"the crop cuts through the detected face"* on a clip that tracks the face perfectly, and on a clip with **no face in it at all** | the application's own diagnostics on two real clips of a real stream | the crop plan carries the faces it was built around, in source pixels and in the clip's own time base; the check compares each keyframe against the face nearest it **in time**, and `diagnose_clip` no longer accepts a whole-source rectangle as a face | 5 tests in `tests/test_diagnostics.py` and 2 in `tests/test_reframe.py`; the time-matching test **fails without the fix** |
+| 8 | **The URL policy refused any host whose two DNS answers were not the same set of addresses**, so a legitimate load-balanced host — `graph.facebook.com` — was treated as a DNS-rebinding attack and the publish was refused | the **full-suite gate**, as a flaky failure in the Instagram publishing tests — it passes alone and fails in a full run | the rebinding guard compares the **class** of the two answers, not the exact addresses: an answer that moved *inwards* (public → private or loopback) is refused, and an answer that moved between two **public** addresses is a load balancer and is allowed | 2 tests in `tests/test_url_policy.py` **fail without the fix**; 3 more assert that the protection still holds, and 1 asserts the unit suite never resolves a real hostname |
 
 **Defect 3 is the one that would have shipped.** It rendered on the machine the code was written
 on and would have failed on the CI runners and on every user with an ffmpeg older than 9. It was
@@ -298,6 +322,109 @@ matrix: **110 Implemented · 9 Partial · 1 Blocked · 9 Not Applicable · 0 Mis
 The dates, the counts and the commit trail are in `docs/UPGRADE-LEDGER.md`; the audit trail is
 in `docs/upgrade-audit.md` §13.
 
+### 4.4 M5.2 — the real four-hour recording, and four more defects
+
+Every earlier milestone tested AutoClip against **doubles**: a fake provider, a synthetic clip, a
+stubbed filesystem. That is the right way to test a pipeline, and it is not the same as running
+it. M5.2 pointed the application at a **real four-hour YouTube live recording** and ran it through
+the **real ingest path**.
+
+**The source.** `https://www.youtube.com/live/l-oEKLu4Y3w` — *"BACK AT IT AGAIN IN THE VICE CITY!!!
+| NO PROMOTIONS"*, channel **CarryisLive**, uploaded **2026-11-19**, **4:00:10** long,
+**4,032,307 views**, public, no age limit, a **Hindi** audio track with ASR captions, and a best
+stream of **2560×1440p60** AV01 + Opus — **12.54 GiB**. It is a third-party creator's stream, and
+it was used for **technical acceptance only — nothing was published anywhere.**
+
+**What ran, and what it produced.**
+
+| Run | What | Result |
+|---|---|---|
+| **Ingest 1** | The full 4:00:10 file at 360p | **653 MiB** (684,877,097 B), 640×360, 30 fps, 14410.118 s. Cancelled at the stage boundary |
+| **Ingest 2** | The full 4:00:10 file at the **product's default** | Format **399+140** (1920×1080@60, `av01.0.09M.08` + `mp4a.40.2` @ 129.471 kbps), **5,529,989,793 B**, 14410.048 s. Cancelled after the download |
+| **Ingest 3** | The full file at 360p muxed, after defect 6 was fixed | Format 18, **844,513,587 B**, and **exactly one** transfer-log row: `operation=media_download`, `provider=yt-dlp`, `destination=https://www.youtube.com/live/l-oEKLu4Y3w` (query stripped), `destination_class=public`, `outcome=ok`, `duration_ms=175578` |
+| **Pipeline** | A **real 180 s segment cut from that same downloaded file**, through the whole pipeline, with a **real local model** | **done** in **1,136 s**: prepare 10 s → transcribe 432 s (284 words, `hi`) → highlights 342 s → creative 242 s → reframe 20 s → export 90 s |
+| **Output** | Two real clips and two real exports | `the-biggest-challenge-in-making-money_9x16.mp4` (h264 1080×1920, 30 fps, AAC stereo 48 kHz, 26.97 s) and `why-nobody-tells-you-this-about-scaling_9x16.mp4` (24.97 s), each with a `.srt` sidecar in Devanagari |
+
+**The model was a real Ollama** (`llama3.1:8b` at `127.0.0.1:11434`, `active_provider=ollama`), so
+no hosted credential was spent, and transcription was pinned to `engine=local`, whisper `small`,
+`compute_type=int8`, language auto-detected as `hi`.
+
+**The four-hour pipeline itself was not run, and the reason is measured, not assumed.**
+Transcription took about **7 minutes per 180 s** on this four-core laptop, so the full recording
+would have needed roughly **16 hours** of transcription alone — before the highlight stage, which
+took **342 s for 180 s** of speech on the same machine. The **ingest** of the complete file was
+exercised, twice, at two formats; the **pipeline** was exercised on real segments cut from that
+same downloaded file. This is recorded as **NOT APPLICABLE** in the evidence table, with the
+measurement attached, rather than quietly passed.
+
+#### The four defects it found
+
+**Defect 5 — the configured download format was dead.** `ingest.ytdlp_format` existed in the
+settings and its own comment promised a 1080p cap, but `download_youtube` hard-coded
+`bestvideo*+bestaudio/best`. The real ingest proved it: the default configuration produced
+**12.54 GiB of 1440p60** where the configuration said 1080p. The command line is now built in one
+place and the format selector comes from the settings. After the fix, the same setting produced
+**399+140 — 1920×1080@60**.
+
+**Defect 6 — the download was never written to the transfer log.** The yt-dlp transfer was
+authorised through the egress gateway and then simply not recorded, which made
+`docs/EGRESS-INVENTORY.md` E11's claim that it is *logged* **false** — and it meant the largest
+thing AutoClip ever sends left the machine with nothing in the user's own log. Reading *Settings
+→ External processing* after a **5.52 GB** download showed **0 rows**. The transfer is now
+recorded on refusal, on a failed launch, on a failed download and on success, with the duration.
+Ingest 3 is the proof: **exactly one row**, `outcome=ok`, `duration_ms=175578`.
+
+**Defect 7 — the crop-safety measurement reported failures that had not happened.** The check
+compared a **per-clip** crop against the **whole-source webcam region** — the rectangle the
+detector found once for the entire recording — and called that rectangle *"the detected face"*.
+On two real clips it reported *"the crop cuts through the detected face"* for both: one clip that
+tracks the face perfectly, and one clip with **no face in it at all**. MediaPipe's own
+observations settle it — **99 observations at 2 fps**; **51 inside the first clip's window**,
+tracking the real face; **none at all** inside the second clip's window. The crop plan now carries
+the faces it was built around, in source pixels and in the clip's own time base, and the check
+matches each keyframe to the face nearest it **in time**. `diagnose_clip` no longer accepts a
+whole-source rectangle as a face — the parameter is **gone**, so the mistake cannot be made again
+by accident.
+
+The proof was read back through the application's own endpoint, on the rebuilt crop paths, with
+the stored report cleared so the measurement was fresh:
+
+| Clip | The old rule, same crop paths | The app's own diagnostics, after the fix |
+|---|---|---|
+| `2e78863daafc4c6e` — tracks the real face | **FAIL** — *"the crop cuts through the detected face"* | **PASS** — `1 segment(s), 123 face(s) tracked` |
+| `23bb845bc10d453a` — no face in the window | **FAIL** — *"the crop cuts through the detected face"* | **PASS** — `1 segment(s), no face tracked` |
+
+**Defect 8 — a load-balanced host was mistaken for a DNS-rebinding attack.** The full-suite gate
+failed once: **1,324 passed, 1 failed**. The failing test was an Instagram publishing test that
+**passes when run alone** — the signature of a flake. It was not one. The URL policy resolves
+**twice** on purpose, to defeat DNS rebinding, and the check was *"the two answers must be the
+same set of addresses"*. `graph.facebook.com` — **Meta's own Graph API host** — answers with a
+rotating subset of its own edge addresses, so a legitimate publish was refused with *"DNS for
+graph.facebook.com changed between lookups … refusing a possible rebinding"*. **Both answers were
+public**, so neither could reach anything the policy does not already allow; the refusal bought no
+security and broke the feature. The guard now compares the **class** of the two answers, not the
+exact addresses: an answer that moved **inwards** — public on the first lookup, private or
+loopback on the second — is still refused, and so is an answer that moved to an address that may
+not be contacted at all. Only a move between two public addresses is allowed, because that is a
+load balancer.
+
+And the test was wrong too: the Instagram test stubbed `httpx` but not the resolver, so a unit
+test was reaching the **real DNS** — slow, non-deterministic, and the reason a product defect
+looked like a flake. The whole unit suite now resolves nothing.
+
+#### One thing that looked like a defect and was not
+
+The M5.2 pipeline was re-run on the same segment. It produced **zero clips**. That is not a
+defect: the transcription differed between the two runs (**284 words** against **243**), and the
+model's candidates all failed the **20–90 s** duration refinement. The application's own Review
+screen explains it — *"No clips came back. The model found nothing self-contained enough to stand
+alone — which is a real answer for some source material, not necessarily a failure."* It is
+recorded as a **model-quality observation**, and the zero-clip result is reported as it is.
+
+**M5.2 did not change the verdict.** No matrix row was closed and none was opened. What changed is
+the **evidence**: the ingest path and the pipeline are now verified against real media, and the
+defect count went from four to **eight**.
+
 ---
 
 ## 5. Every PARTIAL item, named
@@ -320,6 +447,15 @@ implemented, and what is missing in each.
 **MUS-31 was the tenth, and it was closed at M5.1.** The eight-case ducking matrix is now asserted
 as **eight full renders**, each measured on the bed's own frequency band. It is described in
 §4.3.
+
+**M5.2 closed no rows and opened none.** The count is unchanged at **9 Partial · 1 Blocked**, and
+that is the honest answer: the four defects M5.2 fixed were not matrix rows. But M5.2 did change
+the **evidence** behind two of the rows above. **GOV-14** (the egress gateway) claimed the yt-dlp
+download was logged, and it was not — the transfer was authorised and then silently dropped. It is
+now recorded, and that was proven on a real 844 MB download. **GOV-17** (yt-dlp network
+restriction) stays **Partial** for exactly the reason it always did: yt-dlp's own secondary
+requests — the manifest, the CDN, the page assets — are made by yt-dlp, not by AutoClip, so
+AutoClip cannot re-classify each hop. That is unchanged and still needs a Lane B controlled test.
 
 **And one BLOCKED item:**
 
@@ -345,6 +481,8 @@ as **eight full renders**, each measured on the bed's own frequency band. It is 
 | K8 | **There is no emergency-stop route, and a job can only be cancelled or retried** — not paused and resumed. |
 | K9 | **The `verified` music licence state cannot be reached through the API.** By design. |
 | K10 | **A re-export from the Review page does not rebuild the webcam composition.** The per-clip `LayoutPath` is not persisted, so a re-export at 9:16 reuses the job's cached **crop path**. The framing is right — the resolution, the crop and the duration all match the requested ratio — but a stacked webcam/gameplay composition from the layout planner is **not** reconstructed. Rebuilding it is new scope, so it is recorded here as a limitation rather than presented as a pass. Found during the M5 application test (`docs/M5-APPLICATION-TESTING.md` AT-B-05). |
+| K22 | **The complete four-hour pipeline was not run.** The **ingest** of the complete file was exercised twice, at two formats, and the **pipeline** was exercised on real segments cut from that same downloaded file. Transcription measured at **432 s per 180 s** on this four-core machine, so the full recording would have needed roughly **16 hours** of transcription alone. The claim is about the ingest path and about the pipeline on real segments — **not** about the complete recording end to end. Found at M5.2. |
+| K23 | **The pipeline was exercised with local models only** — a local Ollama model and local whisper. The hosted-LLM paths remain unverified for the reason they always were: no authorised credential was supplied. Found at M5.2. |
 
 ### 6.2 Engineering
 
@@ -387,6 +525,11 @@ behalf.
 | **The M5 performance report** | `docs/M5-PERFORMANCE-REPORT.md` |
 | **The M5 real-application testing evidence** | `docs/M5-APPLICATION-TESTING.md` |
 | **The M5.1 ducking matrix — eight cases, each a real render** | `tests/test_ducking_matrix.py` |
+| **The M5.2 real-media evidence — the four-hour ingest, the segment pipeline, the four defects** | `docs/M5-APPLICATION-TESTING.md` §M5.2, AT-E-01 … AT-E-12 |
+| **The M5.2 crop-safety proof — the old rule and the new rule, on the same crop paths** | `docs/M5-APPLICATION-TESTING.md` §"The gate that found the last defect" |
+| **The M5.2 ingest guards** | `tests/test_ingest.py` — the format selector and the transfer-log row |
+| **The M5.2 crop-safety guards** | `tests/test_diagnostics.py`, `tests/test_reframe.py` |
+| **The M5.2 URL-policy guards** | `tests/test_url_policy.py` — 39 cases, zero `xfail` markers |
 | **The installation and upgrade guide** | `docs/M5-INSTALLATION.md` |
 | **This report** | `docs/FINAL_UPGRADE_REPORT.md` |
 | The Instagram API evaluation | `docs/INSTAGRAM-API-EVALUATION.md` |
@@ -403,16 +546,17 @@ behalf.
 ## 8. What a reviewer should do next
 
 1. **Read `docs/M5-APPLICATION-TESTING.md`.** It is the evidence that the application works, and
-   it is also the record of the three defects that the application testing found. (A fourth was
-   found afterwards, by M5.1 — §4.3.)
+   it is also the record of the **eight** defects that the application testing and the gates
+   found — three at M5, one at M5.1 (§4.3) and four at M5.2 (§4.4).
 2. **Read `docs/M5-SECURITY-REVIEW.md`.** It says what was *not* checked as plainly as what was.
-3. **Read the ledger's M0–M5.1 sections.** Every milestone records its decisions and its
+3. **Read the ledger's M0–M5.2 sections.** Every milestone records its decisions and its
    residuals, and the residuals are the honest edges of this release.
 4. **Run the gates.** `ruff check . && ruff format --check . && pytest -m "not slow and not golden
    and not e2e" && pytest -m "slow and not golden and not e2e"`. About ten minutes.
-5. **Run the gates on an older ffmpeg too, if you can.** One of the four defects this milestone
-   found renders on ffmpeg 9 and fails on ffmpeg 7. The suite's structural graph check now catches
-   it on any version, but the habit of reproducing the Linux leg locally is what found it.
+5. **Run the gates on an older ffmpeg too, if you can.** One of the **eight** defects this
+   milestone found renders on ffmpeg 9 and fails on ffmpeg 7. The suite's structural graph check
+   now catches it on any version, but the habit of reproducing the Linux leg locally is what found
+   it — and it is what keeps finding things the developer's machine agrees with.
 6. **Run the real-media suite.** `python scripts/make_e2e_media.py --run` — it cuts a three-minute
    segment and runs the 24 e2e tests against it.
 7. **If you have credentials**, close the four UNVERIFIED live paths. They are the only thing
@@ -438,6 +582,7 @@ touched. The branch was created from `bf76811` and every commit since is in fron
 | M4b | `b55bfad` · `3bbf876` · `6318655` · `2cfeb65` · `521cec5` · `5fc04cc` |
 | M5 | `0ef1548` (the keyring test fix) · `4cf309b` (the formatter pin) · `94c6d9c` (no test may touch the owner's real OS keyring) · `69498e3` (the CI ffmpeg-check fix) · `bcdfc47` (the export and ducking fixes, with their tests) · `64d253d` (the release package) |
 | M5.1 | `294c274` (the empty-timeline fix and the eight-case ducking matrix, with their tests) |
+| M5.2 | `066bbf6` (the configured yt-dlp format is the one that is used) · `5574a8d` (the download is written to the transfer log) · `78f1781` (the crop-safety check measures the clip's own face) · `a907805` (a load-balanced public host is not a DNS rebinding) |
 
 **The M5 commits, in order, and what each one is for.**
 
@@ -456,6 +601,16 @@ touched. The branch was created from `bf76811` and every commit since is in fron
 |---|---|---|
 | `294c274` | `pipeline/speech_timeline.py` (`ducking_intervals()`), `pipeline/export.py` (the tri-state contract and the no-ducking graph), `pipeline/runner.py` and `api/clips.py` (the two call sites), `tests/test_ducking_matrix.py` (the eight-case matrix) and the four test files it touched | The product fix and its guards travel together, as they did at M5. **The no-speech case of the matrix fails without the fix**, at a measured ratio of 0.915 against a flat render — the guard is proven, not assumed |
 | `b59605b` | The M5.1 documentation: the matrix, the ledger, the audit, the regression report, the performance report, the security review and this report | Documentation only, in its own commit, so the product diff stays reviewable |
+
+**The four M5.2 commits, and what each one is for.** They are one commit per defect, and each
+carries its own guards.
+
+| Commit | What it does | Why it is separate |
+|---|---|---|
+| `066bbf6` | `pipeline/ingest.py` — the download command is built in one place, `_download_command`, and the format selector comes from the settings instead of a hard-coded `bestvideo*+bestaudio/best` | The first defect the real ingest found. **2 of its 3 tests fail without the fix.** The real 4-hour download then came down at **399+140 — 1920×1080@60** instead of **12.54 GiB at 1440p60** |
+| `5574a8d` | `pipeline/ingest.py` — the transfer is recorded on refusal, on a failed launch, on a failed download and on success, with the duration | The second defect. Its guard is **one test**, and it fails without the fix with `assert [] == [('ok', ...)]`. The **5.52 GB** download that exposed it had left **0 rows** in the user's own log |
+| `78f1781` | `pipeline/reframe/croppath.py` (`FaceRect`, `CropPath.faces`), `pipeline/reframe/__init__.py` (the plan records the faces it framed), `pipeline/diagnostics.py` (the face nearest the keyframe **in time**; `diagnose_clip` loses the `face_rect` parameter **entirely**) and `pipeline/runner.py` | The third defect, and the one that is also a **structural** guard: removing the parameter means the mistake cannot be made again by accident. **7 tests**, and the time-matching one fails without the fix |
+| `a907805` | `security/urlpolicy.py` (the rebinding guard compares the **class** of the two answers, not the exact set), `tests/conftest.py` (the unit suite resolves no real hostname) and `tests/test_url_policy.py` | The fourth defect — found by the **full-suite gate** as a flake. **2 tests fail without the fix**; 3 more assert that the protection still holds (public → private, public → loopback, public → forbidden) |
 
 The full, dated list is in `docs/UPGRADE-LEDGER.md` §Change log.
 
@@ -498,6 +653,29 @@ layout — were answering the same question differently, and the app's own princ
 must agree. **It was found by closing a matrix row, not by a report.** The row asked for eight
 scenarios to be asserted; the assertions were written as eight *real renders* rather than eight
 string checks, and the render that failed was the one that mattered.
+
+M5.2 added four more, and they are the clearest argument of all, because **every one of them was
+invisible to the whole test suite**:
+
+* **The configured download format was dead.** The setting existed, was documented, had a comment
+  promising a 1080p cap — and the download hard-coded something else. A four-hour stream came
+  down at **12.54 GiB** instead of 5.52 GB, and no unit test could see it, because the test was
+  about a string in a command line and the command line was never assembled from the setting.
+* **The download was never written to the transfer log.** The egress gateway authorised it, the
+  file came down, and the user's own *External processing* screen showed **0 rows**. The
+  inventory said it was logged. It was not.
+* **The crop-safety diagnostic lied.** It compared a per-clip crop against a rectangle the
+  detector found once for the **whole recording**, and called that rectangle *"the detected face"*.
+  It reported *"the crop cuts through the detected face"* on a clip that tracks the face
+  perfectly, and on a clip with **no face in it at all**. A measurement that reports failures that
+  did not happen is worse than no measurement, because it sends the user looking for a fault that
+  is not there.
+* **The DNS-rebinding guard was too strict to be true.** It refused any host whose two answers
+  were not byte-identical — and `graph.facebook.com`, Meta's own Graph API host, answers with a
+  rotating subset of its own edge addresses. Both answers were **public**; the refusal bought no
+  security and broke a legitimate publish. It was found as a **flaky failure** — a test that
+  passes alone and fails in a full run — which is exactly the shape a real defect takes when the
+  test suite is reaching the live network.
 
 Every one of those was found by measuring the real thing, not by reading the code and feeling
 satisfied. The tests that caught them are in the tree, and they will catch them again.
