@@ -224,9 +224,20 @@ and two of them change what is known.
 ### The number that decides what was and was not run
 
 **Transcription measured at ~432 s per 180 s of speech.** The full four-hour recording is
-**14,410 s**, so the transcription alone would have taken roughly **16 hours** on this four-core
-laptop — before the highlight stage, which costs **342 s per 180 s** and would have added about
-**7.5 hours** of its own.
+**14,410 s**, so the transcription alone would have taken roughly **9.6 hours** on this four-core
+laptop; the highlight stage, which costs **342 s per 180 s** of speech, would have added about
+**7.6 hours** of its own; and the whole segment pipeline — **1,136 s per 180 s** — would have taken
+roughly **25 hours**.
+
+> **Correction, found while documenting M5.3 (2026-11-22).** This paragraph originally read
+> *"roughly **16 hours** of transcription alone"*. That figure does **not** reproduce from the
+> rates measured in the table above: 14,410 s ÷ 180 s × 432 s is **9.6 hours**, not 16. **17.2
+> hours** is the transcription **plus** the highlight stage, and the **whole** pipeline is **≈25
+> hours** — which is the figure that matches the measured segment rate of 1,136 s per 180 s. The
+> number was therefore most likely the transcription-and-highlight total, mislabelled as
+> transcription alone. **The conclusion does not change — the four-hour pipeline was still not
+> run, and it was still impractical — but the arithmetic is now right, and it makes the reason
+> stronger rather than weaker.**
 
 That is why the **ingest path** was exercised on the **complete** file (twice) and the **pipeline**
 was exercised on **real segments cut from that same downloaded file**. It is a measured constraint,
@@ -287,20 +298,64 @@ project whose timing figures cover a **whole source**, and two of them change wh
 |---|---|---|
 | **Download** | **140,602,318 B in 64.55 s** | ≈ **2.18 MB/s** on this machine's connection. Format **399+140** (1920×1080 AV01 + AAC @ 129.482 kbps) |
 | **Transcription, 619 s of real Hindi speech** | **1,346 s** | whisper `small`, `compute_type=int8`, CPU only. ≈ **2.17× real time** |
-| **Highlight detection** | **174.8 s** (first job) · **152.5 s** (the re-run's own call) | Real local model (`llama3.1:8b` over Ollama) |
-| **Creative planning** | **98.2 s** · **148.7 s** · **96.6 s** | The same model; the spread is the schema-repair retry, and it varies with the model's output |
-| **Reframe, including the first-use model download** | **≈ 528 s** | MediaPipe face tracking over the whole source, plus the **3.6 MB** `face_landmarker.task` download on first use |
-| **Export, three real clips** | **176.3 s** | 1080×1920, burnt captions, `.srt` sidecars. Output: 31.30 s, 40.27 s and 33.37 s |
-| **The complete pipeline** | **≈ 40 min** for 619 s of source | ≈ **3.9× real time**, end to end, including the model download and the reframe pass |
+| **Highlight detection** | **425.1 s** (job 1) · **656.8 s** (job 2) | **Two sequential windows** per job — `WINDOW_S = 480 s`, `OVERLAP_S = 60 s` — and a local model runs them **one at a time** (`LOCAL_CONCURRENCY = 1`). Job 1: 174.8 s + 250.3 s. Job 2: 152.5 s + 504.3 s |
+| **Creative planning** | **98.2 s** (job 1) · **245.3 s** (job 2) | The same model. Job 1: **one** call, validated first try. Job 2: **two** calls — the plan and its schema-repair retry, 148.7 s + 96.6 s — and **neither validated** |
+| **The export, re-rendered** | **176.3 s** for job 2's three clips | 1080×1920, burnt captions, `.srt` sidecars. Output: 31.30 s, 40.27 s and 33.37 s. Its ffmpeg time alone was **140.3 s over 3 runs** |
+| **The tail — reframe, captions, export, diagnostics** | **1,274 s** (job 1) | The interval from the end of the creative plan to the job's `finished_at`. The **export's own ffmpeg time** is recorded separately: **82.5 s over 3 runs** for job 1's single clip, **140.3 s over 3 runs** for job 2's three. The split **inside** this tail — the MediaPipe face tracking, the caption pass, the ten diagnostics — was **not instrumented**, so it is given as the interval it is rather than dressed up as per-stage figures. The **first-use** `face_landmarker.task` download (**3.6 MB**) falls in this tail too — the transfer log puts it after the creative-planning call and before job 2's first highlight call |
+| **The complete pipeline — job 1** | **3,746 s (62.4 min)** for 619 s of source | ≈ **6.05× real time**, measured as the job's own `started_at → finished_at`. Job 2's wall clock is **not** a pipeline measurement — it was interrupted and resumed twice — and it was **slower at the model stages** anyway (656.8 s of highlight detection against job 1's 425.1 s), because the local model is stochastic |
+
+> **The earlier "≈ 40 min / 3.9× real time" figure is withdrawn.** It was computed from a highlight
+> timing that counted **one** window per job, when the stage makes **two**. The corrected total is
+> the job's own wall clock, and it is **62.4 minutes**. A number that was wrong because its input
+> was wrong is not a number to keep with a footnote attached.
+
+### The second job's creative plan fell back to the defaults
+
+This is the one figure in the table above that would otherwise be misleading, so it is stated on
+its own rather than buried in a footnote.
+
+**The two jobs are not equivalent, and their creative plans came out differently.**
+
+| | Job 1 — `1075820ea45841fe` | Job 2 — `f4648116d6ba49e4` |
+|---|---|---|
+| Highlight stage | 2 calls, **425.1 s** | 2 calls, **656.8 s** |
+| Creative-planning calls | **1** — 98.2 s | **2** — 148.7 s + 96.6 s = **245.3 s** |
+| Did the plan validate? | **Yes, first try** | **No** — neither the plan nor its schema-repair retry |
+| The stored plan | `source='ai'`, `problems=[]` | `source='fallback'`, `problems=['the creative-planning budget was spent']` |
+| The budget counters | `plan_used=1, repair_used=0` | `plan_used=1, repair_used=1` |
+| What the plan chose | `caption_strategy='clean_lower'`, `ducking_db=-12.0` | `caption_strategy=''`, `ducking_db=0.0`, `reason=''` — the deterministic defaults |
+
+**Why the second job's stored plan says "the budget was spent".** The planning budget is
+**one plan call and one repair retry per job**, and job 2 spent both: the model answered, the
+answer did not match the schema, the repair answer did not match it either, and the plan fell
+back. The later **defect-12 resume** then asked for a plan again — and by then the budget was
+already spent, so the plan written at **18:02:38** is the fallback, and the database records the
+reason rather than pretending the model chose the defaults.
+
+**What this does and does not mean.** It does **not** mean job 2's clips are uninteresting or
+unmodeled. The clips' **titles, hooks, reasons and scores are the highlight stage's** — they came
+from the model's own candidates in the first place (*"Hook is not strong, but payoff is a
+specific and concrete statement."*). What fell back was the **creative plan's** layer: the
+layout, crop, caption strategy, music and ducking choices, which took the deterministic defaults.
+
+That distinction is the point, and it is the reason the numbers are recorded per stage rather
+than as one "model time" figure. The model's own output — the clips — was real in both jobs; the
+model's *plan* was real in one and a fallback in the other.
 
 ### What it changes in this report
 
 - **P7 is now partly answered, again.** The transcription figure is now measured on **two**
   different real sources: **432 s per 180 s** at M5.2 (2.4× real time) and **1,346 s per 619 s**
-  here (2.17× real time). The two agree closely, which is what makes the **16-hour** arithmetic
-  for the four-hour recording trustworthy rather than a guess. The missing half is unchanged: there
-  is still no **M0 counterpart** to compare against, because the pre-upgrade pipeline had no
-  equivalent path.
+  here (2.17× real time). The two agree closely — which is what makes the **9.6-hour**
+  transcription figure for the four-hour recording a measurement rather than a guess. The missing
+  half is unchanged: there is still no **M0 counterpart** to compare against, because the
+  pre-upgrade pipeline had no equivalent path.
+- **The whole-pipeline rate is now measured on a complete source, and it corroborates M5.2's.**
+  M5.2 measured the segment pipeline at **1,136 s per 180 s** — **≈6.3× real time**. M5.3 measured
+  the whole pipeline on a **complete** source at **3,746 s per 619 s** — **≈6.05× real time**. Two
+  different sources, two different measurements, and they land within **4%** of each other. That is
+  the corroboration the four-hour arithmetic rests on, and it is stronger than the transcription
+  rate alone: it is the **whole** pipeline that scales, and the whole pipeline is what was not run.
 - **P6 is now partly answered.** yt-dlp's **download** time was measured on a second real source:
   **64.55 s** for 140.6 MB (≈ 2.18 MB/s). Its *import* time — the metadata and manifest fetches —
   was still not measured separately, so P6 stays open.

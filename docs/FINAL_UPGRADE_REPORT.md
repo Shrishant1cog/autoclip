@@ -253,12 +253,12 @@ The run history is release evidence, not noise. **Every run on this branch since
 was green.** The two that failed were **real defects** — one in the product, one in the CI itself.
 Neither was a flake, and neither was explained away. Four runs were cancelled by a newer push.
 
-**The table below is the run history as it stands at the M5.2 commit.** It is a record, and it
+**The table below is the run history as it stands at the M5.3 commit.** It is a record, and it
 grows; the claim that matters is the one above it, which does not go stale.
 
 | Runs | Result | What happened |
 |---|---|---|
-| 4, 5, 7–13, 15–17, **22**, **23**, **24**, **25**, **26**, **27**, **28**, **29**, **30** | **success** | green |
+| 4, 5, 7–13, 15–17, **22**, **23**, **24**, **25**, **26**, **27**, **28**, **29**, **30**, **31** | **success** | green |
 | 6, 14, 18, **21** | **cancelled** | each superseded by a newer push — the concurrency group cancelled the older run |
 | **19** (`4cf309b`) | **failure** | the Ubuntu legs failed in **Unit tests**; Windows and macOS passed the same tests. A test wrote to the owner's real OS keyring. On Linux there is no keyring backend, so the token was never stored and the assertion could not hold — the test passed on Windows and macOS *because those machines had a real keyring to write to*. Fixed by `94c6d9c`, an **autouse** isolation fixture so no test can reach the owner's credential store |
 | **20** (`94c6d9c`) | **failure** | the Ubuntu py3.12 leg failed at *"Verify ffmpeg can burn subtitles"*. The check piped the ffmpeg filter list into `grep -q`; `grep -q` exits at the match, the producer gets **SIGPIPE**, and GitHub's `set -o pipefail` turns that into a failed step. The runner's ffmpeg 8 has a filter list large enough to fill the pipe, so CI reported that an ffmpeg **with** the `ass` filter did not have one — the job log shows `printf: Broken pipe` and then the `ass` filter listed on the very next line. **Corrected, not removed**: the check now matches with bash's own pattern matching and never pipes, and a build genuinely without the filter still fails it |
@@ -275,6 +275,12 @@ the ingest, the crop-safety and the URL-policy guards in the unit selection.
 
 **Run 30 is the M5.2 documentation tree, and it is green on all six jobs too** — the same six jobs,
 with the M5.2 evidence in the tree.
+
+**Run 31 is the whole M5.3 tree — the four M5.3 code commits and the documentation, together — and
+it is green on all six jobs too**
+([run 44944459562](https://github.com/Shrishant1cog/autoclip/actions/runs/44944459562)).
+`2b5935d`, the defect-13 fix, was **not** pushed on its own, so **that** is the run that first
+exercised it on every CI job.
 
 **Both failures were reproduced before they were fixed.** Run 19 was reproduced on a Linux
 environment with no keyring backend. Run 20 was reproduced with a 320 KB filter list: the old body
@@ -391,8 +397,9 @@ no hosted credential was spent, and transcription was pinned to `engine=local`, 
 
 **The four-hour pipeline itself was not run, and the reason is measured, not assumed.**
 Transcription took about **7 minutes per 180 s** on this four-core laptop, so the full recording
-would have needed roughly **16 hours** of transcription alone — before the highlight stage, which
-took **342 s for 180 s** of speech on the same machine. The **ingest** of the complete file was
+would have needed roughly **9.6 hours** of transcription — **≈17 hours** with the highlight stage,
+which took **342 s for 180 s** of speech on the same machine, and **≈25 hours** for the whole
+pipeline. The **ingest** of the complete file was
 exercised, twice, at two formats; the **pipeline** was exercised on real segments cut from that
 same downloaded file. This is recorded as **NOT APPLICABLE** in the evidence table, with the
 measurement attached, rather than quietly passed.
@@ -471,11 +478,21 @@ M5.2 left one thing on the table, and named it as a limitation: **K22 — the co
 never been run on a complete source.** The four-hour recording was ingested in full, but only
 *segmented*; the pipeline ran on pieces cut from it. The reason was measured, not assumed:
 transcription took about seven minutes per 180 s on this four-core machine, so four hours would
-have needed roughly sixteen hours of transcription alone.
+have needed roughly **9.6 hours** of transcription — and roughly **25 hours** for the whole
+pipeline.
 
 **A ten-minute source does not have that problem.** M5.3 chose one, and pushed it through **every
 stage** — paste the link, ingest, prepare, transcribe, highlight, lay out, export, caption,
 diagnose — and inspected what came out.
+
+> **The four-hour arithmetic, corrected (2026-11-22).** The M5.2 documents said *"roughly
+> **16 hours** of transcription alone"*. That does not reproduce from the rates they quote:
+> 14,410 s ÷ 180 s × 432 s is **9.6 hours**, not 16. **17.2 hours** is the transcription **plus**
+> the highlight stage, and the **whole** pipeline is **≈25 hours** — which is the figure that
+> matches the measured segment rate of 1,136 s per 180 s. The number was most likely the
+> transcription-and-highlight total, mislabelled. **The verdict does not change** — the four-hour
+> pipeline was still not run and was still impractical — but the arithmetic is now right, and it
+> makes the reason stronger rather than weaker. See `docs/M5-PERFORMANCE-REPORT.md` §7.
 
 **The source.** `https://youtu.be/tg2MwT5FPdY?si=CEj6REktSyC2O_An` — *"PODCAST OF THE DECADE🥵|
 CARRYMINATI"*, channel **CarryMinati**, uploaded **2026-09-14**, **10:19** long, **29,316,913
@@ -499,6 +516,7 @@ with **no face**, and a different, wider framing at 600 s.
 | **Highlight** | A real local Ollama (`llama3.1:8b` at `127.0.0.1:11434`) | **10 raw candidates** proposed; the fixed refinement kept **6**. The old refinement kept **2** |
 | **Export** | All three deduplicated clips, through the real renderer | `why-most-agencies-die-at-10-clients_9x16.mp4` (40,539,188 B), `alien-interview_9x16.mp4` (34,941,233 B), `the-problem-with-marriage_9x16.mp4` (28,552,646 B) — each 1080×1920, 29.97 fps, AAC stereo, **0.000 % full-scale**, and each with a `.srt` sidecar |
 | **Diagnose** | The application's own ten measurements, on each clip | Clip 2 and clip 3: **every measurement `ok: true`**. Clip 1: `ok: false` on **`black_frames` only** — and that one is a **true positive about the source**, not a defect (below) |
+| **The whole pipeline** | **3,746 s (62.4 min)** for 619 s of source | ≈ **6.05× real time**, measured as the job's own `started_at → finished_at`. M5.2 measured the *segment* pipeline at **1,136 s per 180 s** — **≈6.3×** — so two different sources and two different measurements agree within **4%** |
 
 **No hosted credential was spent and no hosted call was made.** Both pipeline stages build a single
 provider from `active_provider`, and `active_provider=ollama`.
@@ -506,6 +524,44 @@ provider from `active_provider`, and `active_provider=ollama`.
 **The title is stored exactly as yt-dlp returned it** — the emoji's U+1F975 code point intact, no
 U+FFFD, no lone surrogates, and the database row identical to what the API returns. The mojibake
 that appeared in the earlier console output was **the PowerShell cp1252 console**, not the data.
+
+#### What the model chose, and what it did not
+
+The run made **seven** model calls, and they did not all have the same outcome. The table below is
+the whole of it, and it is recorded because a summary that said "the model did the planning"
+would have been wrong for the second job.
+
+| | Job 1 — `1075820ea45841fe` | Job 2 — `f4648116d6ba49e4` |
+|---|---|---|
+| Highlight stage | 2 calls, **425.1 s** | 2 calls, **656.8 s** |
+| Creative-planning calls | **1** — 98.2 s | **2** — 148.7 s + 96.6 s = **245.3 s** |
+| Did the plan validate? | **Yes, first try** | **No** — neither the plan nor its schema-repair retry |
+| The stored plan | `source='ai'`, `problems=[]` | `source='fallback'`, `problems=['the creative-planning budget was spent']` |
+| The budget counters | `plan_used=1, repair_used=0` | `plan_used=1, repair_used=1` |
+| What the plan chose | `caption_strategy='clean_lower'`, `ducking_db=-12.0` | `caption_strategy=''`, `ducking_db=0.0`, `reason=''` — the deterministic defaults |
+
+The highlight stage makes **two sequential calls** because a 619 s source is split into **two
+windows** of 480 s with a 60 s overlap, and a local model runs them **one at a time**
+(`LOCAL_CONCURRENCY = 1`) rather than contending with itself.
+
+**The second job's plan fell back, and the database says so.** The planning budget is **one plan
+call and one repair retry per job**. Job 2 spent both: the model answered, the answer did not
+match the schema, the repair answer did not match it either, and the plan fell back with the
+reason recorded. The later **defect-12 resume** asked for a plan again, found the budget spent,
+and wrote the fallback again — **without** silently spending another call.
+
+**What fell back was the plan, not the clips.** The three clips' **titles, hooks, reasons and
+scores** are the **highlight stage's** — they came from the model's own candidates in the first
+place (*"Hook is not strong, but payoff is a specific and concrete statement."*). What took the
+deterministic defaults was the **creative plan's** layer: `layout='auto'`, `crop='auto'`,
+`caption_strategy=''`, `music_track_id=''`, `ducking_db=0.0`, `transition='cut'`, `reason=''`.
+
+This is also where the **stochasticity** shows up. Detection runs at
+`DetectionConfig.temperature = 0.3`, so the before-run and the re-run saw **different candidate
+sets** and proposed different titles — which is why the controlled comparison is the **A/B on the
+identical candidate list** plus the **offline sweep** over 1,130 plausible ranges, and not the
+raw 1-vs-3 end-to-end clip counts (see "Two things that looked like defects and were not",
+below).
 
 #### Defect 9 — the sentence terminators were Latin-only
 
@@ -738,7 +794,7 @@ AutoClip cannot re-classify each hop. That is unchanged and still needs a Lane B
 | K8 | **There is no emergency-stop route, and a job can only be cancelled or retried** — not paused and resumed. |
 | K9 | **The `verified` music licence state cannot be reached through the API.** By design. |
 | K10 | **A re-export from the Review page does not rebuild the webcam composition.** The per-clip `LayoutPath` is not persisted, so a re-export at 9:16 reuses the job's cached **crop path**. The framing is right — the resolution, the crop and the duration all match the requested ratio — but a stacked webcam/gameplay composition from the layout planner is **not** reconstructed. Rebuilding it is new scope, so it is recorded here as a limitation rather than presented as a pass. Found during the M5 application test (`docs/M5-APPLICATION-TESTING.md` AT-B-05). |
-| K22 | **The complete four-hour pipeline was still not run.** The **ingest** of the complete file was exercised twice, at two formats, and the **pipeline** was exercised on real segments cut from that same downloaded file. Transcription measured at **432 s per 180 s** on this four-core machine, so the full recording would have needed roughly **16 hours** of transcription alone. The claim is about the ingest path and about the pipeline on real segments — **not** about the complete recording end to end. Found at M5.2. **Amended at M5.3:** a *complete* source — a ten-minute podcast — has now been run through **every** stage end to end, so the claim is no longer "pieces of a real source" but "a whole real source". The **four-hour** one remains unrun, for the measured reason above. |
+| K22 | **The complete four-hour pipeline was still not run.** The **ingest** of the complete file was exercised twice, at two formats, and the **pipeline** was exercised on real segments cut from that same downloaded file. Transcription measured at **432 s per 180 s** on this four-core machine, so the full recording would have needed roughly **9.6 hours** of transcription and roughly **25 hours** for the whole pipeline. The claim is about the ingest path and about the pipeline on real segments — **not** about the complete recording end to end. Found at M5.2. **Amended at M5.3:** a *complete* source — a ten-minute podcast — has now been run through **every** stage end to end, so the claim is no longer "pieces of a real source" but "a whole real source". The **four-hour** one remains unrun, for the measured reason above. **Corrected at M5.3:** the "16 hours of transcription alone" this row originally quoted did not reproduce from its own rate; see §4.5. |
 | K23 | **The pipeline was exercised with local models only** — a local Ollama model and local whisper. The hosted-LLM paths remain unverified for the reason they always were: no authorised credential was supplied. Found at M5.2. |
 | K24 | **The caption lifetime is one constant for every style and every language.** `captions.MAX_CAPTION_S = 2.5` is the same for a punchy social caption and for a lecture, and for English and for Hindi. A style with a deliberately slower reading pace may have its caption cut short. Found at M5.3. |
 | K25 | **The caption bound hides the symptom rather than correcting the alignment.** A word that genuinely was spoken across a long pause now produces a caption that leaves the screen early, so the words after it appear with a gap in the subtitle. The bound was chosen over rewriting the recogniser's timings because several consumers want the timings as the recogniser reported them; the trade-off is recorded here rather than hidden. Found at M5.3. |

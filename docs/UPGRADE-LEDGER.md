@@ -593,8 +593,9 @@ spent, and transcription was pinned to `engine=local`, whisper `small`, `compute
 language auto-detected as `hi`.
 
 **The four-hour pipeline was not run, and the reason is measured.** Transcription took **432 s per
-180 s** on this four-core laptop, so the full recording would have needed roughly **16 hours** of
-transcription alone, before the highlight stage's own ~7.5 hours. The **ingest** of the complete
+180 s** on this four-core laptop, so the full recording would have needed roughly **9.6 hours** of
+transcription, **≈17 hours** with the highlight stage's own ~7.6 hours, and **≈25 hours** for the
+whole pipeline. The **ingest** of the complete
 file was exercised twice; the **pipeline** was exercised on real segments cut from that same
 downloaded file. Recorded as **NOT APPLICABLE** with the arithmetic attached, not quietly passed.
 
@@ -612,7 +613,7 @@ downloaded file. Recorded as **NOT APPLICABLE** with the arithmetic attached, no
 | Decision | Why | Where recorded |
 |---|---|---|
 | **M5.2 is a post-release increment, not a change of verdict** | The branch is untagged and v0.1.0 is gated on K1, so the M5 documents are live branch documents and may be updated in place — but every change is dated and recorded here | `docs/UPGRADE-LEDGER.md`, `docs/upgrade-audit.md` §13 |
-| **The ingest path was exercised on the complete file; the pipeline was exercised on real segments cut from it** | Transcription measured at ~432 s per 180 s, so the complete recording would have taken ~16 h on this machine. Splitting the claim this way keeps both claims true, and the arithmetic is attached rather than asserted | `docs/M5-APPLICATION-TESTING.md` AT-E-11, `docs/FINAL_UPGRADE_REPORT.md` §4.4 |
+| **The ingest path was exercised on the complete file; the pipeline was exercised on real segments cut from it** | Transcription measured at ~432 s per 180 s, so the complete recording would have taken ~9.6 h of transcription — and ~25 h for the whole pipeline — on this machine. Splitting the claim this way keeps both claims true, and the arithmetic is attached rather than asserted | `docs/M5-APPLICATION-TESTING.md` AT-E-11, `docs/FINAL_UPGRADE_REPORT.md` §4.4 |
 | **The crop-safety defect was fixed by removing the parameter, not by fixing the comparison** | A face rectangle measured elsewhere says nothing about a crop. Removing `face_rect` from `diagnose_clip` closes the **class** of the mistake, the same way the autouse keyring fixture closed the class at M5 | `backend/autoclip/pipeline/diagnostics.py`, `docs/M5-APPLICATION-TESTING.md` §M5.2 |
 | **The rebinding guard compares classes, not addresses** | Both answers were public, so neither could reach anything the policy does not already allow. The refusal bought no security and broke a legitimate publish to **Meta's own Graph API host**. A move **inwards** — public → private, loopback, or forbidden — is still refused | `backend/autoclip/security/urlpolicy.py`, `docs/M5-SECURITY-REVIEW.md` §S2 |
 | **The zero-clip re-run was recorded as a model-quality observation, not a defect** | The two runs transcribed differently (**284** against **243** words) and the model's candidates all failed the 20–90 s duration refinement. The application's own Review screen explains the outcome; the pipeline did what it says it does | `docs/M5-APPLICATION-TESTING.md` §M5.2 |
@@ -646,7 +647,7 @@ the **defect count**.
 been run on a complete source**. The four-hour recording was ingested in full but only *segmented*;
 the pipeline ran on pieces cut from it. The reason was measured, not assumed — transcription took
 about seven minutes per 180 s on this four-core machine, so four hours would have needed roughly
-sixteen hours of transcription alone.
+**9.6 hours** of transcription and roughly **25 hours** for the whole pipeline.
 
 **A ten-minute source does not have that problem.** M5.3 chose one and pushed it through **every
 stage**: paste the link, ingest, prepare, transcribe, highlight, lay out, export, caption,
@@ -677,6 +678,7 @@ an AI-generated animation at 120 s with **no face**, a **pillarboxed vertical** 
 | **Highlight** | A real local Ollama (`llama3.1:8b` at `127.0.0.1:11434`) | **10 raw candidates**; the fixed refinement kept **6**, the old one kept **2**; the pipeline's own deduplication → **3 clips** |
 | **Export** | All three clips, through the real renderer | `why-most-agencies-die-at-10-clients_9x16.mp4` (40,539,188 B), `alien-interview_9x16.mp4` (34,941,233 B), `the-problem-with-marriage_9x16.mp4` (28,552,646 B) — each 1080×1920, 29.97 fps, AAC stereo, **0.000 % full-scale**, and each with a `.srt` sidecar |
 | **Diagnose** | The application's own ten measurements, on each clip | Two clips: **every measurement `ok: true`**. The third: `ok: false` on **`black_frames` only** — and that one is a **true positive about the source** |
+| **The whole pipeline** | **3,746 s (62.4 min)** for 619 s of source | ≈ **6.05× real time**, measured as the job's own `started_at → finished_at`. M5.2 measured the *segment* pipeline at **1,136 s per 180 s** — **≈6.3×** — so two different sources and two different measurements agree within **4%** |
 
 **The title is stored exactly as yt-dlp returned it** — the emoji's U+1F975 code point intact, no
 U+FFFD, no lone surrogates, and the database row identical to what the API returns. The mojibake
@@ -684,6 +686,22 @@ that appeared in the console was **the PowerShell cp1252 code page**, not the da
 
 **No hosted credential was spent and no hosted call was made.** Both pipeline stages build a single
 provider from `active_provider`, and `active_provider=ollama`.
+
+**The two jobs' creative plans did not come out the same, and that is recorded rather than
+smoothed over.** The run made **seven** model calls: the highlight stage's **two sequential
+windows** per job (a 619 s source is split into two 480 s windows with a 60 s overlap, and a local
+model runs them **one at a time**), plus the creative planning. Job 1's plan was **one call**,
+**98.2 s**, and it **validated first try** (`source='ai'`, `problems=[]`, and it chose
+`caption_strategy='clean_lower'` and `ducking_db=-12.0`). Job 2's plan was **two calls** —
+148.7 s + 96.6 s = **245.3 s** — the plan and its schema-repair retry, and **neither validated**;
+the plan fell back, and the later defect-12 resume found the budget spent and wrote the fallback
+again, with `problems=['the creative-planning budget was spent']` and the deterministic defaults
+(`caption_strategy=''`, `ducking_db=0.0`, `reason=''`).
+
+**What fell back was the plan, not the clips.** The three clips' **titles, hooks, reasons and
+scores** are the **highlight stage's** — they came from the model's own candidates in the first
+place. What took the defaults was the **creative plan's** layer: layout, crop, caption strategy,
+music and ducking.
 
 ### The five defects it found
 
@@ -703,7 +721,8 @@ leg**, on the CI's platform — and it is the reason the leg exists.
 | Decision | Why | Where recorded |
 |---|---|---|
 | **M5.3 is a post-release increment, not a change of verdict** | The branch is untagged and v0.1.0 is gated on K1, so the M5 documents are live branch documents and may be updated in place — but every change is dated and recorded here | `docs/UPGRADE-LEDGER.md`, `docs/upgrade-audit.md` §13.2 |
-| **A complete *ten-minute* source was run, and the claim was split from the four-hour one** | The four-hour recording would need ~16 h of transcription on this machine. Running a complete source end to end is a **stronger** claim than running pieces of a long source, and the arithmetic for the four-hour one is attached rather than asserted | `docs/M5-APPLICATION-TESTING.md` AT-F-14, `docs/FINAL_UPGRADE_REPORT.md` §4.5 |
+| **A complete *ten-minute* source was run, and the claim was split from the four-hour one** | The four-hour recording would need ~25 h for the whole pipeline on this machine. Running a complete source end to end is a **stronger** claim than running pieces of a long source, and the arithmetic for the four-hour one is attached rather than asserted | `docs/M5-APPLICATION-TESTING.md` AT-F-14, `docs/FINAL_UPGRADE_REPORT.md` §4.5 |
+| **The second job's creative plan fell back to the defaults, and that is stated rather than smoothed over** | The budget is **one plan call and one repair retry per job**, and job 2 spent both: the model answered, the answer did not match the schema, the repair answer did not match it either. The plan fell back with the reason recorded, and the later resume found the budget spent and wrote the fallback again **without** silently spending another call. The clip **titles** were never in doubt — those are the **highlight stage's**; what fell back was the **plan's** layout, crop, caption, music and ducking choices | `docs/M5-APPLICATION-TESTING.md` AT-F-14, `docs/M5-PERFORMANCE-REPORT.md` §8, `docs/FINAL_UPGRADE_REPORT.md` §4.5 |
 | **The clip-count comparison was *not* offered as evidence** | Detection runs at `DetectionConfig.temperature = 0.3`, so the before-run and the re-run saw **different candidate sets** and proposed **different titles**. The controlled comparison is the **same ten candidates** refined by the old rule and the new rule — **2 against 6** — plus the offline sweep over **1,130** candidate ranges | `docs/M5-APPLICATION-TESTING.md` AT-F-06, AT-F-07 |
 | **The caption bound is in the caption layer, not the transcript layer** | The recogniser's word timings are **estimates**, and several other consumers want them as the recogniser reported them. It is the **caption's own lifetime** that needs a bound, so the caption is bounded and the recogniser's timings are left alone. The trade-off is recorded as **K25**, not hidden | `backend/autoclip/pipeline/captions.py`, `docs/FINAL_UPGRADE_REPORT.md` §6 |
 | **The Tibetan tsheg is deliberately *not* a clause mark** | It separates syllables, not clauses. Treating it as a clause end would split Tibetan speech into one word per segment. A test pins the exclusion so a later "add more marks" change cannot quietly introduce it | `tests/test_transcript.py::TestClauseEnd::test_the_tibetan_tsheg_is_not_a_clause_mark` |
@@ -801,5 +820,6 @@ forward exactly as before. M5.3 closed no matrix row and opened none.
 | 2026-11-21 | `a7fc82d` | M5.3 — the terminators each script actually uses: `SENTENCE_END` and `CLAUSE_END` carry the marks of the other writing systems, every code point verified against the Unicode database, and the Tibetan tsheg deliberately **excluded** because it separates syllables rather than clauses. The clip-edge rule's too-short branch now falls back to the **first word that reaches the minimum duration** instead of dropping the candidate silently. On the real ten-minute Hindi source the old patterns matched **1** of **1,128** words; over **1,130** plausible candidate ranges the old rule kept **852** and the new one keeps **1,070**. Guarded by **65 tests**, of which **33 fail without the fix** |
 | 2026-11-21 | `09f8a29` | M5.3 — the webcam crop is built once, not once per segment: the crop and the scale are applied **once, after the segment concat**, so the filter graph no longer grows with the segment count, and the speech emphasis is evaluated against the **clip's** timeline rather than a segment-local one. The real clip's command was **36,743** characters against Windows' own **32,767** limit and failed at progress 0.88 **every time**; it is now **10,697**. A guard refuses an over-long command **before** ffmpeg runs and names the filter graph rather than blaming a filename. Guarded by **7 tests** that fail without the export fix and **4 more** without the guard |
 | 2026-11-21 | `a3aecab` | M5.3 — a caption is read, not watched: `MAX_CAPTION_S = 2.5` bounds every caption, the grouping breaks on a start-span ceiling so a stretched word does not drag the words before it along, and `caption_spans()` is the **single source** of the caption timing, shared by the renderer and the diagnostic. The longest caption drops **12.57 s → 2.50 s** with the text fully preserved. The bound belongs to the caption layer, not the transcript layer, because the recogniser's timings are estimates and several consumers want them as they are. Guarded by **8 tests** that fail without the fix |
+| 2026-11-22 | M5.3 corrections | The M5.3 evidence read back against the scratch database, and **four** figures that did not survive the reading were corrected. **The transfer log** is **1** `media_download` (public), **7** loopback (`highlights` ×4, `creative_planning` ×3) and **1** `model_download` (public) = 9 rows — the documents said 6 and 2. **The highlight stage** makes **two sequential windows** per job, so the stage totals are **425.1 s** and **656.8 s**, not the first window's 174.8 s and 152.5 s. **The second job's creative plan fell back** — its plan and its schema-repair retry both failed, so the stored plan is `source='fallback'`; the clips' titles, hooks, reasons and scores are the **highlight stage's**, and only the plan's layout, crop, caption, music and ducking took the defaults. And the **four-hour arithmetic** said *"16 hours of transcription alone"*, which does not reproduce from its own rate: 14,410 s ÷ 180 s × 432 s is **9.6 hours**, **17.2 hours** is transcription **plus** the highlight stage, and the whole pipeline is **≈25 hours** — so the verdict is unchanged and the reason is stronger. The M5.3 pipeline total is the job's own wall clock, **3,746 s (62.4 min)**, **≈6.05× real time**, which corroborates M5.2's segment rate of **6.3×** within **4%** |
 | 2026-11-22 | `2b5935d` | M5.3 — every segment gets its own copy of the source: found by the **Linux leg** on **ffmpeg 7.0.2**, the version that reproduces the CI's platform. The export's video graph consumed a filter output **once per crop segment** — the source was split in two and then *each* segment read from the same output again, which is invalid. ffmpeg 9 tolerates it; ffmpeg 7 refuses it with *"Invalid stream specifier"*, so a multi-segment clip exported on the developer's machine and failed on every strict ffmpeg. The source is now split **once per consumer**, and the shape was measured against **both** ffmpeg builds before it was chosen (`split=64` is accepted by 7.0.2 and 9.0.2 alike). The structural graph check moves to `tests/graph_shape.py` and is now applied to the **video** graph as well as the music graph — it was already written for this class of defect, but only ever looked at the music graph, so the video graph was never checked. Guarded by **4 tests**, of which **3 fail without the fix** |
 | 2026-11-22 | M5.3 docs | The M5.3 evidence: the ledger's M5.3 section, the audit's thirteen-defect table, the regression report's §11, the performance report's §8, the security review's §3b, the matrix's CR-06 and GOV-14 evidence, the egress inventory's observed E12 row, the application-testing record AT-F-01 … AT-F-15 and the final report's §4.5 |

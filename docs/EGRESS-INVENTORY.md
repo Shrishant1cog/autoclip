@@ -245,12 +245,13 @@ the ones that ask.
 
 **What the M5.3 real run actually left in the log.** The complete ten-minute
 pipeline produced **9 rows**, and every one of them is one of the paths above:
-**1** `media_download` (E11, yt-dlp, public), **6** `highlights` /
+**1** `media_download` (E11, yt-dlp, public), **7** `highlights` /
 `creative_planning` against `http://127.0.0.1:11434` (E4/E5, class
-**loopback**), and **2** `model_download` of `face_landmarker.task` (E12,
-public). **No hosted provider was contacted and no hosted credential was
-spent** — the run used a local Ollama and local whisper throughout, and the
-log is the proof of that rather than an assertion.
+**loopback** — four highlight calls and three planning calls), and **1**
+`model_download` of `face_landmarker.task` (E12, public). **No hosted provider
+was contacted and no hosted credential was spent** — the run used a local
+Ollama and local whisper throughout, and the log is the proof of that rather
+than an assertion.
 
 ## 6. Where the enforcement lives
 

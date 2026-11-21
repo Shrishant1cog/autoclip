@@ -224,6 +224,7 @@ grows; the claim that matters is the one under it, which does not go stale.
 | 28 | `066bbf6` | Ingest: the configured yt-dlp format is the one that is used | **success** — all six jobs green. The first M5.2 code commit |
 | 29 | `a907805` | Security: a load-balanced public host is not a DNS rebinding | **success** — all six jobs green. The whole M5.2 code tree: the transfer log, the crop-safety measurement and the URL policy |
 | 30 | `f1cbe81` | docs: M5.2 — the real four-hour ingest, and four more defects | **success** — all six jobs green. The whole M5.2 documentation tree |
+| 31 | `f190e9a` | docs: M5.3 — the complete ten-minute pipeline, and five more defects | **success** — all six jobs green — [run 44944459562](https://github.com/Shrishant1cog/autoclip/actions/runs/44944459562). The whole M5.3 tree — the four M5.3 code commits and the documentation, together. `2b5935d` (the defect-13 fix) was **not** pushed on its own, so **this** is the run that first exercised it on all six CI jobs |
 
 **Every run on this branch since the two failures was green.** Two of the runs failed, and **both
 failures were real defects** — not flakes, and neither was explained away. Four runs were cancelled
@@ -338,7 +339,7 @@ Stated so a reviewer does not assume more than was checked.
 - **The full four-hour pipeline was not run** (M5.2). The **ingest** of the complete file was
   exercised twice, at two formats, and the **pipeline** was exercised on real segments cut from
   that same downloaded file. Running the complete four-hour recording through every stage would
-  have needed roughly **16 hours** of transcription on this four-core machine — measured, not
+  have needed roughly **25 hours** for the whole pipeline on this four-core machine — measured, not
   assumed. The claim is therefore about the ingest path and about the pipeline on real segments,
   **not** about the complete recording end to end. **Amended at M5.3:** a *complete* source — a
   **ten-minute** podcast — was run through **every** stage end to end, so the end-to-end claim
@@ -348,7 +349,7 @@ Stated so a reviewer does not assume more than was checked.
   a **local** Ollama model and **local** whisper. The hosted-LLM paths remain unverified for the
   same reason as before — no authorised credential was supplied. **The M5.3 run is the same:** a
   local `llama3.1:8b` over Ollama and local whisper `small`, and the transfer log is the proof —
-  **6** of its **9** rows point at `127.0.0.1` and **no hosted host appears at all**.
+  **7** of its **9** rows point at `127.0.0.1` and **no hosted host appears at all**.
 - **No publishing of anything derived from the real media.** The source is a third-party creator's
   stream and was used for **technical acceptance only**. Nothing produced from it was published
   anywhere.
@@ -453,7 +454,7 @@ The application was pointed at a **real four-hour YouTube live recording** and r
 | The ingest | The complete file, **twice** — at 360p and at the product's default 1080p |
 | The pipeline | A **real 180 s segment cut from that same downloaded file**, through every stage, with a **real local model** (`llama3.1:8b` over Ollama) and a **real local transcription** (whisper `small`, `int8`) |
 | The output | Two real clips and two real exports, with `.srt` sidecars in Devanagari |
-| The full four-hour pipeline | **Not run** — transcription measured at ~7 minutes per 180 s, so ~16 hours on this machine. Recorded as **NOT APPLICABLE** with the measurement attached |
+| The full four-hour pipeline | **Not run** — transcription measured at ~7 minutes per 180 s, so ~9.6 hours of it and ~25 hours for the whole pipeline, on this machine. Recorded as **NOT APPLICABLE** with the measurement attached |
 
 ### What it found
 
@@ -514,7 +515,8 @@ details are in `docs/M5-APPLICATION-TESTING.md` §M5.3 (AT-F-01 … AT-F-15) and
 | The ingest | The complete file — **140,602,318 B in 64.55 s**, at format 399+140 |
 | The pipeline | The **whole source**, through every stage, with a **real local model** (`llama3.1:8b` over Ollama) and a **real local transcription** (whisper `small`, `int8`) — **1,128 words** |
 | The output | **Three** real clips and **three** real exports, each with a `.srt` sidecar in Devanagari |
-| The full four-hour pipeline | **Still not run** — ~16 hours of transcription on this machine. A complete *ten-minute* source was run instead, and that is what the end-to-end claim rests on |
+| The model's own part | **Seven** local calls: the highlight stage's **two sequential windows** per job (a 619 s source is two 480 s windows with a 60 s overlap, and a local model runs them one at a time) plus creative planning. **Job 1's plan validated on the first call; job 2's did not** — its plan and its schema-repair retry both failed, so the plan fell back with the reason recorded, and the later resume found the budget spent. The clips' **titles, hooks, reasons and scores are the highlight stage's**; what fell back was the **plan's** layout, crop, caption, music and ducking choices |
+| The full four-hour pipeline | **Still not run** — ~25 hours for the whole pipeline on this machine. A complete *ten-minute* source was run instead, and that is what the end-to-end claim rests on |
 
 ### What it found
 

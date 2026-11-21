@@ -627,7 +627,8 @@ PART 12 lists the unusual inputs to try. Each was tried against the real applica
    persisted, so a re-export reuses the cached crop path. Named in AT-B-05.
 7. **The four-hour YouTube source was not run through the whole pipeline.** Its **ingest** was
    verified in full, twice; the **pipeline** was verified on segments cut from that same file. The
-   measured reason — roughly 16 hours of transcription on this machine — is in AT-E-11.
+   measured reason — roughly **25 hours** for the whole pipeline on this machine, **≈9.6 hours** of
+   it transcription — is in AT-E-11.
 8. **The M5.2 run used a local model, not a hosted one.** A real `llama3.1:8b` over Ollama is a
    real model, but the hosted-LLM paths are still **UNVERIFIED (external)** for the reason they
    always were: no authorised credential was supplied.
@@ -686,7 +687,8 @@ https://www.youtube.com/live/l-oEKLu4Y3w?si=c3S4e115hL1-w5XT
 
 **What was still not done.** The four-hour source was **not** run through the whole pipeline end to
 end. Transcription measured at about **7 minutes per 180 s** on this four-core laptop, so the full
-recording would have taken roughly **16 hours** of transcription alone. The **ingest path** was
+recording would have taken roughly **25 hours** for the whole pipeline — **≈9.6 hours** of it
+transcription. The **ingest path** was
 therefore exercised on the **whole four-hour file** — twice, at two different formats — and the
 **pipeline** was exercised on **real segments cut from that same downloaded file**. That mirrors
 the M5 lane-C pattern, and it is recorded here as a stated limitation rather than glossed over.
@@ -878,7 +880,7 @@ time**. The whole-source rectangle is no longer accepted as a face at all: `diag
 | **Test ID** | AT-E-11 |
 | **User input** | Run the pipeline on the complete 4:00:10 recording |
 | **Expected** | The recording is transcribed and turned into clips end to end |
-| **Actual** | **Not run.** Transcription measured at about **7 minutes per 180 s** on this four-core laptop (Intel i5-8279U, 8 GB RAM, no CUDA), so the full recording would have taken roughly **16 hours** of transcription alone, before the highlight stage, which took **342 s for 180 s** of speech on the same machine. The ingest of the complete file **was** exercised, twice, at two different formats (AT-E-02, AT-E-05) |
+| **Actual** | **Not run.** Transcription measured at about **7 minutes per 180 s** on this four-core laptop (Intel i5-8279U, 8 GB RAM, no CUDA), so the full recording would have needed roughly **9.6 hours** of transcription — **≈17 hours** with the highlight stage, which took **342 s for 180 s** of speech on the same machine, and **≈25 hours** for the whole pipeline. The ingest of the complete file **was** exercised, twice, at two different formats (AT-E-02, AT-E-05) |
 | **Result** | **NOT APPLICABLE** — impractical on this machine, for the measured reason above. It is not claimed as verified |
 | **Screenshot** | n/a |
 | **Logs** | — |
@@ -947,7 +949,7 @@ inject their own.
 | **The default format cap** | **VERIFIED** — 1080p, not 1440p |
 | **The crop-safety measurement** | **VERIFIED** after the fix; it was reporting failures that did not happen |
 | **The publishing destination policy** | **VERIFIED** after the fix; a load-balanced public host is no longer mistaken for a rebinding, and the rebinding protection still holds |
-| **The four-hour pipeline** | **NOT APPLICABLE** — 16 hours of transcription on this machine |
+| **The four-hour pipeline** | **NOT APPLICABLE** — ≈25 hours for the whole pipeline on this machine |
 | **Any publishing** | **NOT APPLICABLE** — out of scope; technical acceptance only |
 
 ---
@@ -1213,12 +1215,28 @@ with **no face**, and a different, wider framing at 600 s.
 | **Test ID** | AT-F-14 |
 | **User input** | Run the application against one URL, and follow it all the way to the finished files |
 | **Expected** | Every stage of the pipeline runs on a **complete** source: ingest → prepare → transcribe → highlight → creative → reframe → export, with the diagnostics measured on the results |
-| **Actual** | Job `f4648116d6ba49e4` reached **`done`** with `progress=1.0000` and `error=None`. **Every stage ran.** The transcript and the plan were reused from the earlier run, so the **model was not asked a second time** for the re-export — the comparison stayed controlled. The job's own timeline: `prepare` and `transcribe` complete, `highlights` reached in **instantly** on the re-run, and the export ran to `progress=1.0000` in **176.3 s** |
+| **Actual** | Job `f4648116d6ba49e4` reached **`done`** with `progress=1.0000` and `error=None`. **Every stage ran.** The transcript and the **highlight candidates** were reused from the earlier run, so **no model was asked again** for either and the comparison stayed controlled. The **creative plan was rebuilt**, not reused — as a **fallback**, because the planning budget had already been spent — and it was written at **18:02:38** with `problems=['the creative-planning budget was spent']`. The job's own timeline: `prepare` and `transcribe` complete, `highlights` reached in **instantly** on the re-run, and the export ran to `progress=1.0000` in **176.3 s** |
 | **Result** | **VERIFIED** |
 | **Screenshot** | Not captured — this run was driven through the HTTP API the browser uses |
 | **Logs** | the job's progress events, from `queued` through `running/export` to `done` |
-| **Backend evidence** | `jobs` row: `id=f4648116d6ba49e4`, `status=done`, `current_stage=export`, `progress=1.0`, `error=NULL`. The transfer log holds **9 rows** for the whole run, all of them accounted for: **1** `media_download` (yt-dlp, public), **6** `highlights`/`creative_planning` against `http://127.0.0.1:11434` (class **loopback**), and **2** `model_download` of `face_landmarker.task` from `storage.googleapis.com` (class **public**) |
+| **Backend evidence** | `jobs` row: `id=f4648116d6ba49e4`, `status=done`, `current_stage=export`, `progress=1.0`, `error=NULL`. The transfer log holds **9 rows** for the whole run, all of them accounted for: **1** `media_download` (yt-dlp, public), **7** `highlights`/`creative_planning` against `http://127.0.0.1:11434` (class **loopback** — four highlight calls and three planning calls), and **1** `model_download` of `face_landmarker.task` from `storage.googleapis.com` (class **public**) |
 | **Export inspection** | Three vertical exports and three `.srt` sidecars, all measured — AT-F-11 and AT-F-12 |
+
+> **What the model chose, and what it did not.** The three clips' **titles, hooks, reasons and
+> scores** are the **highlight stage's** — they came from the model's own candidates in the first
+> place (*"Hook is not strong, but payoff is a specific and concrete statement."*). What fell
+> back to the deterministic defaults was the **creative plan's** layer: `layout='auto'`,
+> `crop='auto'`, `caption_strategy=''`, `ducking_db=0.0`, `reason=''` for all three clips. The
+> database records that distinction rather than hiding it — `creative_plans.source` is
+> **`fallback`**, and `job_ai_budget` shows `plan_used=1, repair_used=1` for this job against
+> `plan_used=1, repair_used=0` for the first job, whose plan **did** validate and **did** choose
+> `caption_strategy='clean_lower'` and `ducking_db=-12.0`.
+>
+> **The budget is a real product behaviour and it worked as designed.** One plan call and one
+> repair retry per job: the model answered, the answer did not match the schema, the repair
+> answer did not match it either, and the plan fell back with the reason recorded. The later
+> resume found the budget spent and wrote the fallback again — **without** silently spending
+> another call. The clip **titles** were never in doubt; only the **plan** was.
 
 > **One new public egress was observed and is now in the inventory.** The MediaPipe face detector
 > downloads `face_landmarker.task` (**3.6 MB**) from
@@ -1258,7 +1276,7 @@ with **no face**, and a different, wider framing at 600 s.
 | **The webcam emphasis** | **VERIFIED** after the fix; it only ever worked in the first segment before |
 | **The caption's lifetime** | **VERIFIED** after the fix; a caption could be held for twelve seconds before |
 | **The graph's portability** | **VERIFIED** after the fix; a multi-segment clip failed on ffmpeg 7 before |
-| **The complete four-hour pipeline** | **NOT APPLICABLE** — 16 hours of transcription on this machine. A complete *ten-minute* source was run instead, and that is what the claim above rests on |
+| **The complete four-hour pipeline** | **NOT APPLICABLE** — ≈25 hours for the whole pipeline on this machine. A complete *ten-minute* source was run instead, and that is what the claim above rests on |
 | **Any publishing** | **NOT APPLICABLE** — out of scope; technical acceptance only |
 | **The hosted-LLM and ElevenLabs paths** | **UNVERIFIED** — no authorised credential; the run used a local Ollama and local whisper |
 

@@ -446,6 +446,8 @@ cause and its fix.
 | 22, 23, 24, 25, 26 | `cbcbe1c`, `ab9052e`, `2931059`, `822143e`, `b59605b` | **success** | green on all six jobs — the four backend legs, the frontend build, and the Docker image with its health smoke test | — | — |
 | 27, 28 | `d8db47f`, `066bbf6` | **success** | green on all six jobs. Run 28 is the first M5.2 code commit — the configured yt-dlp format | — | — |
 | **29** | `a907805` | **success** | green on all six jobs. The whole M5.2 code tree: the transfer log, the crop-safety measurement and the URL policy | — | — |
+| 30 | `f1cbe81` | **success** | green on all six jobs. The whole M5.2 documentation tree | — | — |
+| **31** | `f190e9a` | **success** | green on all six jobs ([run 44944459562](https://github.com/Shrishant1cog/autoclip/actions/runs/44944459562)). The whole M5.3 tree — the four M5.3 code commits and the documentation, together. `2b5935d` was not pushed on its own, so **this** is the run that first exercised the defect-13 fix on every CI job | — | — |
 
 **Both failures were reproduced before they were fixed.** Run 19 was reproduced on a Linux
 environment with no keyring backend, and run 20 was reproduced with a 320 KB filter list — the

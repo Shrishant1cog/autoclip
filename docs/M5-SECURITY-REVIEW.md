@@ -359,8 +359,8 @@ review documents:
 | Operation | Count | Destination | Class |
 |---|---|---|---|
 | `media_download` (E11) | 1 | `https://youtu.be/tg2MwT5FPdY` | **public** |
-| `highlights` / `creative_planning` (E4/E5) | 6 | `http://127.0.0.1:11434` | **loopback** |
-| `model_download` (E12) | 2 | `storage.googleapis.com` | **public** |
+| `highlights` / `creative_planning` (E4/E5) | 7 — four highlight calls and three planning calls | `http://127.0.0.1:11434` | **loopback** |
+| `model_download` (E12) | 1 | `storage.googleapis.com` | **public** |
 
 **No hosted provider was contacted and no hosted credential was spent.** That is not an assertion
 here — it is what the log says. It is also the reason the four live paths in §6 remain unverified
@@ -499,7 +499,7 @@ requests are still made by yt-dlp, and a Lane B controlled test is still what wo
 
 **M5.3 did not close any residual either, and did not add one.** The same four live paths remain
 unverified for the same reason — no authorised credential was supplied, and the run used a local
-Ollama and local whisper throughout. The transfer log is the proof: **6** of its **9** rows point
+Ollama and local whisper throughout. The transfer log is the proof: **7** of its **9** rows point
 at `127.0.0.1`, and **no hosted host appears at all**.
 
 **What M5.3 changed on this page is the *evidence*, not the residuals.** The MediaPipe model
