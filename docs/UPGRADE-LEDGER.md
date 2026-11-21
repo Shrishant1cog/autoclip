@@ -524,6 +524,21 @@ other seven still pass. The files were restored afterwards.
 | Low-volume | Ducked in speech, flat outside — the timeline drives the ducking, not the level |
 | **No speech** | 1.005 at the loudest point — full level throughout |
 
+**The gates, on both platforms, before the commit was pushed.**
+
+| Gate | Windows (ffmpeg 9.0.2) | Linux (ffmpeg 7.0.2, Python 3.12.16) |
+|---|---|---|
+| Unit — `-m "not slow and not golden and not e2e"` | **1,270 passed**, 69 deselected | **1,270 passed**, 69 deselected |
+| Render — `-m "slow and not golden and not e2e"` | **45 passed**, 1,294 deselected | **45 passed**, 1,294 deselected |
+| Whole suite, one invocation | **1,315 passed**, 534.88 s | — |
+| `ruff check .` | *All checks passed* | *All checks passed* |
+| `ruff format --check .` | *227 files already formatted* | *221 files already formatted* (the synced subset) |
+| mypy | **10 errors in 8 files** — the M1 baseline, unchanged | — |
+
+**The Linux leg was reproduced on the M5.1 tree**, as it was for M5. The counts are identical on
+both platforms. That leg is what caught the ffmpeg-7-only sidechain defect at M5, so it is run
+before the push, not after.
+
 ### Decisions taken in M5.1
 
 | Decision | Why | Where recorded |
@@ -598,3 +613,5 @@ exactly as M5 recorded them. M5.1 closed one row and changed nothing else.
 | 2026-11-21 | `2931059` | docs — the CI run history reads the same way whichever run you look at: a stable phrasing for the run count, and the run-23 row added |
 | 2026-11-21 | `822143e` | docs — four runs were cancelled, not three; the run table is framed as a record that grows |
 | 2026-11-21 | `294c274` | M5.1 — the ducking answer is tri-state: no timeline, a timeline that found no speech in this clip, or the speech itself. `ducking_intervals()` produces the right one of the three, and the API and the pipeline both call it. Guarded by the eight-case ducking matrix (`tests/test_ducking_matrix.py`), whose **no-speech** case fails without the fix |
+| 2026-11-21 | `b59605b` | M5.1 — the documentation: the matrix recount (110 Implemented · 9 Partial), the ledger's M5.1 section, the audit's fourth defect and the new gate column, the regression and performance reports, the security review and the final report |
+| 2026-11-21 | CI run 26 | The M5.1 tree is **green on all six jobs** — the four backend legs (Ubuntu 3.11, Ubuntu 3.12, macOS 3.12, Windows 3.12), the frontend build, and the Docker image with its health smoke test |

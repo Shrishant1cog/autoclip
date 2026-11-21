@@ -1,6 +1,7 @@
 # AutoClip — Final Upgrade Report
 
 **Milestone:** M5 — independent audit and release
+**Amendment:** M5.1 — the ducking matrix and the empty-timeline defect (2026-11-21)
 **Branch:** `feature/upgrade-u0-u10`
 **Base commit:** `bf76811` (`feature/autonomous-platform-v2`)
 **Report date:** 2026-11-21
@@ -25,7 +26,7 @@ double stands in for the same code path the real service would take — but "the
 
 | | |
 |---|---|
-| **Milestones complete** | **8 of 8** — M0, M0.5, M1, M2, M3, M4a, M4b, M5 |
+| **Milestones complete** | **8 of 8** — M0, M0.5, M1, M2, M3, M4a, M4b, M5 — plus **M5.1**, a post-release increment that is not one of the specification's milestones (see the amendment below) |
 | **Gate items** | 94 across M0–M4b: **91 done**, **1 blocked on the owner**, **2 unverified (external)**. M5's 10 are in §4. |
 | **Feature coverage** | **129 rows**: 110 Implemented · 9 Partial · 1 Blocked · 9 Not Applicable · **0 Missing** |
 | **Tests** | **1,315 passing** — 1,270 in the unit selection, 45 in the render selection — 0 failing, 0 skipped, 0 xfailed, plus 24 real-media e2e tests run against a real source |
@@ -203,9 +204,12 @@ The run history is release evidence, not noise. **Every run on this branch since
 was green.** The two that failed were **real defects** — one in the product, one in the CI itself.
 Neither was a flake, and neither was explained away. Four runs were cancelled by a newer push.
 
+**The table below is the run history as it stands at the M5.1 commit.** It is a record, and it
+grows; the claim that matters is the one above it, which does not go stale.
+
 | Runs | Result | What happened |
 |---|---|---|
-| 4, 5, 7–13, 15–17, **22**, **23**, **24**, **25** | **success** | green |
+| 4, 5, 7–13, 15–17, **22**, **23**, **24**, **25**, **26** | **success** | green |
 | 6, 14, 18, **21** | **cancelled** | each superseded by a newer push — the concurrency group cancelled the older run |
 | **19** (`4cf309b`) | **failure** | the Ubuntu legs failed in **Unit tests**; Windows and macOS passed the same tests. A test wrote to the owner's real OS keyring. On Linux there is no keyring backend, so the token was never stored and the assertion could not hold — the test passed on Windows and macOS *because those machines had a real keyring to write to*. Fixed by `94c6d9c`, an **autouse** isolation fixture so no test can reach the owner's credential store |
 | **20** (`94c6d9c`) | **failure** | the Ubuntu py3.12 leg failed at *"Verify ffmpeg can burn subtitles"*. The check piped the ffmpeg filter list into `grep -q`; `grep -q` exits at the match, the producer gets **SIGPIPE**, and GitHub's `set -o pipefail` turns that into a failed step. The runner's ffmpeg 8 has a filter list large enough to fill the pipe, so CI reported that an ffmpeg **with** the `ass` filter did not have one — the job log shows `printf: Broken pipe` and then the `ass` filter listed on the very next line. **Corrected, not removed**: the check now matches with bash's own pattern matching and never pipes, and a build genuinely without the filter still fails it |
@@ -213,6 +217,9 @@ Neither was a flake, and neither was explained away. Four runs were cancelled by
 **The release run is green on all six jobs** — the four backend legs (Ubuntu 3.11, Ubuntu 3.12,
 macOS 3.12, Windows 3.12), the frontend build and the Docker image with its health smoke test.
 The Ubuntu py3.12 leg, which had failed twice, now passes.
+
+**Run 26 is the M5.1 tree, and it is green on all six jobs too** — the same six jobs, with the
+eight-case ducking matrix in the render selection.
 
 **Both failures were reproduced before they were fixed.** Run 19 was reproduced on a Linux
 environment with no keyring backend. Run 20 was reproduced with a 320 KB filter list: the old body
@@ -379,6 +386,7 @@ behalf.
 | **The M5 regression report** | `docs/M5-REGRESSION-REPORT.md` |
 | **The M5 performance report** | `docs/M5-PERFORMANCE-REPORT.md` |
 | **The M5 real-application testing evidence** | `docs/M5-APPLICATION-TESTING.md` |
+| **The M5.1 ducking matrix — eight cases, each a real render** | `tests/test_ducking_matrix.py` |
 | **The installation and upgrade guide** | `docs/M5-INSTALLATION.md` |
 | **This report** | `docs/FINAL_UPGRADE_REPORT.md` |
 | The Instagram API evaluation | `docs/INSTAGRAM-API-EVALUATION.md` |
@@ -447,7 +455,7 @@ touched. The branch was created from `bf76811` and every commit since is in fron
 | Commit | What it does | Why it is separate |
 |---|---|---|
 | `294c274` | `pipeline/speech_timeline.py` (`ducking_intervals()`), `pipeline/export.py` (the tri-state contract and the no-ducking graph), `pipeline/runner.py` and `api/clips.py` (the two call sites), `tests/test_ducking_matrix.py` (the eight-case matrix) and the four test files it touched | The product fix and its guards travel together, as they did at M5. **The no-speech case of the matrix fails without the fix**, at a measured ratio of 0.915 against a flat render — the guard is proven, not assumed |
-| — | The M5.1 documentation: the matrix, the ledger, the audit, the regression report, the performance report, the security review and this report | Documentation only, in its own commit, so the product diff stays reviewable |
+| `b59605b` | The M5.1 documentation: the matrix, the ledger, the audit, the regression report, the performance report, the security review and this report | Documentation only, in its own commit, so the product diff stays reviewable |
 
 The full, dated list is in `docs/UPGRADE-LEDGER.md` §Change log.
 
@@ -481,6 +489,15 @@ this release was produced:
   does not. It would have shipped, because it rendered on the machine the code was written on.
 * And **the CI's own ffmpeg check was wrong** — it reported that an ffmpeg *with* the `ass`
   filter did not have one, because `grep -q` exited at the match and SIGPIPE killed the producer.
+
+M5.1 added a fifth, and it is the smallest and the most instructive of them: **an empty speech
+timeline was indistinguishable from no timeline at all**, so a clip with no talking had its music
+pulled down by whatever else the source contained. The impact was under a decibel. It was still
+worth fixing, because the two halves of the same feature — the music ducking and the webcam
+layout — were answering the same question differently, and the app's own principle is that they
+must agree. **It was found by closing a matrix row, not by a report.** The row asked for eight
+scenarios to be asserted; the assertions were written as eight *real renders* rather than eight
+string checks, and the render that failed was the one that mattered.
 
 Every one of those was found by measuring the real thing, not by reading the code and feeling
 satisfied. The tests that caught them are in the tree, and they will catch them again.

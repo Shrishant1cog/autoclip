@@ -164,6 +164,7 @@ grows; the claim that matters is the one under it, which does not go stale.
 | 23 | `ab9052e` | docs: the release run is green, and the Journey D records are complete | **success** — all six jobs green again, including the Ubuntu py3.12 leg that had failed twice |
 | 24 | `2931059` | docs: the CI run history reads the same way whichever run you look at | **success** — all six jobs green |
 | 25 | `822143e` | docs: four runs were cancelled, not three | **success** — all six jobs green |
+| 26 | `b59605b` | M5.1: the empty-timeline fix and the eight-case ducking matrix, with their tests | **success** — all six jobs green, including the Ubuntu py3.12 leg |
 
 **Every run on this branch since the two failures was green.** Two of the runs failed, and **both
 failures were real defects** — not flakes, and neither was explained away. Four runs were cancelled
