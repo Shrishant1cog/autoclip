@@ -157,7 +157,39 @@ export function Settings() {
               })
             }
           />
+          <NumberField
+            label="Request timeout (s)"
+            value={settings.providers[settings.active_provider]?.timeout_s ?? 0}
+            onCommit={(value) =>
+              patch({
+                providers: {
+                  [settings.active_provider]: {
+                    ...settings.providers[settings.active_provider],
+                    timeout_s: value,
+                  },
+                },
+              })
+            }
+          />
+          <NumberField
+            label="Context window (tokens)"
+            value={settings.providers[settings.active_provider]?.context_tokens ?? 0}
+            onCommit={(value) =>
+              patch({
+                providers: {
+                  [settings.active_provider]: {
+                    ...settings.providers[settings.active_provider],
+                    context_tokens: value,
+                  },
+                },
+              })
+            }
+          />
         </div>
+        <p className="mt-3 text-xs leading-snug text-ink-500">
+          0 uses the provider&apos;s own default. A local model without a GPU can take many minutes
+          for one request, and its prompt has to fit the context window it is given.
+        </p>
       </Section>
 
       <Section title="Keys" note="Stored in your OS keyring. Never sent anywhere but the provider.">

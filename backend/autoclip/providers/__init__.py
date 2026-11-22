@@ -14,6 +14,7 @@ from .base import (
     ClipCandidates,
     DetectionConfig,
     LLMProvider,
+    PromptBudget,
     ProviderError,
     ProviderStatus,
     TranscriptWindow,
@@ -32,6 +33,7 @@ __all__ = [
     "LLMProvider",
     "OllamaProvider",
     "OpenAIProvider",
+    "PromptBudget",
     "ProviderError",
     "ProviderStatus",
     "TranscriptWindow",
@@ -77,6 +79,8 @@ def build_provider(name: str | None = None, settings: Settings | None = None) ->
         provider_settings.model,
         api_key=api_key,
         base_url=provider_settings.base_url,
+        timeout_s=provider_settings.timeout_s,
+        context_tokens=provider_settings.context_tokens,
     )
 
 

@@ -92,7 +92,17 @@ async def put_settings(payload: SettingsIn) -> SettingsOut:
     if "providers" in updates:
         for name, values in updates["providers"].items():
             provider_settings = settings.provider(name)
-            settings.providers[name] = provider_settings.model_copy(update=values)
+            try:
+                # Validated, not merely copied: a negative timeout or a
+                # context window of zero would otherwise be stored and
+                # used as if it were a number.
+                settings.providers[name] = provider_settings.model_validate(
+                    provider_settings.model_dump() | values
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid {name} provider settings: {exc}"
+                ) from exc
 
     if settings.clips.min_duration_s >= settings.clips.max_duration_s:
         raise HTTPException(

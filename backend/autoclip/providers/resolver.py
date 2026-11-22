@@ -54,7 +54,15 @@ def build_preset_provider(
     from . import PROVIDERS
 
     cls = PROVIDERS[adapter_cls]
-    return cls(use_model, api_key=api_key, base_url=use_base_url)
+    return cls(
+        use_model,
+        api_key=api_key,
+        base_url=use_base_url,
+        # The adapter's own limits — a local model's request timeout and
+        # context window — travel with the adapter, whichever path built it.
+        timeout_s=provider_settings.timeout_s,
+        context_tokens=provider_settings.context_tokens,
+    )
 
 
 def resolve_chain(

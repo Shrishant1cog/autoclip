@@ -122,6 +122,26 @@ class TestSettings:
 
         assert response.status_code == 400
 
+    def test_the_provider_timeout_and_context_are_stored(self, client: TestClient) -> None:
+        """A local model needs both: one request can outlast a fixed ceiling,
+        and the prompt has to fit the context the server is running with."""
+        response = client.put(
+            "/api/settings",
+            json={"providers": {"ollama": {"timeout_s": 900, "context_tokens": 8192}}},
+        )
+
+        assert response.status_code == 200
+        provider = response.json()["providers"]["ollama"]
+        assert provider["timeout_s"] == 900
+        assert provider["context_tokens"] == 8192
+
+    def test_a_negative_provider_timeout_is_rejected(self, client: TestClient) -> None:
+        """The update path validated nothing before, so a negative timeout
+        would have been stored and used as if it were a number."""
+        response = client.put("/api/settings", json={"providers": {"ollama": {"timeout_s": -1}}})
+
+        assert response.status_code == 400
+
     def test_secrets_are_never_returned(self, client: TestClient, fake_keyring) -> None:
         client.put("/api/settings/secrets", json={"key": "anthropic", "value": "sk-secret-value"})
 

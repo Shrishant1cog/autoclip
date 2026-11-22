@@ -42,8 +42,22 @@ class OpenAIProvider(LLMProvider):
     #: literal, so a URL scan would miss it.
     DEFAULT_ENDPOINT = "https://api.openai.com/v1"
 
-    def __init__(self, model: str = "", *, api_key: str | None = None, base_url: str | None = None):
-        super().__init__(model or DEFAULT_MODEL, api_key=api_key, base_url=base_url)
+    def __init__(
+        self,
+        model: str = "",
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        timeout_s: int = 0,
+        context_tokens: int = 0,
+    ):
+        super().__init__(
+            model or DEFAULT_MODEL,
+            api_key=api_key,
+            base_url=base_url,
+            timeout_s=timeout_s,
+            context_tokens=context_tokens,
+        )
 
     def _client(self):
         try:
@@ -64,6 +78,8 @@ class OpenAIProvider(LLMProvider):
         kwargs = {"api_key": key}
         if self.base_url:
             kwargs["base_url"] = self.base_url
+        if self.timeout_s:
+            kwargs["timeout"] = self.timeout_s
         return AsyncOpenAI(**kwargs)
 
     def _is_local(self) -> bool:

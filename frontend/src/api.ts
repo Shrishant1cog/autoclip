@@ -394,7 +394,10 @@ export interface ProviderStatus {
 
 export interface Settings {
   active_provider: string
-  providers: Record<string, { model: string; base_url: string | null }>
+  providers: Record<
+    string,
+    { model: string; base_url: string | null; timeout_s: number; context_tokens: number }
+  >
   whisper: { model: string; compute_type: string; language: string; diarization: boolean }
   transcription?: {
     engine: 'auto' | 'elevenlabs' | 'local'

@@ -25,12 +25,27 @@ class GeminiProvider(LLMProvider):
     #: Where the Google SDK sends requests when no base_url is configured.
     DEFAULT_ENDPOINT = "https://generativelanguage.googleapis.com"
 
-    def __init__(self, model: str = "", *, api_key: str | None = None, base_url: str | None = None):
-        super().__init__(model or DEFAULT_MODEL, api_key=api_key, base_url=base_url)
+    def __init__(
+        self,
+        model: str = "",
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        timeout_s: int = 0,
+        context_tokens: int = 0,
+    ):
+        super().__init__(
+            model or DEFAULT_MODEL,
+            api_key=api_key,
+            base_url=base_url,
+            timeout_s=timeout_s,
+            context_tokens=context_tokens,
+        )
 
     def _client(self):
         try:
             from google import genai
+            from google.genai import types
         except ImportError as exc:  # pragma: no cover - google-genai is a core dep
             raise ProviderError(
                 "The google-genai package is not installed.", provider=self.name
@@ -42,7 +57,11 @@ class GeminiProvider(LLMProvider):
                 provider=self.name,
                 hint="Add one with `autoclip config set-secret gemini`.",
             )
-        return genai.Client(api_key=self.api_key)
+        kwargs = {"api_key": self.api_key}
+        if self.timeout_s:
+            # The SDK counts this one in milliseconds.
+            kwargs["http_options"] = types.HttpOptions(timeout=self.timeout_s * 1000)
+        return genai.Client(**kwargs)
 
     async def _complete(self, system: str, user: str, config: DetectionConfig) -> str:
         from google.genai import types

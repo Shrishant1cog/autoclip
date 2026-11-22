@@ -24,8 +24,22 @@ class AnthropicProvider(LLMProvider):
     #: Where the Anthropic SDK sends requests when no base_url is configured.
     DEFAULT_ENDPOINT = "https://api.anthropic.com"
 
-    def __init__(self, model: str = "", *, api_key: str | None = None, base_url: str | None = None):
-        super().__init__(model or DEFAULT_MODEL, api_key=api_key, base_url=base_url)
+    def __init__(
+        self,
+        model: str = "",
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        timeout_s: int = 0,
+        context_tokens: int = 0,
+    ):
+        super().__init__(
+            model or DEFAULT_MODEL,
+            api_key=api_key,
+            base_url=base_url,
+            timeout_s=timeout_s,
+            context_tokens=context_tokens,
+        )
 
     def _client(self):
         try:
@@ -45,6 +59,8 @@ class AnthropicProvider(LLMProvider):
         kwargs = {"api_key": self.api_key}
         if self.base_url:
             kwargs["base_url"] = self.base_url
+        if self.timeout_s:
+            kwargs["timeout"] = self.timeout_s
         return AsyncAnthropic(**kwargs)
 
     async def _complete(self, system: str, user: str, config: DetectionConfig) -> str:

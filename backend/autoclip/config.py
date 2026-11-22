@@ -65,6 +65,24 @@ class ProviderSettings(BaseModel):
     #: OpenRouter, Groq, DeepSeek, or a local LM Studio server is the supported
     #: way to use any other vendor.
     base_url: str | None = None
+    #: How long to wait for one request before giving up, in seconds. 0 uses
+    #: the provider's own default.
+    #:
+    #: This is a setting rather than a constant because the honest answer
+    #: depends on the machine: a local model with no GPU runs on the CPU, and
+    #: one detection call over an eight-minute window was measured at 1,993 s
+    #: on an eight-core CPU. A fixed ceiling shorter than that fails jobs
+    #: that were about to succeed, and tells the user to try again — which
+    #: reproduces the failure exactly.
+    timeout_s: int = Field(default=0, ge=0)
+    #: The context window to ask the provider for, in tokens. 0 uses the
+    #: provider's own default.
+    #:
+    #: The detection prompt and the answer have to fit inside it together.
+    #: A prompt larger than the context is not rejected by the model
+    #: server — it is truncated, silently, and the model answers from a
+    #: partial transcript.
+    context_tokens: int = Field(default=0, ge=0)
 
 
 class WhisperSettings(BaseModel):

@@ -14,7 +14,16 @@ import logging
 
 import httpx
 
-from .base import DetectionConfig, LLMProvider, ProviderError, ProviderStatus
+from ..errors import TIMEOUT
+from .base import (
+    CHARS_PER_TOKEN,
+    DetectionConfig,
+    LLMProvider,
+    PromptBudget,
+    ProviderError,
+    ProviderStatus,
+    render_window_overhead,
+)
 
 log = logging.getLogger(__name__)
 
@@ -30,8 +39,29 @@ RECOMMENDED_MODELS = [
     "gemma2:9b",
 ]
 
-#: Highlight detection over an 8-minute window is slow on consumer hardware.
-_REQUEST_TIMEOUT = httpx.Timeout(600.0, connect=5.0)
+#: How long to wait for one request before giving up, in seconds.
+#:
+#: Highlight detection over an eight-minute window is slow on consumer
+#: hardware, and slower still when there is no GPU: one such call was
+#: measured on an eight-core CPU at 1,993 s, of which 554 s went into
+#: evaluating the prompt alone. The old ceiling of 600 s was shorter than
+#: calls that were about to succeed, so it failed jobs that had not
+#: actually gone wrong — and told the user to try again, which reproduced
+#: the failure exactly.
+DEFAULT_TIMEOUT_S = 3600.0
+
+#: The context window to ask Ollama for, in tokens.
+#:
+#: Ollama's own default is 4,096. The detection prompt for one
+#: eight-minute window measured 5,862 tokens, so the prompt alone did not
+#: fit: the server truncated it without saying so, the model answered from
+#: a partial transcript, and the request ran for half an hour without
+#: finishing. 8,192 holds the prompt and the answer together.
+DEFAULT_CONTEXT_TOKENS = 8192
+
+#: The smallest answer worth asking for. Below this a model cannot finish
+#: a JSON object of clip candidates.
+MIN_ANSWER_TOKENS = 256
 
 
 class OllamaProvider(LLMProvider):
@@ -40,12 +70,48 @@ class OllamaProvider(LLMProvider):
     #: Ollama is local by definition; the endpoint is the loopback address.
     DEFAULT_ENDPOINT = DEFAULT_BASE_URL
 
-    def __init__(self, model: str = "", *, api_key: str | None = None, base_url: str | None = None):
-        super().__init__(model, api_key=api_key, base_url=base_url or DEFAULT_BASE_URL)
+    def __init__(
+        self,
+        model: str = "",
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        timeout_s: int = 0,
+        context_tokens: int = 0,
+    ):
+        super().__init__(
+            model,
+            api_key=api_key,
+            base_url=base_url or DEFAULT_BASE_URL,
+            timeout_s=timeout_s,
+            context_tokens=context_tokens,
+        )
+        #: The effective request timeout, in seconds.
+        self.request_timeout_s = float(timeout_s) if timeout_s else DEFAULT_TIMEOUT_S
+        #: The effective context window, in tokens.
+        self.context_window = int(context_tokens) if context_tokens else DEFAULT_CONTEXT_TOKENS
 
     @property
     def url(self) -> str:
         return (self.base_url or DEFAULT_BASE_URL).rstrip("/")
+
+    def answer_budget(self, config: DetectionConfig) -> int:
+        """How many tokens the answer may take.
+
+        The prompt and the answer have to fit in the context together. A
+        budget as large as the whole context leaves nothing for the prompt,
+        which is what made the server truncate it and then run for an hour.
+        A quarter of the context is the share a detection answer needs: the
+        measured answer for a ten-clip window was 875 tokens.
+        """
+        reserve = max(MIN_ANSWER_TOKENS, self.context_window // 4)
+        return min(config.max_output_tokens, reserve)
+
+    def prompt_budget(self, config: DetectionConfig) -> PromptBudget:
+        """How much of a prompt this provider can take."""
+        fixed = len(self._system_prompt(config)) + render_window_overhead(config)
+        room = self.context_window - self.answer_budget(config)
+        return PromptBudget(max_chars=int(room * CHARS_PER_TOKEN), fixed_chars=fixed)
 
     async def _complete(self, system: str, user: str, config: DetectionConfig) -> str:
         if not self.model:
@@ -65,12 +131,19 @@ class OllamaProvider(LLMProvider):
             "format": "json",
             "options": {
                 "temperature": config.temperature,
-                "num_predict": config.max_output_tokens,
+                "num_predict": self.answer_budget(config),
+                # Ask for the context this request needs, explicitly. Ollama
+                # re-reads the model with it when it differs from the one
+                # already loaded; left to its own default of 4,096, a prompt
+                # larger than that is truncated without a word of complaint.
+                "num_ctx": self.context_window,
             },
         }
 
         try:
-            async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(self.request_timeout_s, connect=5.0)
+            ) as client:
                 response = await client.post(f"{self.url}/api/generate", json=payload)
                 response.raise_for_status()
                 data = response.json()
@@ -82,20 +155,40 @@ class OllamaProvider(LLMProvider):
             ) from exc
         except httpx.TimeoutException as exc:
             raise ProviderError(
-                "Ollama timed out.",
+                f"Ollama did not answer within {self.request_timeout_s:.0f} s.",
                 provider=self.name,
+                code=TIMEOUT,
                 hint=(
-                    "Large transcripts on a small GPU can exceed the limit. Try a smaller "
-                    "model, or use a hosted provider for this video."
+                    "A local model runs on the CPU when no GPU is present, and one "
+                    "detection call over a long window can take many minutes. "
+                    "Raise the request timeout in Settings → AI Providers, use a "
+                    "faster model, or use a hosted provider if you have one."
                 ),
             ) from exc
         except httpx.HTTPStatusError as exc:
             raise _translate_status(exc, self.name, self.model) from exc
 
+        prompt_tokens = data.get("prompt_eval_count", 0) or 0
         self._record_usage(
-            input_tokens=data.get("prompt_eval_count", 0) or 0,
+            input_tokens=prompt_tokens,
             output_tokens=data.get("eval_count", 0) or 0,
         )
+
+        # The server does not say when it has truncated a prompt: it simply
+        # answers from what is left. Catching it here is the difference
+        # between a wrong answer and an honest failure.
+        room = self.context_window - self.answer_budget(config)
+        if prompt_tokens > room:
+            raise ProviderError(
+                f"The prompt was larger than Ollama's context window: "
+                f"{prompt_tokens} token(s) of prompt, {room} available.",
+                provider=self.name,
+                hint=(
+                    "Raise the context window in Settings → AI Providers, or use a "
+                    "model with a larger context."
+                ),
+            )
+
         return data.get("response", "")
 
     async def health_check(self) -> ProviderStatus:

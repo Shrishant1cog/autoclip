@@ -17,6 +17,7 @@ from collections.abc import Callable
 
 from .. import resources
 from ..db.models import Clip, new_id
+from ..errors import TIMEOUT, classify
 from ..providers import ClipCandidate, DetectionConfig, LLMProvider, TranscriptWindow
 from ..providers.base import ProviderConsentRequired
 from . import boundaries
@@ -47,8 +48,15 @@ def build_windows(
     *,
     window_s: float = WINDOW_S,
     overlap_s: float = OVERLAP_S,
+    max_chars: int | None = None,
 ) -> list[TranscriptWindow]:
     """Split a transcript into overlapping windows.
+
+    ``max_chars`` caps how much text one window may hold. It is how a
+    provider with a small context keeps the prompt inside that context: a
+    prompt that does not fit is not rejected by the model server, it is
+    truncated without a word of complaint, and the model answers from a
+    partial transcript.
 
     Preconditions:
         overlap_s is less than window_s, otherwise windows would never advance.
@@ -66,8 +74,16 @@ def build_windows(
         window_start_time = transcript.words[cursor].start
         window_end_time = window_start_time + window_s
 
+        # The transcript's rendered size is measured as the window is built,
+        # word by word, so the budget is a fact about the window rather than
+        # an estimate from an average word.
         last = cursor
+        used = _word_cost(transcript, cursor)
         while last + 1 < total_words and transcript.words[last + 1].end <= window_end_time:
+            cost = _added_cost(transcript, last, last + 1)
+            if max_chars is not None and used + cost > max_chars:
+                break
+            used += cost
             last += 1
 
         windows.append(_make_window(transcript, cursor, last))
@@ -77,11 +93,50 @@ def build_windows(
 
         # Step forward by (window - overlap), measured in time then converted
         # back to a word index so overlap stays constant regardless of pace.
-        next_time = transcript.words[last].end - overlap_s
+        # The overlap is never more than half the window: a window cut short
+        # by the character budget can be shorter than the overlap itself, and
+        # then the windows would stop advancing.
+        span = transcript.words[last].end - transcript.words[cursor].start
+        next_time = transcript.words[last].end - min(overlap_s, span / 2)
         next_cursor = transcript.index_at_time(next_time)
         cursor = max(cursor + 1, next_cursor)
 
     return windows
+
+
+def _window_budget(provider: LLMProvider, config: DetectionConfig) -> int | None:
+    """How many characters of transcript one window may hold.
+
+    A provider that knows how much prompt it can take decides; one that
+    does not — every hosted provider, whose context dwarfs any window this
+    product builds — leaves the window size alone.
+    """
+    planner = getattr(provider, "prompt_budget", None)
+    if not callable(planner):
+        return None
+    budget = planner(config)
+    if budget is None:
+        return None
+    return budget.window_chars
+
+
+def _word_cost(transcript: Transcript, index: int) -> int:
+    """Characters one word takes when the window is rendered."""
+    return len(f"[{index}]{transcript.words[index].text}")
+
+
+def _added_cost(transcript: Transcript, previous: int, current: int) -> int:
+    """Characters appending word ``current`` adds to a rendered window.
+
+    Mirrors :func:`render_window_text`: the word is tagged with its index and
+    separated by a space, and a speaker change adds a marker.
+    """
+    cost = _word_cost(transcript, current) + 1
+    word = transcript.words[current]
+    previous_word = transcript.words[previous]
+    if word.speaker and word.speaker != previous_word.speaker:
+        cost += len(f"\n<{word.speaker}>")
+    return cost
 
 
 def _make_window(transcript: Transcript, first: int, last: int) -> TranscriptWindow:
@@ -142,7 +197,10 @@ async def detect(
     counted and said out loud: analysing less of the video than the job
     claims to would be a quiet lie.
     """
-    windows = build_windows(transcript)
+    windows = build_windows(
+        transcript,
+        max_chars=_window_budget(provider, config),
+    )
     if not windows:
         raise HighlightError("The transcript is empty, so there is nothing to clip.")
 
@@ -168,6 +226,8 @@ async def detect(
     completed = 0
     failures = 0
     last_error: Exception | None = None
+    not_attempted = 0
+    stop = False
     lock = asyncio.Lock()
 
     # The windows run concurrently against one provider, so the provider's
@@ -176,8 +236,16 @@ async def detect(
     usage_before = provider.total_usage.snapshot()
 
     async def run_window(window: TranscriptWindow) -> list[ClipCandidate]:
-        nonlocal completed, failures, last_error
+        nonlocal completed, failures, last_error, not_attempted, stop
         async with semaphore:
+            if stop:
+                # A timeout leaves the provider still working on the request
+                # we gave up on — the local server keeps generating it. The
+                # next window would queue behind that work and burn its own
+                # timeout without ever starting, so it is not sent.
+                async with lock:
+                    not_attempted += 1
+                return []
             try:
                 result = await provider.detect_highlights(window, config)
                 candidates = result.clips
@@ -190,7 +258,7 @@ async def detect(
             except Exception as exc:
                 # One bad window shouldn't lose the whole video's other windows.
                 log.warning(
-                    "Window %d-%d failed (%s); continuing with the remaining windows.",
+                    "Window %d-%d failed (%s).",
                     window.first_word,
                     window.last_word,
                     exc,
@@ -199,6 +267,8 @@ async def detect(
                 async with lock:
                     failures += 1
                     last_error = exc
+                    if classify(exc).code == TIMEOUT:
+                        stop = True
             async with lock:
                 completed += 1
                 if on_progress:
@@ -217,7 +287,13 @@ async def detect(
     if not candidates:
         # Reporting "no clips" when every request actually failed hides the real
         # cause (bad model, revoked key, outage) behind a misleading suggestion.
-        if failures == len(windows) and last_error is not None:
+        if last_error is not None and (not_attempted or failures == len(windows)):
+            if not_attempted:
+                raise HighlightError(
+                    f"Highlight detection stopped after the first window timed out. "
+                    f"Original error: {last_error} "
+                    f"{not_attempted} window(s) of this video were not analysed."
+                )
             raise HighlightError(
                 f"Highlight detection failed in every window. Original error: {last_error}"
             )

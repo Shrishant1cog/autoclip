@@ -67,7 +67,10 @@ _HINTS: dict[str, str] = {
     RATE_LIMIT: "Too many requests. This usually clears on its own in a minute.",
     PROVIDER: "Every AI provider failed. Add a key in Settings → AI Providers.",
     NETWORK: "The connection dropped. Check your network and try again.",
-    TIMEOUT: "The operation took too long. Try again, or use a smaller source.",
+    TIMEOUT: (
+        "The operation took too long. Raise the provider's request timeout in "
+        "Settings → AI Providers, or use a faster model."
+    ),
     NOT_FOUND: "That item no longer exists.",
     VALIDATION: "The request was not valid.",
     CONFIG: "Check the settings for this feature.",

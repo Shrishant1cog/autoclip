@@ -39,18 +39,52 @@ log = logging.getLogger(__name__)
 
 PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
+#: How many characters of text one token is worth.
+#:
+#: Measured on the transcripts this product handles: a Devanagari transcript
+#: worked out at 5,862 tokens for 12,121 characters — about 2.1 characters
+#: per token — and an English one at about 4. Two is the conservative
+#: default: it over-counts tokens for Latin scripts, so a window ends up
+#: smaller than it strictly needed to be rather than larger. A prompt that
+#: does not fit is silently truncated by the model server, so the estimate
+#: has to err on the side of "smaller".
+CHARS_PER_TOKEN = 2.0
+
 
 class ProviderError(RuntimeError):
     """A provider could not produce a usable response."""
 
-    def __init__(self, message: str, *, provider: str = "", hint: str = "") -> None:
+    def __init__(self, message: str, *, provider: str = "", hint: str = "", code: str = "") -> None:
         super().__init__(message)
         self.provider = provider
         self.hint = hint
+        #: An explicit classification, when the provider knows exactly what
+        #: went wrong. :func:`autoclip.errors.classify` honours it, so a
+        #: timeout stays a timeout instead of being filed as a generic
+        #: provider failure.
+        self.code = code
 
     def __str__(self) -> str:
         base = super().__str__()
         return f"{base}\n\n{self.hint}" if self.hint else base
+
+
+@dataclass(frozen=True)
+class PromptBudget:
+    """How much of a prompt the provider can take.
+
+    ``max_chars`` is the whole prompt — the standing instructions and the
+    transcript together. ``fixed_chars`` is the part that does not vary with
+    the window, so what is left for the transcript is the difference.
+    """
+
+    max_chars: int
+    fixed_chars: int
+
+    @property
+    def window_chars(self) -> int:
+        """Characters left for the transcript itself."""
+        return max(0, self.max_chars - self.fixed_chars)
 
 
 class ProviderConsentRequired(ProviderError):
@@ -223,10 +257,24 @@ class LLMProvider(ABC):
     #: policy classifies the real destination instead of guessing.
     DEFAULT_ENDPOINT: str = ""
 
-    def __init__(self, model: str, *, api_key: str | None = None, base_url: str | None = None):
+    def __init__(
+        self,
+        model: str,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        timeout_s: int = 0,
+        context_tokens: int = 0,
+    ):
         self.model = model
         self.api_key = api_key
         self.base_url = base_url
+        #: How long to wait for one request, in seconds. 0 means the
+        #: provider's own default.
+        self.timeout_s = timeout_s
+        #: The context window to ask for, in tokens. 0 means the provider's
+        #: own default.
+        self.context_tokens = context_tokens
         #: What the most recent call cost (Phase 16). Reset on every call, so
         #: a caller can read it straight after a request without having to
         #: subtract anything.
@@ -251,6 +299,17 @@ class LLMProvider(ABC):
     @abstractmethod
     async def health_check(self) -> ProviderStatus:
         """Report whether this provider is usable right now."""
+
+    def prompt_budget(self, config: DetectionConfig) -> PromptBudget | None:
+        """How much of a prompt this provider can take, if it has a limit.
+
+        ``None`` means the provider's context is far larger than any window
+        this product builds, so there is nothing to plan around. A provider
+        that does have a limit says so here, and the pipeline sizes its
+        windows to fit — because a prompt that does not fit is truncated by
+        the model server without a word of complaint.
+        """
+        return None
 
     # -- shared behaviour --------------------------------------------------
 
@@ -393,16 +452,13 @@ class LLMProvider(ABC):
             data_summary=data_summary,
         )
 
-    async def detect_highlights(
-        self, window: TranscriptWindow, config: DetectionConfig
-    ) -> ClipCandidates:
-        """Ask the model for clip candidates in ``window``, validating the reply.
+    def _system_prompt(self, config: DetectionConfig) -> str:
+        """The standing instructions sent with every detection call.
 
-        One retry is attempted on a schema violation, feeding the validation
-        error back so the model can correct itself.
+        Factored out of :meth:`detect_highlights` so the prompt budget can
+        be computed from the very same text that will be sent.
         """
         system = load_prompt(config.prompt_version)
-        user = render_window_prompt(window, config)
 
         # Phase 11: the user's improve.txt standing instructions ride along on
         # every detection call. A read failure must never break detection.
@@ -420,6 +476,19 @@ class LLMProvider(ABC):
             system += trend_research.prompt_section(trend_research.cached_context())
         except Exception:  # noqa: BLE001
             log.debug("Could not load the trend context.", exc_info=True)
+
+        return system
+
+    async def detect_highlights(
+        self, window: TranscriptWindow, config: DetectionConfig
+    ) -> ClipCandidates:
+        """Ask the model for clip candidates in ``window``, validating the reply.
+
+        One retry is attempted on a schema violation, feeding the validation
+        error back so the model can correct itself.
+        """
+        system = self._system_prompt(config)
+        user = render_window_prompt(window, config)
 
         raw = await self._send(system, user, config)
         try:
@@ -517,6 +586,18 @@ def render_window_prompt(window: TranscriptWindow, config: DetectionConfig) -> s
 
 
 _JSON_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
+
+
+def render_window_overhead(config: DetectionConfig) -> int:
+    """Characters the window prompt spends on everything but the transcript.
+
+    The instructions around the transcript — the word range, the clip-length
+    rule, the reply instruction — cost the same whatever the window holds,
+    so they are measured once, on an empty window, and taken off the
+    budget the transcript gets.
+    """
+    empty = TranscriptWindow(text="", first_word=0, last_word=0)
+    return len(render_window_prompt(empty, config))
 
 
 def extract_json_object(raw: str) -> dict[str, Any]:
