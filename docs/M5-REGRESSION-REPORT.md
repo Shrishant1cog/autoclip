@@ -255,6 +255,7 @@ grows; the claim that matters is the one under it, which does not go stale.
 | 38 | `0a39623` | docs: M5.3 — a claim that contradicted the count next to it | **success** — all six jobs green — [run 44954553153](https://github.com/Shrishant1cog/autoclip/actions/runs/44954553153). The last run before the M5.4 work |
 | 39 | `74ec3eb` | Exports: five defects the run's own diagnostics found | **success** — all six jobs green — [run 45144508403](https://github.com/Shrishant1cog/autoclip/actions/runs/45144508403). The whole M5.4 code tree — the three M5.4 code commits together: the provider limits, the export names, the crop-safety measurement, the shared duplicate rule, the boundary clamp and the tracker tolerance, all exercised on every CI job |
 | 40 | `722afb7` | docs: M5.4 — a second real source, run twice, and nine defects | **success** — all six jobs green — [run 45146983505](https://github.com/Shrishant1cog/autoclip/actions/runs/45146983505). The M5.4 documentation tree — the eight files that carry the second source's evidence |
+| 41 | `0af44dc` | docs: M5.4 -- the two runs, compared byte by byte | **success** — all six jobs green — [run 45161730246](https://github.com/Shrishant1cog/autoclip/actions/runs/45161730246). The tree that carries the two-run comparison, **K32** and **R8** |
 
 > **One commit on this branch has no workflow run at all.** `9fdc6ae` — *"docs: M5.3 — a count
 > that did not survive being read back"* — is on the branch, between runs 35 and 36, and GitHub's
@@ -265,7 +266,7 @@ grows; the claim that matters is the one under it, which does not go stale.
 > narrower one below, and it is checked by a script rather than by eye.
 
 
-**Runs 31, 33, 34, 35, 36, 37, 38, 39 and 40 are green on all six jobs, and run 32 was cancelled.** Run 31
+**Runs 31, 33, 34, 35, 36, 37, 38, 39, 40 and 41 are green on all six jobs, and run 32 was cancelled.** Run 31
 was the first to exercise the defect-13 fix on every CI job. Run 32 is the evidence-correction
 commit — it was **cancelled** by the concurrency group when the next commit was pushed, with five
 of its six jobs already green: a cancellation, not a failure, and the sixth (Windows) was cancelled
@@ -276,6 +277,8 @@ green on all six jobs. **Run 39 is the whole M5.4 code tree** — the three M5.4
 together — and it is green on all six jobs, so every M5.4 guard was exercised on the Ubuntu 3.11,
 Ubuntu 3.12, macOS 3.12 and Windows 3.12 legs, and the Docker image built and smoke-tested on top
 of it. **Run 40 is the M5.4 documentation tree**, and it is green on all six jobs too.
+**Run 41 is the tree that carries the two-run comparison, K32 and R8**, and it is green on all six
+jobs as well.
 
 > **Why this table stops here.** A commit that records a CI run is itself run by CI, and
 > recording *its* run would need another commit — which would need another. The table therefore

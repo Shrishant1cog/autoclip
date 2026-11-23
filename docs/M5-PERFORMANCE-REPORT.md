@@ -499,13 +499,16 @@ spread on identical work. **K29** keeps this open, and this report does not pret
 
 - **The whole-pipeline rate is **≈8.3× real time** on this source, against **≈6.05×** on M5.3's.
   The difference is almost entirely the **detection stage**: **1,568.6 s** here against **425.1 s**
-  there, for windows of a comparable size. **The gap is not explained**, and it is not explained
-  away here either — the M5.3 source produced a transcript the local model handled in **425 s**
-  across two windows, and this one took **1,568.6 s** across two windows of **900** and **525**
-  words. The prompt sizes are close — this run's two user prompts are **8,402** and **5,264**
-  characters, **13,666** in total — so the extra time is not a larger prompt on its own. It is
-  recorded as an **open question**, and **K29** already says the honest thing: a local model on a
-  CPU can be slow enough to look broken, and the product does not bound that.
+  there. **That gap is not explained**, and this report does not explain it away: M5.3's first window
+  covered the opening **480 s** of a **1,128-word** transcript and was answered in **174.8 s**,
+  where M5.4's **885**-word window took **882.0 s**. It is **not** machine load — the transcription
+  rate on this machine was **2.17×** real time at M5.3 and **2.38×** at M5.4 — and it is **not** the
+  request shape alone, because the **same** payload hand-sent to the same server with
+  `num_ctx: 8192` took **1,992.9 s** against the application's **881,989 ms**, a **2.26×** spread on
+  identical work. The request shape **did** change between the two increments (`num_ctx`
+  **4,096 → 8,192**, the change defect 17 introduced), and it remains a candidate; it is **not**
+  proven. **K29** says the honest thing: a local model on a CPU can be slow enough to look broken,
+  and the product does not bound that.
   **Amended at the second run:** the difference **between the two M5.4 runs** is now explained — the
   prompts grew with the transcript and the time grew with the prompts (see *The detection time is
   the prompt size*) — and the gap **against M5.3** is measured rather than guessed: it is **not**
