@@ -164,8 +164,14 @@ def _match_score(track: FaceTrack, observation: FaceObservation) -> float:
     # At 5 fps a person can move further than their own face width between
     # samples, which zeroes IoU on a perfectly good match. Fall back to
     # proximity scaled by face size.
+    #
+    # The scale is the *smaller* of the two faces: that is the person's own
+    # face width, and it is what the rule has always said. Using the larger
+    # one instead lets a track jump to a much smaller face that happens to be
+    # nearby — a face-shaped object on a shelf behind the speaker, say — and
+    # the crop then pans away from the speaker to follow it.
     distance = ((last.cx - observation.cx) ** 2 + (last.cy - observation.cy) ** 2) ** 0.5
-    tolerance = max(last.width, observation.width) * CENTRE_DISTANCE_FACTOR
+    tolerance = min(last.width, observation.width) * CENTRE_DISTANCE_FACTOR
     if distance <= tolerance:
         return 1.0 - (distance / tolerance)
 

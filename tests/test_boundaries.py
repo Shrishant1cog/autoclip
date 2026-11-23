@@ -221,3 +221,31 @@ class TestSilenceAlignment:
 
         assert result is not None
         assert result.duration_s <= 12.0
+
+    def test_the_start_never_lands_after_the_first_word(self) -> None:
+        """The cut never falls inside the first word of the clip.
+
+        The silence detector and the recogniser disagree by a few tens of
+        milliseconds now and then. When the silence starts *after* the word
+        does, the alignment used to follow the silence and cut the word in
+        half; the caption for that word then began before the clip did. Two
+        clips of a real run were reported for exactly this.
+        """
+        # The word starts at 5.0; the silence detector says 5.012 onwards.
+        silences = [Silence(start=5.012, end=5.359)]
+
+        aligned = boundaries.align_start(5.0, silences)
+
+        assert aligned <= 5.0
+
+    def test_a_clip_never_opens_inside_a_word(self, transcript: Transcript) -> None:
+        """The whole of the first word is inside the clip it belongs to."""
+        # The silence detector puts the silence after the word's own start.
+        silences = [Silence(start=5.012, end=5.359)]
+
+        result = boundaries.refine(
+            transcript, 10, 39, silences=silences, min_duration_s=5.0, max_duration_s=12.0
+        )
+
+        assert result is not None
+        assert transcript.words[result.start_word].start >= result.start_s

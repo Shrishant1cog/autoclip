@@ -278,10 +278,20 @@ async def export_clip(clip_id: str, payload: ExportRequestIn) -> ExportOut:
     workspace = JobWorkspace(clip.job_id)
     crop_path = await asyncio.to_thread(_crop_path_for, workspace, clip, source, payload.ratio)
 
+    # Two clips of one job can carry the same title — the model chose it —
+    # and the exports share one directory. The names are made unique against
+    # the whole set, so a re-export never overwrites another clip's file.
+    siblings = await asyncio.to_thread(store.list_clips, clip.job_id)
+    sibling_titles = [other.title or f"clip-{other.rank}" for other in siblings]
     destination = (
         paths.exports_dir()
         / clip.job_id
-        / export_module.output_filename(clip.title or f"clip-{clip.rank}", payload.ratio)
+        / export_module.unique_output_filename(
+            clip.title or f"clip-{clip.rank}",
+            payload.ratio,
+            rank=clip.rank,
+            sibling_titles=sibling_titles,
+        )
     )
 
     # The music and the ducking are the user's choices, not the pipeline's

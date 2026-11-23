@@ -178,9 +178,7 @@ def build_crop_path(
     # The faces the plan was built around travel with the plan. They are the
     # only face rectangles that belong to this clip, in this clip's time base;
     # anything measured elsewhere cannot say whether *this* crop kept the face.
-    faces = [
-        FaceRect(t=o.t, x=o.left, y=o.top, width=o.width, height=o.height) for o in observations
-    ]
+    faces = [_face_rect(o) for o in observations]
     return CropPath(
         source_width=source_w,
         source_height=source_h,
@@ -334,6 +332,10 @@ def _track_segment(
         height=crop_h,
         keyframes=keyframes,
         strategy=Strategy.TRACK,
+        # The face this crop follows. It travels with the plan so that
+        # "did the crop keep the face it was built around?" can be answered
+        # from the plan itself.
+        faces=[_face_rect(o) for o in observations],
     )
 
 
@@ -379,6 +381,7 @@ def _wide_segment(
             keyframes=[CropKeyframe(t=start_s, x=0.0, y=0.0)],
             strategy=Strategy.WIDE,
             fit=True,
+            faces=[_face_rect(o) for o in observations],
         )
 
     centre_x = (left + right) / 2
@@ -397,6 +400,9 @@ def _wide_segment(
             )
         ],
         strategy=Strategy.WIDE,
+        # A wide shot is meant to hold everyone it can. All of them are the
+        # faces the plan was built around, and the crop has to keep them.
+        faces=[_face_rect(o) for o in observations],
     )
 
 
@@ -423,3 +429,14 @@ def _general_segment(
 
 def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(value, high)) if high > low else max(0.0, low)
+
+
+def _face_rect(observation: FaceObservation) -> FaceRect:
+    """One face observation, in the plan's own coordinates."""
+    return FaceRect(
+        t=observation.t,
+        x=observation.left,
+        y=observation.top,
+        width=observation.width,
+        height=observation.height,
+    )

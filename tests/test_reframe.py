@@ -405,6 +405,26 @@ class TestTracking:
 
         assert len(tracks) == 1
 
+    def test_a_track_does_not_jump_to_a_smaller_face_beside_it(self) -> None:
+        """A smaller face nearby is not the same person.
+
+        The face of a speaker and a face-shaped object on a shelf behind them
+        can sit within a face width of each other. Linking the two makes the
+        crop pan away from the speaker to follow the object, and the
+        speaker's face is cut while it does.
+        """
+        speaker = [self._observation(i * 0.2, 500 + i * 5) for i in range(20)]
+        impostor = [
+            FaceObservation(t=4.0, cx=775, cy=400, width=110, height=130, eye_y=360, mar=0.05),
+            FaceObservation(t=4.2, cx=775, cy=400, width=110, height=130, eye_y=360, mar=0.05),
+        ]
+
+        tracks = build_tracks(speaker + impostor)
+
+        # The speaker's track is unbroken: it still has all twenty observations.
+        assert len(tracks) == 1
+        assert len(tracks[0].observations) == 20
+
     def test_tracks_rank_by_prominence(self) -> None:
         big = [
             FaceObservation(t=i * 0.2, cx=500, cy=400, width=400, height=500, eye_y=360, mar=0.1)

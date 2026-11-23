@@ -702,3 +702,111 @@ class TestSecretsNeverLeak:
 
         assert "DEADBEEF" not in paths.config_path().read_text(encoding="utf-8")
         assert config.get_secret("anthropic") == "sk-DEADBEEF"
+
+
+class TestClipsWithTheSameTitle:
+    """Two clips of one job can carry the same title.
+
+    The exports live in one directory, so a file name built from the title
+    alone lets the second export overwrite the first: the clip is gone, and
+    its subtitles with it. A real run produced exactly that — two clips the
+    model had both called "The language of love in videos", and one export
+    file of 14 MB replaced by another of 54 MB.
+    """
+
+    TITLE = "The language of love in videos"
+
+    @pytest.fixture
+    def job(self, source: Source) -> Job:
+        from autoclip.pipeline.runner import JobWorkspace
+        from autoclip.pipeline.transcript import Transcript, Word
+
+        created = store.create_job(Job(id=new_id(), source_id=source.id, status="done"))
+        store.replace_clips(
+            created.id,
+            [
+                Clip(
+                    id=new_id(),
+                    job_id=created.id,
+                    rank=1,
+                    start_s=60.0,
+                    end_s=100.0,
+                    start_word=0,
+                    end_word=4,
+                    title=self.TITLE,
+                    score=70,
+                ),
+                Clip(
+                    id=new_id(),
+                    job_id=created.id,
+                    rank=2,
+                    start_s=120.0,
+                    end_s=160.0,
+                    start_word=10,
+                    end_word=14,
+                    title=self.TITLE,
+                    score=65,
+                ),
+            ],
+        )
+        Transcript(
+            words=[
+                Word(text=f"word{index}", start=float(index), end=float(index) + 0.5)
+                for index in range(20)
+            ]
+        ).save(JobWorkspace(created.id).transcript)
+        return created
+
+    @pytest.fixture
+    def rendered(self, monkeypatch):
+        """Capture what the renderer was asked for, without rendering anything."""
+        from autoclip.pipeline import export as export_module
+        from autoclip.pipeline import validate as validate_module
+
+        calls: list = []
+
+        def fake_export(request, *, work_dir, settings=None, **kwargs):
+            calls.append(request)
+            request.destination.parent.mkdir(parents=True, exist_ok=True)
+            request.destination.write_bytes(b"0" * 64)
+            return request.destination
+
+        monkeypatch.setattr(export_module, "export_clip", fake_export)
+        monkeypatch.setattr(
+            validate_module,
+            "validate_media",
+            lambda *args, **kwargs: validate_module.ValidationReport(
+                ok=True, checks=[], duration_s=40.0, width=1080, height=1920
+            ),
+        )
+        return calls
+
+    def test_the_two_exports_get_different_files(
+        self, client: TestClient, job: Job, rendered: list
+    ) -> None:
+        clips = client.get(f"/api/jobs/{job.id}/clips").json()
+
+        for clip in clips:
+            response = client.post(
+                f"/api/clips/{clip['id']}/export",
+                json={"ratio": "9:16", "style": "bold_pop"},
+            )
+            assert response.status_code == 201, response.text
+
+        destinations = [request.destination for request in rendered]
+        assert len(destinations) == 2
+        assert destinations[0] != destinations[1]
+
+    def test_both_exports_are_recorded(self, client: TestClient, job: Job, rendered: list) -> None:
+        clips = client.get(f"/api/jobs/{job.id}/clips").json()
+
+        for clip in clips:
+            response = client.post(
+                f"/api/clips/{clip['id']}/export",
+                json={"ratio": "9:16", "style": "bold_pop"},
+            )
+            assert response.status_code == 201, response.text
+
+        recorded = [export.path for export in store.list_exports(clips[0]["id"])]
+        recorded += [export.path for export in store.list_exports(clips[1]["id"])]
+        assert len(set(recorded)) == 2

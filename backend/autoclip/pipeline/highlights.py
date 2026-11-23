@@ -21,6 +21,7 @@ from ..errors import TIMEOUT, classify
 from ..providers import ClipCandidate, DetectionConfig, LLMProvider, TranscriptWindow
 from ..providers.base import ProviderConsentRequired
 from . import boundaries
+from .duplicates import OVERLAP_LIMIT, overlap_fraction
 from .prepare import Silence
 from .transcript import Transcript
 
@@ -409,11 +410,27 @@ def dedupe(
 
 
 def _dedupe_clips(clips: list[Clip], *, iou_threshold: float = DEDUPE_IOU) -> list[Clip]:
+    """Keep the highest-scoring clip of each overlapping cluster.
+
+    Two rules, and the second one matters more than it looks. The first
+    compares the word ranges of the candidates: two proposals of the same
+    moment have almost all their words in common. The second compares the
+    finished clips in time, because a clip *inside* another one has almost
+    no words in common with it and is the same clip twice all the same.
+
+    The second rule is the same one the diagnostic applies, so nothing the
+    pipeline keeps is a pair the diagnostic calls duplicates.
+    """
     ordered = sorted(clips, key=lambda c: c.score, reverse=True)
     kept: list[Clip] = []
     for clip in ordered:
         if any(
             _iou(clip.start_word, clip.end_word, other.start_word, other.end_word) > iou_threshold
+            for other in kept
+        ):
+            continue
+        if any(
+            overlap_fraction(clip.start_s, clip.end_s, other.start_s, other.end_s) >= OVERLAP_LIMIT
             for other in kept
         ):
             continue

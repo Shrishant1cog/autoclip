@@ -90,6 +90,15 @@ class CropSegment:
     #: wider than any crop of the target ratio can hold — cropping there would
     #: cut someone out of frame, which the acceptance bar forbids.
     fit: bool = False
+    #: The faces this segment was built around, in source-pixel coordinates
+    #: and clip-relative time.
+    #:
+    #: A crop that follows one person must keep *that* person's face in
+    #: frame. Whether it did is a question about these rectangles — the ones
+    #: the plan was actually framed on — and not about every face that
+    #: happened to be on screen. Another person may well be larger, and the
+    #: crop may well cut them: that is a framing choice, not a fault.
+    faces: list[FaceRect] = field(default_factory=list)
 
     @property
     def duration_s(self) -> float:
@@ -128,7 +137,14 @@ class CropPath:
         return {
             "source_width": self.source_width,
             "source_height": self.source_height,
-            "segments": [{**asdict(s), "strategy": s.strategy.value} for s in self.segments],
+            "segments": [
+                {
+                    **asdict(s),
+                    "strategy": s.strategy.value,
+                    "faces": [asdict(f) for f in s.faces],
+                }
+                for s in self.segments
+            ],
             "faces": [asdict(f) for f in self.faces],
         }
 
@@ -147,6 +163,7 @@ class CropPath:
                     strategy=Strategy(raw.get("strategy", "general")),
                     zoom=raw.get("zoom", 0.0),
                     fit=raw.get("fit", False),
+                    faces=[FaceRect(**f) for f in raw.get("faces", [])],
                 )
             )
         return cls(

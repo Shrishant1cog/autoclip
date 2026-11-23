@@ -266,3 +266,55 @@ class TestGraphShape:
         # Three gameplay segments and three webcam segments: six outputs.
         assert "split=6" in graph
         assert graph.count("trim=start=") == 6
+
+
+class TestExportFilenames:
+    """Two clips of one job can carry the same title.
+
+    The exports live in one directory, so a file name built from the title
+    alone lets the second export overwrite the first: the clip is gone, and
+    its subtitles with it. A real run produced exactly that — two clips the
+    model had both called "The language of love in videos", and one export
+    file of 14 MB replaced by another of 54 MB.
+    """
+
+    def test_a_title_alone_names_the_export(self) -> None:
+        assert (
+            export.output_filename("Why do we fear what others think?", "9:16")
+            == "why-do-we-fear-what-others-think_9x16.mp4"
+        )
+
+    def test_a_title_that_is_unique_keeps_its_name(self) -> None:
+        titles = ["Why do we fear what others think?", "How America is making reels"]
+
+        name = export.unique_output_filename(titles[0], "9:16", rank=1, sibling_titles=titles)
+
+        assert name == "why-do-we-fear-what-others-think_9x16.mp4"
+
+    def test_two_clips_with_the_same_title_get_different_names(self) -> None:
+        titles = ["The language of love in videos", "The language of love in videos"]
+
+        first = export.unique_output_filename(titles[0], "9:16", rank=3, sibling_titles=titles)
+        second = export.unique_output_filename(titles[1], "9:16", rank=4, sibling_titles=titles)
+
+        assert first != second
+        assert first == "the-language-of-love-in-videos-3_9x16.mp4"
+        assert second == "the-language-of-love-in-videos-4_9x16.mp4"
+
+    def test_titles_that_slug_to_the_same_name_are_told_apart(self) -> None:
+        # "Hello world!" and "Hello world?" slug to the same file name.
+        titles = ["Hello world!", "Hello world?"]
+
+        first = export.unique_output_filename(titles[0], "9:16", rank=1, sibling_titles=titles)
+        second = export.unique_output_filename(titles[1], "9:16", rank=2, sibling_titles=titles)
+
+        assert first != second
+
+    def test_the_ratio_is_still_part_of_the_name(self) -> None:
+        titles = ["The language of love in videos", "The language of love in videos"]
+
+        portrait = export.unique_output_filename(titles[0], "9:16", rank=3, sibling_titles=titles)
+        square = export.unique_output_filename(titles[0], "1:1", rank=3, sibling_titles=titles)
+
+        assert portrait.endswith("_9x16.mp4")
+        assert square.endswith("_1x1.mp4")

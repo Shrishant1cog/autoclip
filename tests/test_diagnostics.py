@@ -660,3 +660,157 @@ def test_the_instruction_mentions_the_balance_when_it_is_not_the_default() -> No
 
     assert text
     assert "story" in text.lower()
+
+
+class TestCropSafetyMeasuresTheFollowedFace:
+    """The crop is measured against the face it follows.
+
+    Two people on screen — a speaker, and somebody in a video playing beside
+    them — and the crop follows the speaker. The largest face in the frame is
+    not the subject: it may be the other person, and it may have been bigger
+    half a second ago. Measuring the crop against it reported six clips of a
+    real run as "the crop cuts through the detected face" when the crop had
+    cut nothing at all.
+    """
+
+    #: The crop of that run: 1012 px wide, following the speaker on the left.
+    CROP_X = 45.0
+    CROP_WIDTH = 1012.0
+
+    #: The speaker the crop follows, and the bystander beside them.
+    SPEAKER = FaceRect(t=1.0, x=459.0, y=202.0, width=172.0, height=230.0)
+    BYSTANDER = FaceRect(t=0.6, x=1055.0, y=216.0, width=372.0, height=368.0)
+
+    def _path(self) -> CropPath:
+        return CropPath(
+            source_width=1920,
+            source_height=1080,
+            segments=[
+                CropSegment(
+                    start_s=0.0,
+                    end_s=2.0,
+                    width=self.CROP_WIDTH,
+                    height=1080,
+                    keyframes=[CropKeyframe(t=1.0, x=self.CROP_X, y=0.0)],
+                    faces=[self.SPEAKER],
+                )
+            ],
+            faces=[self.SPEAKER, self.BYSTANDER],
+        )
+
+    def test_a_bystander_face_cut_by_the_crop_is_not_reported(self) -> None:
+        report = diagnostics.diagnose_clip(
+            None,
+            clip_id="c1",
+            crop_path=self._path(),
+            source_size=(1920, 1080),
+        )
+
+        safety = next(d for d in report.diagnostics if d.name == "crop_safety")
+        assert safety.ok is True
+        assert "face" not in safety.detail
+
+    def test_the_followed_face_cut_by_the_crop_is_reported(self) -> None:
+        path = self._path()
+        # The crop now stops in the middle of the speaker's face.
+        path.segments[0].keyframes[0].x = 520.0
+
+        report = diagnostics.diagnose_clip(
+            None,
+            clip_id="c1",
+            crop_path=path,
+            source_size=(1920, 1080),
+        )
+
+        safety = next(d for d in report.diagnostics if d.name == "crop_safety")
+        assert safety.ok is False
+        assert "face" in safety.detail
+
+
+class TestCropSafetyTolerance:
+    """A crop that keeps the face is safe, even when the box is not perfect.
+
+    Two things make the face's bounding box a poor thing to measure the crop
+    against. It is loose — it includes hair and chin — and it can run past
+    the edge of the picture, because the face is half out of shot. And the
+    crop follows a moving subject along a smoothed curve, so at the instant
+    the subject moves fastest the curve is a few pixels behind.
+
+    The numbers here are the ones a real run produced: nineteen pixels of a
+    five-hundred-pixel face, and a face box that ran fifty-six pixels past
+    the edge of the source while the crop was the whole frame.
+    """
+
+    def _path(self, *, keyframe_x: float, width: float, face: FaceRect) -> CropPath:
+        return CropPath(
+            source_width=1920,
+            source_height=1080,
+            segments=[
+                CropSegment(
+                    start_s=0.0,
+                    end_s=2.0,
+                    width=width,
+                    height=1080,
+                    keyframes=[CropKeyframe(t=1.0, x=keyframe_x, y=0.0)],
+                    faces=[face],
+                )
+            ],
+            faces=[face],
+        )
+
+    def test_a_sliver_of_the_face_outside_the_crop_is_not_reported(self) -> None:
+        # 19 px of a 549 px face, on a 1012 px crop.
+        path = self._path(
+            keyframe_x=559.7,
+            width=1012.0,
+            face=FaceRect(t=1.0, x=540.6, y=256.5, width=549.4, height=577.5),
+        )
+
+        report = diagnostics.diagnose_clip(
+            None,
+            clip_id="c1",
+            crop_path=path,
+            source_size=(1920, 1080),
+        )
+
+        safety = next(d for d in report.diagnostics if d.name == "crop_safety")
+        assert safety.ok is True
+
+    def test_a_face_that_runs_past_the_edge_of_the_source_is_not_the_crop_s_fault(
+        self,
+    ) -> None:
+        # The face box ends 56 px past the right edge of the picture, and the
+        # crop is the whole picture. No crop can contain what is not there.
+        path = self._path(
+            keyframe_x=0.0,
+            width=1920.0,
+            face=FaceRect(t=1.0, x=1466.4, y=154.1, width=509.7, height=591.7),
+        )
+
+        report = diagnostics.diagnose_clip(
+            None,
+            clip_id="c1",
+            crop_path=path,
+            source_size=(1920, 1080),
+        )
+
+        safety = next(d for d in report.diagnostics if d.name == "crop_safety")
+        assert safety.ok is True
+
+    def test_a_crop_that_keeps_only_half_the_face_is_reported(self) -> None:
+        path = self._path(
+            keyframe_x=350.0,
+            width=1012.0,
+            face=FaceRect(t=1.0, x=100.0, y=200.0, width=500.0, height=500.0),
+        )
+
+        report = diagnostics.diagnose_clip(
+            None,
+            clip_id="c1",
+            crop_path=path,
+            source_size=(1920, 1080),
+        )
+
+        safety = next(d for d in report.diagnostics if d.name == "crop_safety")
+        assert safety.ok is False
+        assert "face" in safety.detail

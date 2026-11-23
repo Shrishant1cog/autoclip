@@ -1314,6 +1314,11 @@ class PipelineRunner:
         # speaker is talking.
         timeline = self._load_speech_timeline()
 
+        # Two clips of one job can carry the same title — the model chose
+        # it — and the exports share one directory. The names are made
+        # unique against the whole set, so no export overwrites another.
+        titles = [clip.title or f"clip-{clip.rank}" for clip in clips]
+
         for index, clip in enumerate(clips):
             self._check_cancelled()
 
@@ -1322,8 +1327,11 @@ class PipelineRunner:
                 composition.crop_path if composition else self._fallback_crop_path(clip, ratio)
             )
             words = transcript.slice(clip.start_word, clip.end_word)
-            destination = destination_dir / export.output_filename(
-                clip.title or f"clip-{clip.rank}", ratio
+            destination = destination_dir / export.unique_output_filename(
+                clip.title or f"clip-{clip.rank}",
+                ratio,
+                rank=clip.rank,
+                sibling_titles=titles,
             )
 
             # The export settings for this clip. The creative plan may

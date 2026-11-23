@@ -230,7 +230,15 @@ def _clamp_duration(
 
 
 def align_start(start_s: float, silences: list[Silence]) -> float:
-    """Pull the clip start back into the silence preceding the first word."""
+    """Pull the clip start back into the silence preceding the first word.
+
+    The cut never lands *after* the first word's own start. The silence
+    detector and the recogniser disagree by a few tens of milliseconds now
+    and then, and when the silence starts after the word does, following the
+    silence would cut the word in half — the caption for that word would
+    then begin before the clip did. Two clips of a real run were reported
+    for exactly that.
+    """
     silence = _silence_ending_near(start_s, silences)
     if silence is None:
         return max(0.0, start_s - FALLBACK_LEAD_S)
@@ -240,7 +248,9 @@ def align_start(start_s: float, silences: list[Silence]) -> float:
     # the point of aligning at all.
     earliest = min(silence.start + SILENCE_MARGIN_S, silence.end)
     preferred = silence.end - SILENCE_LEAD_S
-    return max(0.0, max(earliest, min(preferred, start_s)))
+    # The alignment may only ever widen the clip: the cut is at or before the
+    # first word, never inside it.
+    return max(0.0, min(start_s, max(earliest, min(preferred, start_s))))
 
 
 def align_end(end_s: float, silences: list[Silence]) -> float:

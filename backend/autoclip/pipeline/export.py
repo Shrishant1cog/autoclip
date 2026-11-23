@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -111,8 +111,43 @@ def slugify_title(title: str, *, max_length: int = 50) -> str:
     return slug[:max_length] or "clip"
 
 
-def output_filename(title: str, ratio: str) -> str:
-    return f"{slugify_title(title)}_{ratio.replace(':', 'x')}.mp4"
+def output_filename(title: str, ratio: str, *, suffix: str | None = None) -> str:
+    """The file name for an exported clip.
+
+    ``suffix`` distinguishes two clips whose titles slug to the same name.
+    """
+    stem = slugify_title(title)
+    if suffix:
+        stem = f"{stem}-{suffix}"
+    return f"{stem}_{ratio.replace(':', 'x')}.mp4"
+
+
+def unique_output_filename(
+    title: str,
+    ratio: str,
+    *,
+    rank: int,
+    sibling_titles: Iterable[str],
+) -> str:
+    """A file name that is unique among the clips of one job.
+
+    The model chooses the titles, and two clips of the same video can end up
+    with the same one. The exports of a job live in one directory, so a name
+    built from the title alone lets the second export overwrite the first:
+    the clip is gone, and its subtitles with it. That is not a hypothetical —
+    a real run produced two clips called "The language of love in videos",
+    and the second export replaced the first.
+
+    When the title is not shared, the name is the plain one: the user's own
+    words are the best file name there is. When it is shared, the clip's
+    rank is added — the rank is unique within the job, and the pipeline and
+    the re-export both know it.
+    """
+    slug = slugify_title(title)
+    shared = sum(1 for other in sibling_titles if slugify_title(other) == slug)
+    if shared > 1:
+        return output_filename(title, ratio, suffix=str(rank))
+    return output_filename(title, ratio)
 
 
 # --------------------------------------------------------------------------

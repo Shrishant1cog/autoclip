@@ -473,9 +473,7 @@ class TestATimeoutStopsTheStage:
         usage = resources.Usage()
 
         clips = asyncio.run(
-            highlights.detect(
-                transcript, provider, DetectionConfig(), job_id="job", usage=usage
-            ),
+            highlights.detect(transcript, provider, DetectionConfig(), job_id="job", usage=usage),
         )
 
         assert clips

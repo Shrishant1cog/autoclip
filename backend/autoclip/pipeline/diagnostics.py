@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from . import captions, ffmpeg
+from .duplicates import duplicate_pairs
 from .reframe.croppath import CropPath, FaceRect
 from .transcript import Word
 
@@ -55,16 +56,22 @@ FRAME_RATE_TOLERANCE = 0.02
 #: A black stretch longer than this counts as a black frame.
 BLACK_MIN_S = 0.2
 
-#: Two clips overlap by more than this fraction of the shorter one and
-#: they are duplicates.
-OVERLAP_LIMIT = 0.5
-
 #: How far a crop keyframe may sit from a face observation and still be
 #: compared with it. The crop planner samples faces several times a second,
 #: so half a second is loose enough for a smoothed keyframe and tight enough
 #: that a face from a different moment is never mistaken for the one in the
 #: shot.
 FACE_MATCH_TOLERANCE_S = 0.5
+
+#: How much of the followed face the crop has to keep.
+#:
+#: The detector's box is loose — it includes hair and chin, and it can run
+#: past the edge of the picture — and the crop follows a moving subject along
+#: a smoothed curve, so a few pixels of that box can fall outside at the
+#: instants when the subject moves fastest. A sliver of a bounding box is
+#: not something a viewer can see; half a face is. So the crop has to keep
+#: at least this much of the face, and a cut below it is reported.
+FACE_KEEP_RATIO = 0.9
 
 #: Every measurement this module makes, in the order the specification
 #: lists them. The list is the contract: a measurement that is not here
@@ -449,14 +456,63 @@ def _caption_timing(
 def _subject_face_at(faces: list[FaceRect], t: float) -> FaceRect | None:
     """The largest face seen within half a second of ``t``.
 
-    The largest face is the subject: when several are on screen the crop is
-    planned around the one that matters, and a smaller face at the edge of
-    the frame may legitimately be cut.
+    This is the fallback for a crop plan that does not say which face it was
+    built around — an older plan, or one written by hand. It is a guess, and
+    a guess that can be wrong: when several people are on screen the largest
+    face is not necessarily the one the crop follows.
     """
     near = [face for face in faces if abs(face.t - t) <= FACE_MATCH_TOLERANCE_S]
     if not near:
         return None
     return max(near, key=lambda face: face.width * face.height)
+
+
+def _face_inside_fraction(
+    face: FaceRect,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    *,
+    source_width: float,
+    source_height: float,
+) -> float:
+    """How much of the face the crop window keeps.
+
+    The face is first clipped to the source frame. A detector's box can run
+    past the edge of the picture — the face is half out of shot — and no
+    crop can contain what the source does not have. Blaming the crop for
+    that is a measurement error, not a fault.
+
+    What is left is the share of the face the crop window covers.
+    """
+    left = max(0.0, face.x)
+    top = max(0.0, face.y)
+    right = min(float(source_width), face.x + face.width)
+    bottom = min(float(source_height), face.y + face.height)
+    if right <= left or bottom <= top:
+        return 1.0
+
+    overlap_x = max(0.0, min(right, x + width) - max(left, x))
+    overlap_y = max(0.0, min(bottom, y + height) - max(top, y))
+    inside = overlap_x * overlap_y
+    total = (right - left) * (bottom - top)
+    return inside / total if total > 0 else 1.0
+
+
+def _faces_at(faces: list[FaceRect], t: float) -> list[FaceRect]:
+    """The faces seen at the moment ``t``, to the nearest sample.
+
+    Faces are sampled several times a second, so the observation closest to
+    the crop's own moment is the one that describes the shot then. When
+    several people are tracked, they are sampled together and every one of
+    them is returned: a wide shot has to hold all of them.
+    """
+    near = [face for face in faces if abs(face.t - t) <= FACE_MATCH_TOLERANCE_S]
+    if not near:
+        return []
+    closest = min(abs(face.t - t) for face in near)
+    return [face for face in near if abs(face.t - t) <= closest + 1e-6]
 
 
 def _crop_safety(
@@ -517,30 +573,42 @@ def _crop_safety(
                 problems.append("the crop leaves the frame at the bottom")
                 break
 
+    # A plan that says which face each segment followed is measured against
+    # those faces. A plan that says nothing — an older one, written before
+    # the segments carried their faces — is measured against the largest face
+    # in the shot, which is a guess.
+    names_its_subjects = any(segment.faces for segment in crop_path.segments)
+
     for segment in crop_path.segments:
+        followed = list(getattr(segment, "faces", []) or [])
         for keyframe in segment.keyframes:
-            face = _subject_face_at(crop_path.faces, keyframe.t)
-            if face is None:
-                continue
-            crop_right = keyframe.x + segment.width
-            crop_bottom = keyframe.y + segment.height
-            face_right = face.x + face.width
-            face_bottom = face.y + face.height
-            overlaps = (
-                keyframe.x < face_right
-                and crop_right > face.x
-                and keyframe.y < face_bottom
-                and crop_bottom > face.y
-            )
-            contains = (
-                keyframe.x <= face.x
-                and keyframe.y <= face.y
-                and crop_right >= face_right
-                and crop_bottom >= face_bottom
-            )
-            if overlaps and not contains:
-                problems.append("the crop cuts through the detected face")
-                break
+            if followed:
+                # The faces the plan was built around, at the moment the crop
+                # is at: the person it follows, or — in a wide shot — the
+                # people it is holding.
+                faces = _faces_at(followed, keyframe.t)
+            elif not names_its_subjects:
+                # An older plan carries no per-segment faces; the largest face
+                # in the shot is the best guess available.
+                guess = _subject_face_at(crop_path.faces, keyframe.t)
+                faces = [guess] if guess is not None else []
+            else:
+                # This segment followed nobody, so there is no face of its own
+                # to keep in frame.
+                faces = []
+            for face in faces:
+                kept = _face_inside_fraction(
+                    face,
+                    keyframe.x,
+                    keyframe.y,
+                    segment.width,
+                    segment.height,
+                    source_width=width,
+                    source_height=height,
+                )
+                if kept < FACE_KEEP_RATIO:
+                    problems.append("the crop cuts through the detected face")
+                    break
         if problems:
             break
 
@@ -560,26 +628,12 @@ def duplicate_clips(clips: list[Any]) -> list[tuple[str, str, float]]:
     fraction is of the *shorter* clip, because a 20-second clip that is
     entirely inside a 60-second one is a duplicate in every sense that
     matters to a viewer.
+
+    The rule itself lives in :mod:`autoclip.pipeline.duplicates`, because
+    the pipeline has to apply the same one — a pair the pipeline kept and
+    the diagnostic calls duplicates is a pair of the same clip twice.
     """
-    pairs: list[tuple[str, str, float]] = []
-    ordered = sorted(clips, key=lambda clip: clip.start_s)
-    for index, first in enumerate(ordered):
-        for second in ordered[index + 1 :]:
-            if second.start_s >= first.end_s:
-                break
-            overlap = min(first.end_s, second.end_s) - max(first.start_s, second.start_s)
-            if overlap <= 0:
-                continue
-            shorter = min(
-                first.end_s - first.start_s,
-                second.end_s - second.start_s,
-            )
-            if shorter <= 0:
-                continue
-            fraction = overlap / shorter
-            if fraction >= OVERLAP_LIMIT:
-                pairs.append((first.id, second.id, round(fraction, 3)))
-    return pairs
+    return duplicate_pairs(clips)
 
 
 def _duplicate(clips: list[Any], clip_id: str) -> Diagnostic:
