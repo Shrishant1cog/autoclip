@@ -17,14 +17,14 @@ and one of the defects found at M5 renders on Windows and fails on Linux. See §
 | # | Gate | Command | Result | Verdict |
 |---|---|---|---|---|
 | G1 | Lint | `ruff check .` | *All checks passed!* | **PASS** |
-| G2 | Format | `ruff format --check .` | *230 files already formatted* | **PASS** |
-| G3 | Types | `mypy backend/autoclip` | *Found 10 errors in 8 files (checked 137 source files)* | **BASELINE — unchanged** |
-| G4 | Unit suite | `pytest -m "not slow and not golden and not e2e" -q` | **1,351 passed**, 70 deselected — and the **same 1,351 on the Linux leg** | **PASS** |
-| G5 | Render suite | `pytest -m "slow and not golden and not e2e" -q` | **46 passed**, 1,375 deselected | **PASS** |
-| G6 | Frontend | `npm run build` (`tsc -b && vite build`) | 59 modules transformed, built in 2.68 s | **PASS** |
+| G2 | Format | `ruff format --check .` | *233 files already formatted* | **PASS** |
+| G3 | Types | `mypy backend/autoclip` | *Found 10 errors in 8 files (checked 138 source files)* | **BASELINE — unchanged** |
+| G4 | Unit suite | `pytest -m "not slow and not golden and not e2e" -q` | **1,395 passed**, 70 deselected — and the **same 1,395 on the Linux leg** | **PASS** |
+| G5 | Render suite | `pytest -m "slow and not golden and not e2e" -q` | **46 passed**, 1,419 deselected | **PASS** |
+| G6 | Frontend | `npm run build` (`tsc -b && vite build`) | 59 modules transformed, built in 1.52 s | **PASS** |
 | G7 | Container | `docker build -f docker/Dockerfile --target base .` + `GET /api/health` | **Not runnable locally — Docker is not installed on this machine.** Verified by the CI `docker` job on every push. | **PASS (CI)** |
 | G8 | Real media | `AUTOCLIP_E2E_MEDIA=… pytest tests/test_pipeline_e2e.py -q` | See §5 | **PASS** |
-| G9 | Whole suite | `pytest tests -q --ignore=tests/test_pipeline_e2e.py` | **1,397 passed**, 0 failed, 0 xfailed, 0 skipped, **454.05 s** | **PASS** |
+| G9 | Whole suite | `pytest tests -q --ignore=tests/test_pipeline_e2e.py` | **1,441 passed**, 0 failed, 0 xfailed, 0 skipped, **452.38 s** | **PASS** |
 
 ### G3 in detail — mypy is at its baseline, and that is the claim
 
@@ -63,18 +63,31 @@ figures printed in the earlier revisions of this document were taken with a narr
 excluded the class methods). The **deltas** are unaffected; the absolute numbers are now
 reproducible from any revision with one command.
 
-| | M0 (`bf76811`) | M5 (`bcdfc47`) | M5.1 (`b59605b`) | M5.2 (`a907805`) | **M5.3** | Δ M0 → M5.3 |
-|---|---|---|---|---|---|---|
-| Test files | 35 | **54** | **55** | **55** | **57** | +22 |
-| Test functions in the tree | 658 | **1,257** | **1,272** | **1,287** | **1,322** | **+664** |
-| — of which module-level | 384 | 900 | 913 | **926** | **928** | +544 |
-| Tests collected | 672 (of which 26 were `xfail`) | 1,300 (of which **0** are `xfail`) | **1,315** (of which **0** are `xfail`) | **1,330** (of which **0** are `xfail`) | **1,397** (of which **0** are `xfail`) | **+725** |
-| Failing | 0 | **0** | **0** | **0** | **0** | — |
-| Skipped | 0 | **0** — the only `pytest.skip` calls in the tree are the e2e media gate, which is deliberate and documented | **0** | **0** | **0** | — |
-| `xfail` markers | **26** (the SSRF gap, pre-registered) | **0** | **0** | **0** | **0** | −26 |
-| Wall clock, unit selection | 193.77 s (672 tests, one invocation) | — | **249.81 s** (1,270 tests) | — | **230.28 s** (1,351 tests) | — |
-| Wall clock, whole suite | — | — | **534.88 s** (1,315 tests) | **499.52 s** (1,330 tests) | **454.05 s** (1,397 tests) | — |
-| Wall clock **per test** | 0.288 s | — | **0.407 s** (whole suite, incl. renders) | **0.375 s** (whole suite, incl. renders) | **0.325 s** (whole suite, incl. renders) | — |
+| | M0 (`bf76811`) | M5 (`bcdfc47`) | M5.1 (`b59605b`) | M5.2 (`a907805`) | M5.3 (`2b5935d`) | **M5.4** (`74ec3eb`) | Δ M0 → M5.4 |
+|---|---|---|---|---|---|---|---|
+| Test files | 35 | **54** | **55** | **55** | **57** | **59** | +24 |
+| Test functions in the tree | 658 | **1,257** | **1,272** | **1,287** | **1,322** | **1,366** | **+708** |
+| — of which module-level | 384 | 900 | 913 | **926** | **928** | **928** | +544 |
+| Tests collected | 672 (of which 26 were `xfail`) | 1,300 (of which **0** are `xfail`) | **1,315** (of which **0** are `xfail`) | **1,330** (of which **0** are `xfail`) | **1,397** (of which **0** are `xfail`) | **1,441** (of which **0** are `xfail`) | **+769** |
+| Failing | 0 | **0** | **0** | **0** | **0** | **0** | — |
+| Skipped | 0 | **0** — the only `pytest.skip` calls in the tree are the e2e media gate, which is deliberate and documented | **0** | **0** | **0** | **0** | — |
+| `xfail` markers | **26** (the SSRF gap, pre-registered) | **0** | **0** | **0** | **0** | **0** | −26 |
+| Wall clock, unit selection | 193.77 s (672 tests, one invocation) | — | **249.81 s** (1,270 tests) | — | **230.28 s** (1,351 tests) | **225.95 s** (1,395 tests) | — |
+| Wall clock, whole suite | — | — | **534.88 s** (1,315 tests) | **499.52 s** (1,330 tests) | **454.05 s** (1,397 tests) | **452.38 s** (1,441 tests) | — |
+| Wall clock **per test** | 0.288 s | — | **0.407 s** (whole suite, incl. renders) | **0.375 s** (whole suite, incl. renders) | **0.325 s** (whole suite, incl. renders) | **0.314 s** (whole suite, incl. renders) | — |
+
+**The M5.4 column, against the M5.3 column.** M5.4 added **one new test file** and **44 test
+functions**:
+
+| File | Tests | What it asserts |
+|---|---|---|
+| `tests/test_provider_limits.py` | **+22 functions** (new file) | The timeout is a **per-provider setting** and reaches the vendor SDKs — Gemini in milliseconds; the message says what happened and does not blame a GPU the machine does not have; the stage **stops at the first timeout** and records the windows it never sent; the request asks for the context it needs, caps the answer to the room that remains, sizes the windows by **exact** per-word cost, and **reports** a prompt that still overflows |
+| `tests/test_api.py` | **+2** (settings) and **+2** (same-title clips) | The settings API **validates** the provider update and reads the stored value back; two clips with the same model-chosen title get **different** file names, on both the pipeline path and the re-export path |
+| `tests/test_export_graph.py` | **+5** | A title that is **not** shared keeps its plain name; a title that **is** shared gains the clip's rank; the rank is unique within the job |
+| `tests/test_diagnostics.py` | **+5** | The crop-safety check measures the face the crop **follows**, not the largest face in the shot; the stated **90%** keep-ratio tolerates a sliver of the detector's box and still fails on half a face; the detector's box is clipped to the source frame first |
+| `tests/test_highlights.py` | **+5** (new file) | One shared rule — **half of the shorter clip** — used by the pipeline and the diagnostic: a clip **inside** another one is a duplicate, two clips that only **touch** are not, and two that share a **quarter** are not |
+| `tests/test_boundaries.py` | **+2** | The alignment may only ever **widen** a clip: the cut is at or before the first word, never inside it |
+| `tests/test_reframe.py` | **+1** | A track does not jump to a **smaller** face beside the one it is following |
 
 **The M5.1 column, against the M5 column.** M5.1 added **one test file** and **15 tests**: the
 eight-case ducking matrix (`tests/test_ducking_matrix.py`, 8 tests), four unit tests for the
@@ -237,14 +250,31 @@ grows; the claim that matters is the one under it, which does not go stale.
 | 33 | `56553ec` | docs: M5.3 — two broken references in the evidence | **success** — all six jobs green — [run 44949264565](https://github.com/Shrishant1cog/autoclip/actions/runs/44949264565). The tree with the two documentation fixes a cross-reference check found in the evidence itself, and the tree that carries the evidence corrections of run 32 |
 | 34 | `6c2f9e0` | docs: M5.3 — the final CI run | **success** — all six jobs green — [run 44950193899](https://github.com/Shrishant1cog/autoclip/actions/runs/44950193899) |
 | 35 | `3f95ac0` | docs: M5.3 — run 33 is green, and the run history stops here | **success** — all six jobs green — [run 44951500363](https://github.com/Shrishant1cog/autoclip/actions/runs/44951500363). The last run in the table. The subject's *"run 33"* is **run 34** under the numbering used here — the commit was written before the numbering was corrected, and a commit's subject cannot be changed without rewriting history |
+| 36 | `36eac04` | docs: M5.3 — the change log is complete again | **success** — all six jobs green — [run 44952580580](https://github.com/Shrishant1cog/autoclip/actions/runs/44952580580) |
+| 37 | `7f02638` | docs: M5.3 — the run numbers, read back against GitHub's own | **success** — all six jobs green — [run 44953586655](https://github.com/Shrishant1cog/autoclip/actions/runs/44953586655) |
+| 38 | `0a39623` | docs: M5.3 — a claim that contradicted the count next to it | **success** — all six jobs green — [run 44954553153](https://github.com/Shrishant1cog/autoclip/actions/runs/44954553153). The last run before the M5.4 work |
+| 39 | `74ec3eb` | Exports: five defects the run's own diagnostics found | **success** — all six jobs green — [run 45144508403](https://github.com/Shrishant1cog/autoclip/actions/runs/45144508403). The whole M5.4 code tree — the three M5.4 code commits together: the provider limits, the export names, the crop-safety measurement, the shared duplicate rule, the boundary clamp and the tracker tolerance, all exercised on every CI job |
 
-**Runs 31, 33, 34 and 35 are green on all six jobs, and run 32 was cancelled.** Run 31 was the
-first to exercise the defect-13 fix on every CI job. Run 32 is the evidence-correction commit —
-it was **cancelled** by the concurrency group when the next commit was pushed, with five of its
-six jobs already green: a cancellation, not a failure, and the sixth (Windows) was cancelled
+> **One commit on this branch has no workflow run at all.** `9fdc6ae` — *"docs: M5.3 — a count
+> that did not survive being read back"* — is on the branch, between runs 35 and 36, and GitHub's
+> own API returns **zero** runs for its SHA (`total_count=0`), on this branch and on every other.
+> The commit is **documentation only** (three files under `docs/`), and the commit that follows it
+> is green on all six jobs, so the tree it produced was exercised by CI — but the claim *"every
+> commit on this branch was run by CI"* **cannot** be made for it. The claim that is made is the
+> narrower one below, and it is checked by a script rather than by eye.
+
+
+**Runs 31, 33, 34, 35, 36, 37, 38 and 39 are green on all six jobs, and run 32 was cancelled.** Run 31
+was the first to exercise the defect-13 fix on every CI job. Run 32 is the evidence-correction
+commit — it was **cancelled** by the concurrency group when the next commit was pushed, with five
+of its six jobs already green: a cancellation, not a failure, and the sixth (Windows) was cancelled
 mid-run rather than failed. Run 33 is the tree with the two documentation fixes, and it carries
-run 32's corrections with it. Run 34 records the final CI run, and run 35 is the last run in the
-table.
+run 32's corrections with it. Run 34 records the final CI run, and run 35 is the last of the M5.3
+runs. Runs 36, 37 and 38 are the three documentation commits that closed the M5.3 record, each one
+green on all six jobs. **Run 39 is the whole M5.4 code tree** — the three M5.4 code commits
+together — and it is green on all six jobs, so every M5.4 guard was exercised on the Ubuntu 3.11,
+Ubuntu 3.12, macOS 3.12 and Windows 3.12 legs, and the Docker image built and smoke-tested on top
+of it.
 
 > **Why this table stops here.** A commit that records a CI run is itself run by CI, and
 > recording *its* run would need another commit — which would need another. The table therefore
@@ -585,20 +615,6 @@ nothing in the suite could see this. The check now lives in `tests/graph_shape.p
 render: the split's outputs and the trims' outputs were both named `ws{index}`. A parser catches
 that; a render on one ffmpeg does not.
 
-### The guards were proven by reverting the fix
-
-Every claim in that table was checked by **reverting the product code to `HEAD` and running the
-guard against it**, then restoring the fix:
-
-| Reverted | Result | Restored |
-|---|---|---|
-| `transcript.py` + `boundaries.py` | **33 failed**, 32 passed (of 65) | **65 passed** |
-| `export.py` | **7 failed** (6 graph + the emphasis render) | **7 passed** |
-| `ffmpeg.py` | **4 failed** (`AttributeError` — the guard does not exist) | **37 passed** |
-| `captions.py` + `diagnostics.py` | **8 failed**, 70 passed (of 78) | **78 passed** |
-
-A guard that was never seen failing is a guard that might never fire. These were all seen failing.
-
 ### Two things this increment deliberately does **not** claim
 
 1. **The clip counts are not comparable across runs.** The detection stage runs at
@@ -624,3 +640,124 @@ A guard that was never seen failing is a guard that might never fire. These were
 | Render selection, Windows (ffmpeg 9.0.2) | **46 passed**, 1,375 deselected, 231.92 s |
 | Feature matrix | **129 rows, consistent** — 110 Implemented · 9 Partial · 1 Blocked · 9 Not Applicable · 0 Missing |
 | Linux leg (ffmpeg 7.0.2) | **267 passed** in the ffmpeg-sensitive selection, **1,351 passed / 70 deselected** in the unit selection, ruff clean — reproduced from the committed tree. See `docs/M5-PERFORMANCE-REPORT.md` §8 |
+
+## 12. The M5.4 amendment — a second real source
+
+**Run 2026-11-22, documented 2026-11-23.** M5.4 is a fourth post-release increment on the same
+branch. The branch is still untagged and v0.1.0 is still gated on the reframe golden set, so this
+report was updated in place rather than superseded. **The M5 verdict does not change.** What changed
+is the suite, the defect count and the evidence base.
+
+### What was run
+
+The application was pointed at a **second real YouTube video** — a **9:35** CarryMinati clip, used
+for **technical acceptance only, nothing published anywhere** — and run through **every stage, end
+to end**. The full details are in `docs/M5-APPLICATION-TESTING.md` §M5.4 (AT-G-01 … AT-G-16) and
+`docs/FINAL_UPGRADE_REPORT.md` §4.6; the regression-relevant facts are:
+
+| | |
+|---|---|
+| The source | A real 9:35 Hindi video, 1920×1080 VP9, published by a third-party creator |
+| The ingest | The complete file — **225,722,498 B in 51,703 ms**, at format 616+140 |
+| The pipeline | The **whole source**, through every stage, with a **real local model** (`llama3.1:8b` over Ollama) and a **real local transcription** (whisper `small`, `int8`) — **1,060 words** in **220 segments** |
+| The first attempt | The highlight stage **failed twice**, each time at the provider's whole 600 s ceiling, with *"Ollama timed out."* |
+| The output | **Nine** real clips — and, because two of them shared a title, only **eight** export files on disk. That gap **is** defect 18 |
+| The model's own part | The highlight stage's **two sequential windows** and the creative plan, with a **repair retry**. The first plan named music tracks `track_1` … `track_6` — identifiers not in the library — and the validator refused it; the retry answered with `music_track_id: ""`, and the stored plan has `source='ai'` |
+
+### What it found — first, in the request
+
+**Four** product defects, all about the **request** rather than the content, all behind one line of
+failure. The decisive one was settled by an experiment rather than an argument: the **same** payload
+with `num_ctx: 8192` returned **HTTP 200** after **1,992.9 s** with `prompt_eval_count: 5862` — the
+estimate exactly — and a valid JSON answer.
+
+| # | Defect | Guard |
+|---|---|---|
+| 14 | The detection request's **timeout was a hard-coded 600 s**, and one legitimate call over this window was measured at **1,993 s** on this box | 7 tests in `tests/test_provider_limits.py::TestTheTimeout`; **6 fail without the fix** |
+| 15 | The timeout message blamed a **GPU the machine does not have** (`size_vram: 0`) and told a local-only user to use a hosted provider | 2 more tests in the same file; **both fail without the fix** |
+| 16 | A timed-out window left the server **still generating the abandoned request**, so the next window queued behind the orphan and burned its own timeout **without ever starting** — and the stage then claimed *every* window had failed | 5 tests in `tests/test_provider_limits.py::TestATimeoutStopsTheStage`; **5 fail without the fix** |
+| 17 | The request **did not fit the model's context**: window 0's prompt measured **5,861 tokens** against a **4,096-token** context, while the product asked for `num_predict: 4096`. The model server truncates an overflowing prompt **without saying so** | 8 tests in `tests/test_provider_limits.py`; **8 fail without the fix** |
+
+### What it found — then, in the output
+
+When the pipeline finally finished, **its own diagnostics** found **five more**, all in the
+pipeline's **output**. Every one of those reports was read back against the source before anything
+was changed — a diagnostic that is wrong is worse than no diagnostic, and defect 7 of this upgrade
+was exactly that.
+
+| # | Defect | Guard |
+|---|---|---|
+| 18 | Two clips with the same **model-chosen** title **overwrote each other's exports** — the second clip's **54,024,088 B** replaced the first clip's **14,272,780 B**, and the first clip's subtitles with it | 5 tests in `tests/test_export_graph.py::TestExportFilenames` and 2 in `tests/test_api.py::TestClipsWithTheSameTitle`; **6 fail without the fix** |
+| 19 | The crop-safety diagnostic took *"the largest face within half a second"* for the subject, while the crop follows the **tracked** speaker — **6 of the 9 clips** were reported as cutting a face that was never their subject | 5 tests in `tests/test_diagnostics.py` (`TestCropSafetyMeasuresTheFollowedFace`, `TestCropSafetyTolerance`); **5 fail without the fix** |
+| 20 | The pipeline and the diagnostic had **two different definitions** of *"the same clip"*: the pipeline compared **word ranges**, and a clip inside another one has almost no words in common with it. Two pairs of the same footage were both kept | 5 tests in `tests/test_highlights.py::TestDuplicateClips` (new file); **3 fail without the fix** |
+| 21 | A clip could **open inside its first word** — **52 ms** inside, on rank 1 — which breaks the code's own documented invariant, *"alignment only ever widens a clip"* | 2 tests in `tests/test_boundaries.py::TestSilenceAlignment`; **2 fail without the fix** |
+| 22 | A face track could **jump to a smaller face** beside the speaker, because the tracker's proximity tolerance was scaled by the **larger** of the two faces. The crop then panned away from the speaker | 1 test in `tests/test_reframe.py::TestTracking`; **fails without the fix** |
+
+### The guards were proven by reverting the fix
+
+Every claim in those two tables was checked by **reverting the product code to `HEAD`** — the
+source files alone, with the new tests left in place — and running the guards against it:
+
+| Reverted | Result | Restored |
+|---|---|---|
+| the whole of `backend/` | **17 failed**, 18 passed (of the 35 new and adjacent tests) | **35 passed** |
+| `backend/autoclip/pipeline/duplicates.py` (the new shared rule) | the three duplicate guards **fail**; the two *"kept"* guards pass, as they should | **5 passed** |
+
+A guard that was never seen failing is a guard that might never fire. These were all seen failing.
+The **three** that pass against the pre-fix code are non-regression guards, and they are there on
+purpose: a title that is *not* shared keeps its plain name, clips that only **touch** are kept, and
+clips that share a **quarter** are kept.
+
+### Three things this increment deliberately does **not** claim
+
+1. **The clip counts are not comparable across runs.** The detection stage runs at
+   `DetectionConfig.temperature = 0.3`, so the before-run and the re-run saw **different candidate
+   sets** and proposed different titles. The raw *"9 clips before, N clips after"* comparison is
+   therefore **not** a controlled measurement of the duplicate fix, and is not offered as one. The
+   controlled comparison is the **same candidate list** run through the old rule and the new rule,
+   plus the **offline sweep** over the real transcript's candidate ranges.
+2. **The black-frame failure is not a pipeline defect.** `ffmpeg blackdetect` on the **raw source**
+   finds the same black stretches the exports carry — `105.973–106.807` and `572.505–574.774`. The
+   diagnostic is a **true positive about the source**, and changing it would have made the
+   diagnostic lie. The **verification run** repeated the measurement on the same source and got the
+   same **0.834 s** stretch inside the one clip that covers it, which is what a true positive does.
+3. **The crop-safety tolerance is a judgement, and it is stated as one.** The fix requires the crop
+   to keep at least **90%** of the followed face. The measured worst case on the real source is
+   **19 px of a 549 px face (3.5%)** at one keyframe, plus a detector box that ran **56 px** past the
+   edge of the picture while the crop was the whole frame. A sliver of a bounding box is not
+   something a viewer can see; half a face is.
+
+### The gates, re-run
+
+| Gate | Result at the M5.4 tree |
+|---|---|
+| `ruff check .` | *All checks passed* |
+| `ruff format --check .` | *233 files already formatted* |
+| `mypy backend/autoclip` | **10 errors in 8 files** — the M1 baseline, **unchanged**, and checked against a clean worktree at `HEAD` to be certain that none of the ten is new |
+| Unit selection, Windows (ffmpeg 9.0.2) | **1,395 passed**, 70 deselected, 225.95 s |
+| Render selection, Windows (ffmpeg 9.0.2) | **46 passed**, 1,419 deselected, 233.26 s |
+| Whole suite, Windows (ffmpeg 9.0.2) | **1,441 passed**, 0 failed, 0 skipped, 0 xfailed, 452.38 s |
+| Frontend `tsc -b && vite build` | 59 modules transformed, built in 1.52 s |
+| Feature matrix | **129 rows, consistent** — 110 Implemented · 9 Partial · 1 Blocked · 9 Not Applicable · 0 Missing |
+| Linux leg (ffmpeg 7.0.2) | Reproduced by the CI's own jobs on the pushed tree — see `docs/FINAL_UPGRADE_REPORT.md` §4.1 |
+
+### And the application, run again with every fix in
+
+The gates are not the claim. The claim is that the **application** works, and the M5.4 tree was
+run against the **same second real source**, from the paste, through the real UI:
+
+| | |
+|---|---|
+| The job | **`3db75213de894350`**, source **`651525f6355b4b28`**, `status=done`, `progress=1.0`, `error=null` |
+| The whole pipeline | **4,791 s (79.8 min)** for **574.880 s** of source — **8.33× real time** |
+| The detection stage | two windows, **933,665 ms** and **634,943 ms**, both `ok`, **`windows_skipped = 0`** |
+| The creative plan | the plan and its **repair retry**; the stored plan has `source='ai'` and `problems='[]'` — the model's own plan, not the fallback |
+| The output | **9 clips**, all `status='exported'`, **268,664,639 B** over **11** ffmpeg runs and **448.5** ffmpeg-seconds |
+| The measurements | **90** of them — nine clips × ten — and **89** are `ok`. The one that is not is rank 2's `black_frames`, and it is a **true positive about the source**: `blackdetect` on the raw source finds `105.973–106.807`, inside that clip's own range |
+| The exports | **9 exports, 9 distinct names, no collision**; every recorded size equals the size on disk; every `.srt` present, longest cue **2.500 s**, **0** overlaps; every clip **1080×1920** at **29.97 fps** |
+
+The run happened to produce **two clips with the same model-chosen title** — *"Why I'm not like
+them"*, ranks 2 and 3 — and they were exported as `why-im-not-like-them-2_9x16.mp4` and
+`why-im-not-like-them-3_9x16.mp4`. Under the pre-fix code that pair would have been one file and
+one set of subtitles, and the first clip would have been gone. **The fix was exercised by the run
+itself, not only by a test.**

@@ -377,25 +377,25 @@ would have failed the format step before reaching the tests — which is consist
   independently, and "multiple accounts" currently means "one token displayed twice".
 - **D15 — the formatter gate is broken on a clean checkout** (above).
 
-**Since the baseline (through M5.3).** The table above is the *M0 baseline* and is deliberately left
+**Since the baseline (through M5.4).** The table above is the *M0 baseline* and is deliberately left
 as it was measured. The current state is recorded per milestone in `docs/UPGRADE-LEDGER.md`; at
-the end of M5.3 it is:
+the end of M5.4 it is:
 
-| Gate | At M0 (baseline) | At M5 (release) | At M5.1 | At M5.2 | **At M5.3** |
-|---|---|---|---|---|---|
-| Unit selection — `-m "not slow and not golden and not e2e"` | 672 passed | **1,263 passed**, 61 deselected | **1,270 passed**, 69 deselected | **1,285 passed**, 69 deselected | **1,351 passed**, 70 deselected |
-| Render selection — `-m "slow and not golden and not e2e"` | (included above) | **37 passed**, 1,287 deselected | **45 passed**, 1,294 deselected | **45 passed**, 1,309 deselected | **46 passed**, 1,375 deselected |
-| **Total in the two CI selections** | **672** | **1,300** | **1,315** | **1,330** | **1,397** |
-| Local full suite (Windows, excluding the e2e collection) | — | **1,300 passed** | **1,315 passed**, 534.88 s | **1,330 passed**, 499.52 s | **1,397 passed**, 454.05 s |
-| `xfail` markers | 26 (the SSRF suite) | **0** | **0** | **0** | **0** |
-| `ruff check .` | clean | **clean** | **clean** | **clean** | **clean** |
-| `ruff format --check .` | **FAILED** — 38 of 147 files unformatted | **clean** — 226 files already formatted | **clean** — 227 files already formatted | **clean** — 227 files already formatted | **clean** — 230 files already formatted |
-| `ruff` version | unpinned (`>=0.7`) | **pinned at `0.17.5`** (`pyproject.toml:89`) — committed as `4cf309b`, which closes **D15** and **T2** | unchanged | unchanged | unchanged |
-| mypy | 14 errors in 10 files | **10 errors in 8 files** (tolerated by `continue-on-error`) | **10 errors in 8 files** — unchanged | **10 errors in 8 files** — unchanged | **10 errors in 8 files** — unchanged, and checked against a clean worktree at `HEAD` to be certain that none of the ten is new |
-| Frontend `tsc -b && vite build` | not run locally at audit time | **green**, run locally and in CI | unchanged — no frontend file was touched | unchanged — no frontend file was touched | unchanged — no frontend file was touched |
-| Docker build + health smoke | not run locally at audit time | **not run locally** — Docker is not installed on this machine; the CI `docker` job builds the image and smoke-tests `GET /api/health` | unchanged | unchanged | unchanged |
-| Real-media ingest | not run | not run | not run | **run twice on the complete file** — 684,877,097 B at 360p and 5,529,989,793 B at the default 1080p | **run once on a complete ten-minute file** — 140,602,318 B in 64.55 s, at format 399+140 |
-| Real-media pipeline | 24 e2e tests on a 180 s segment | **done** on a real segment | unchanged | **done again** on a real 180 s segment cut from a real four-hour download, with a real local model | **done on a whole source, end to end** — a complete ten-minute Hindi podcast through every stage, with a real local model, producing three real clips and three real exports |
+| Gate | At M0 (baseline) | At M5 (release) | At M5.1 | At M5.2 | At M5.3 | **At M5.4** |
+|---|---|---|---|---|---|---|
+| Unit selection — `-m "not slow and not golden and not e2e"` | 672 passed | **1,263 passed**, 61 deselected | **1,270 passed**, 69 deselected | **1,285 passed**, 69 deselected | **1,351 passed**, 70 deselected | **1,395 passed**, 70 deselected |
+| Render selection — `-m "slow and not golden and not e2e"` | (included above) | **37 passed**, 1,287 deselected | **45 passed**, 1,294 deselected | **45 passed**, 1,309 deselected | **46 passed**, 1,375 deselected | **46 passed**, 1,419 deselected |
+| **Total in the two CI selections** | **672** | **1,300** | **1,315** | **1,330** | **1,397** | **1,441** |
+| Local full suite (Windows, excluding the e2e collection) | — | **1,300 passed** | **1,315 passed**, 534.88 s | **1,330 passed**, 499.52 s | **1,397 passed**, 454.05 s | **1,441 passed**, 452.38 s |
+| `xfail` markers | 26 (the SSRF suite) | **0** | **0** | **0** | **0** | **0** |
+| `ruff check .` | clean | **clean** | **clean** | **clean** | **clean** | **clean** |
+| `ruff format --check .` | **FAILED** — 38 of 147 files unformatted | **clean** — 226 files already formatted | **clean** — 227 files already formatted | **clean** — 227 files already formatted | **clean** — 230 files already formatted | **clean** — 233 files already formatted |
+| `ruff` version | unpinned (`>=0.7`) | **pinned at `0.17.5`** (`pyproject.toml:89`) — committed as `4cf309b`, which closes **D15** and **T2** | unchanged | unchanged | unchanged | unchanged |
+| mypy | 14 errors in 10 files | **10 errors in 8 files** (tolerated by `continue-on-error`) | **10 errors in 8 files** — unchanged | **10 errors in 8 files** — unchanged | **10 errors in 8 files** — unchanged, and checked against a clean worktree at `HEAD` to be certain that none of the ten is new | **10 errors in 8 files** — unchanged, and checked against a clean worktree at `HEAD` again, so that none of the ten can be blamed on the M5.4 changes |
+| Frontend `tsc -b && vite build` | not run locally at audit time | **green**, run locally and in CI | unchanged — no frontend file was touched | unchanged — no frontend file was touched | unchanged — no frontend file was touched | **green** — 59 modules, built in 1.52 s. Two frontend files **were** touched: the provider timeout and context settings |
+| Docker build + health smoke | not run locally at audit time | **not run locally** — Docker is not installed on this machine; the CI `docker` job builds the image and smoke-tests `GET /api/health` | unchanged | unchanged | unchanged | unchanged |
+| Real-media ingest | not run | not run | not run | **run twice on the complete file** — 684,877,097 B at 360p and 5,529,989,793 B at the default 1080p | **run once on a complete ten-minute file** — 140,602,318 B in 64.55 s, at format 399+140 | **run twice more on a second complete source** — 225,722,498 B at format 616+140, in **51,703 ms** the first time and **60,693 ms** the second — the same video, downloaded twice, **17%** apart on the wire |
+| Real-media pipeline | 24 e2e tests on a 180 s segment | **done** on a real segment | unchanged | **done again** on a real 180 s segment cut from a real four-hour download, with a real local model | **done on a whole source, end to end** — a complete ten-minute Hindi podcast through every stage, with a real local model, producing three real clips and three real exports | **done on a second whole source, end to end, twice** — the first attempt failed at the highlight stage and produced **nine** defects; after the fixes, a **new** job from the paste produced **9 clips**, **9 distinct exports** and **89 of 90** measurements `ok`, the one exception being a **true positive about the source** |
 
 **The M5.1 column, against the M5 column.** M5.1 added **one test file** and **15 tests**: the
 eight-case ducking matrix (`tests/test_ducking_matrix.py`, 8 tests), four unit tests for the
@@ -424,6 +424,19 @@ found defect 13. From the **exact committed tree** (`git archive` of `2b5935d`),
 gsrc"*. After the fix it is green: **267 passed** in **104.89 s**, the unit selection is **1,351
 passed / 70 deselected** — identical to Windows — and `ruff check` and `ruff format --check` are
 clean on both platforms.
+
+**The M5.4 tree, and what the M5.4 column rests on.** The M5.4 column above was measured on the
+**Windows** box with **ffmpeg 9.0.2**. The **Linux** leg was **not** reproduced locally for M5.4 —
+the tree's own CI runs the four backend legs on every push, and the M5.4 tree is green on all six
+jobs. What the local machine cannot reproduce is the one thing the leg exists for: an **older
+ffmpeg**. The M5.4 changes touch the **filter graph** not at all, so the shape measured against
+ffmpeg 7.0.2 and ffmpeg 9.0.2 at M5.3 is unchanged, and the **structural** graph check still
+covers both graphs.
+
+The **44** new M5.4 tests are all **unit** tests, which is why the render selection's count is
+**unchanged at 46** and the unit selection grew by **44**, from **1,351** to **1,395**. That is the
+honest shape of the work: the M5.4 defects are statements about the **application's behaviour**,
+not about how a frame is composed, and none of them needs a render to prove.
 
 **The ruff pin is the point of this row.** The baseline's format failure was not a style
 preference: with no version pinned, the gate was evaluated against whatever ruff CI happened to
@@ -461,7 +474,7 @@ new body. A failure that is only fixed in CI is a failure that comes back.
 **Every run on this branch since those two failures either passed or was cancelled by a newer
 push.**
 
-### 13.2 Thirteen product defects, found by running the application
+### 13.2 Twenty-two product defects, found by running the application
 
 The full-suite gates were green while the application was broken. These defects were found
 by **running the application and its gates**, not by reading the code, and each is now guarded by
@@ -482,6 +495,15 @@ a test that fails without the fix.
 | 11 | **The webcam's speech emphasis was evaluated against a segment-local clock**, so the webcam only ever magnified in the **first** segment of a clip | the same real clip, read against `croppath.axis_expression`, which subtracts `offset_s` for exactly this reason | `tests/test_export_render.py::TestLayoutRender::test_the_speech_emphasis_renders_in_a_later_stretch` — a **behavioural** render test; **fails without the fix** |
 | 12 | **A caption could be held on screen for twelve seconds**, because the caption inherited the recogniser's word timing rather than bounding its own lifetime | the application's **own diagnostic** on a real clip: *"3 word(s) are held on screen too long"*. The exported `.srt` carried a cue of `00:00:09,080 --> 00:00:21,650` | 8 tests in `tests/test_captions.py::TestCaptionLifetime` and 2 in `tests/test_diagnostics.py`; **8 fail without the fix** |
 | 13 | **The export's video graph consumed a filter output once per crop segment.** The source was split in two, and then *each* segment read from the same output again — which is invalid, because a filter output may be consumed only once | the **Linux leg**, on **ffmpeg 7.0.2** — the version that reproduces the CI's platform. ffmpeg **9** tolerates it; ffmpeg **7** refuses it with *"Invalid stream specifier"*, so a multi-segment clip exported on the developer's machine and failed on every strict ffmpeg | 4 tests in `tests/test_export_graph.py::TestGraphShape`; **3 fail without the fix**. The structural graph check moves to `tests/graph_shape.py` and is now applied to the **video** graph as well as the music graph — it was already written for this class of defect, but only ever looked at the music graph |
+| 14 | **The request timeout was a hard-coded 600 s.** On a machine with no GPU, one legitimate detection call over an eight-minute window was measured at **1,993 s** — so the ceiling cut off calls that were about to succeed, and the advice it gave (*"try again"*) reproduced the failure exactly | the **second real source**, at M5.4. The highlight stage failed with *"Ollama timed out."* twice, and the transfer log carries two `highlights` rows of **600,086 ms** and **600,450 ms** — both exactly the ceiling | 7 tests in `tests/test_provider_limits.py::TestTheTimeout`; **6 fail without the fix** |
+| 15 | **The timeout message blamed hardware the machine did not have.** It said *"Large transcripts on a small GPU can exceed the limit. Try a smaller model, or use a hosted provider for this video."* — on a machine with **no GPU** (`size_vram: 0`, an Intel Iris Plus iGPU), and for a user with no hosted provider | the same run. The message was read against the machine's own facts | 2 more tests in the same file; **both fail without the fix** |
+| 16 | **A timed-out window left the server still generating the abandoned request**, so the next window queued behind the orphan and burned its own timeout without ever starting — and the stage then reported *"failed in every window"*, when some windows had never been tried at all | the same run: two windows, two timeouts, and the message claiming every window had failed | 5 tests in `tests/test_provider_limits.py::TestATimeoutStopsTheStage`; **5 fail without the fix** |
+| 17 | **The detection request did not fit the model's context window.** The prompt for one eight-minute window measured **5,861 tokens** against a **4,096-token** context, and the product asked for `num_predict: 4096` — an answer budget as large as the entire context. The model server truncates a prompt that does not fit **without saying so**, so the model would have answered from a partial transcript | the same run, measured with llama-server's own tokenizer, and then confirmed by an experiment: the **same** payload with `num_ctx: 8192` returned **HTTP 200** after **1,992.9 s** with `prompt_eval_count: 5862` and a valid JSON answer | 8 tests in `tests/test_provider_limits.py` — the context, the answer budget, the window sizing and the overflow guard; **8 fail without the fix** |
+| 18 | **Two clips with the same title overwrote each other.** The export's file name came from the title alone, and the titles are the **model's** choice — so when the model gave two clips the same title, the second export replaced the first, subtitles and all | the **second real source**, read back from the export directory: clip `61e1d3ec8c3e4dce` was recorded as **14,272,780 B**, and the file on disk was **54,024,088 B** — the *other* clip's — with **one** `.srt` where there should have been two | 5 tests in `tests/test_export_graph.py::TestExportFilenames` and 2 in `tests/test_api.py::TestClipsWithTheSameTitle`; **6 fail without the fix** |
+| 19 | **The crop-safety diagnostic measured the wrong face.** It took *"the largest face within half a second"* as the subject, while the crop follows the **tracked** speaker — so a clip that tracked its speaker perfectly was reported as cutting a face that was never its subject | the same run's own diagnostics: **6 of the 9 clips** were reported as *"the crop cuts through the detected face"*. Rebuilding the plans and measuring them against the face each one actually followed showed the cut at **0** keyframes in four of the six | 5 tests in `tests/test_diagnostics.py` (`TestCropSafetyMeasuresTheFollowedFace`, `TestCropSafetyTolerance`); **5 fail without the fix** |
+| 20 | **Two clips of the same footage survived the pipeline.** The de-duplication compared the candidates' **word ranges**, and a clip *inside* another one has almost no words in common with it: the shorter clip of the first real pair covered **14** words, the longer **104**, of which those 14 were a part — a common share of a fifth, well under the threshold. In **time**, though, the shorter clip was wholly inside the longer one | the same run's diagnostics: **4 of the 9 clips** were reported as *"overlaps another one by 100%"*, and the diagnostic's own rule (overlap ≥ half of the shorter) disagreed with the pipeline's | 5 tests in `tests/test_highlights.py::TestDuplicateClips` (new file); **3 fail without the fix** |
+| 21 | **A clip could open in the middle of a word.** The boundary alignment pulls the cut back into the silence before the first word, but it could also push it *past* the word's own start when the silence detector and the recogniser disagreed by a few tens of milliseconds — which breaks the code's own documented invariant, *"alignment only ever widens a clip"* | the same run's diagnostics: **2 of the 9 clips** were reported as *"1 word(s) fall outside the clip"*. Rank 1's first word started at **533.800 s** and the clip opened at **533.852 s** — **52 ms inside the word** | 2 tests in `tests/test_boundaries.py::TestSilenceAlignment`; **2 fail without the fix** |
+| 22 | **A face track could jump to a smaller face beside it.** The tracker's proximity fallback scaled its tolerance by the **larger** of the two faces, so a track could hop onto a smaller face-shaped object near the speaker — and the crop would then pan away from the speaker to follow it | found while **verifying defect 19** against the real source: the track of one segment held two different people, and the crop followed the wrong one. A real frame shows what the detector saw: the speaker, leaning forward, and a Pikachu plush on the shelf behind them | 1 test in `tests/test_reframe.py::TestTracking`; **fails without the fix** |
 
 **Defect 3 is the one that would have shipped.** It rendered on the machine the code was written
 on and would have failed on the CI runners and on every user with an ffmpeg older than 9. It was
@@ -547,6 +569,38 @@ in the suite could see this. The check now lives in `tests/graph_shape.py` and i
 graphs. It also earned its keep immediately: it caught a **name collision** in the first version of
 the fix, before any render — the split's outputs and the trims' outputs were both named
 `ws{index}`. A parser catches that; a render on one ffmpeg does not.
+
+**Defects 14 to 17 were found by pointing the application at a second real source** — a
+**574.9-second** CarryMinati video, supplied by the owner — and watching the highlight stage fail
+**twice** with the same line. The four are one failure seen from four sides:
+
+* **Defect 14** is a number that was too small for the machine it ran on. A single detection call
+  over an eight-minute window was measured at **1,993 s** on this box — a CPU-only box with
+  **no GPU at all**. The product's ceiling was **600 s**, and the advice printed with the failure
+  (*"try again"*) reproduced the failure exactly. The ceiling is now a **setting** per provider,
+  with a **3,600 s** default, and it reaches the vendor SDKs as well as the HTTP client.
+* **Defect 15** is a message that was confidently wrong about the hardware. It blamed *a small
+  GPU* on a machine with `size_vram: 0`, and told a local-only user to *use a hosted provider* —
+  advice the product's own settings screen does not let that user follow.
+* **Defect 16** is a consequence of defect 14 that made the failure look like a different one.
+  The server was still generating the abandoned request when the client gave up, so the next
+  window queued behind the orphan, burned its own 600 s without ever starting, and the stage
+  reported *"failed in every window"* — including the window that was never tried.
+* **Defect 17** is the one that would have produced **wrong clips rather than no clips**. The
+  prompt for window 0 measured **5,861 tokens** against a **4,096-token** context, and the
+  product asked for `num_predict: 4096` — an answer budget as large as the entire context. The
+  model server truncates an overflowing prompt **without saying so**. The fix asks for the
+  context it needs (**8,192**), caps the answer to the room that remains (**2,048**), sizes the
+  transcript windows to the provider's budget, and **reports** a prompt that still overflows
+  instead of answering from a partial transcript.
+
+The experiment that closed defect 17 is the strongest evidence in this file: the **same** payload
+that the product sent, with `num_ctx: 8192` and `num_predict: 1024`, returned **HTTP 200** after
+**1,992.9 s** with `prompt_eval_count: 5862` — the estimate exactly — and a valid JSON answer.
+`/api/ps` then reported `context_length: 8192` and the model's resident size growing from
+**5.58 GB** to **6.26 GB**, about **680 MB** of extra KV cache. A context of **16,384** would have
+added roughly **2.7 GB**, which does not fit this **8.4 GB** machine — so the default is the
+largest context that leaves room for the model itself.
 
 ---
 

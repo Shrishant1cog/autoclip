@@ -18,7 +18,7 @@ Node 24.21.0.
 | **Encoder output** | **Byte-identical.** The 5 s 1080×1920 reference encode is 3,691,703 bytes at both M0 and M5 — the same number, to the byte. The encoder did not change. |
 | **Migration cost** | +13 migrations, **+0.5%** on a fresh migrate (239.47 ms → 240.61 ms). |
 | **Cold import** | **Slower.** 93 → 132 `autoclip` modules; the controlled same-session comparison is 1,462 ms → 2,400 ms median. This is a one-time server-start cost and it is explained in §3. |
-| **Suite wall clock** | 193.77 s for 672 tests at M0 → 270.59 s for 1,263 tests at M5 → **499.52 s for 1,330 tests at M5.2**. Per test, the M5 unit selection went **0.288 s → 0.214 s** — the suite got *faster per test* while nearly doubling in size. **No speed-up is claimed at M5.2**: the whole-suite number moved by machine load, not by code. |
+| **Suite wall clock** | 193.77 s for 672 tests at M0 → 270.59 s for 1,263 tests at M5 → **499.52 s for 1,330 tests at M5.2** → **454.05 s for 1,397 tests at M5.3** → **452.38 s for 1,441 tests at M5.4**. Per test, the M5 unit selection went **0.288 s → 0.214 s** — the suite got *faster per test* while nearly doubling in size. **No speed-up is claimed at M5.2, M5.3 or M5.4**: the whole-suite number moved by machine load, not by code. |
 
 **Nothing in this report is a claim of improvement that was not measured.** Where a number moved the
 wrong way, it is reported the wrong way.
@@ -58,12 +58,12 @@ v27 is not a slow operation.
 
 ### Suite-level measurement
 
-| | M0 | M5 | M5.1 |
-|---|---|---|---|
-| Mandatory suite (CI selection 1) | 672 passed in 193.77 s | **1,263 passed, 61 deselected in 270.59 s** | **1,270 passed, 69 deselected in 249.81 s** |
-| Render suite (CI selection 2) | (not separated) | **37 passed, 1,287 deselected in 232.47 s** | **45 passed, 1,294 deselected in 299.24 s** |
-| Whole suite, one invocation | 672 passed in 193.77 s | **1,300 passed in 709.11 s** | **1,315 passed in 534.88 s** |
-| Wall clock **per test** | 0.288 s | **0.214 s** | **0.197 s** |
+| | M0 | M5 | M5.1 | M5.2 | M5.3 | **M5.4** |
+|---|---|---|---|---|---|---|
+| Mandatory suite (CI selection 1) | 672 passed in 193.77 s | **1,263 passed, 61 deselected in 270.59 s** | **1,270 passed, 69 deselected in 249.81 s** | **1,285 passed, 69 deselected** | **1,351 passed, 70 deselected in 230.28 s** | **1,395 passed, 70 deselected in 225.95 s** |
+| Render suite (CI selection 2) | (not separated) | **37 passed, 1,287 deselected in 232.47 s** | **45 passed, 1,294 deselected in 299.24 s** | **45 passed, 1,309 deselected** | **46 passed, 1,375 deselected in 231.92 s** | **46 passed, 1,419 deselected in 233.26 s** |
+| Whole suite, one invocation | 672 passed in 193.77 s | **1,300 passed in 709.11 s** | **1,315 passed in 534.88 s** | **1,330 passed in 499.52 s** | **1,397 passed in 454.05 s** | **1,441 passed in 452.38 s** |
+| Wall clock **per test** | 0.288 s | **0.214 s** | **0.197 s** | **0.375 s** | **0.325 s** | **0.314 s** |
 
 The suite grew by 643 tests (96%) and the per-test cost went *down* by 32%. The M5 whole-suite
 number is roughly double the sum of the two CI selections because a single invocation pays the
@@ -412,4 +412,83 @@ committed):
 The venv lives **outside** the tree, exactly as CI has it. A venv inside the tree puts the venv's
 own `activate_this.py` in front of ruff, and it is neither lint-clean nor format-clean — a harness
 artefact, not a finding.
+
+---
+
+## 9. The M5.4 amendment — a second real source, measured
+
+**Run 2026-11-22, documented 2026-11-23.** M5.4 pointed the application at a **second real
+YouTube video** — a **9:35** CarryMinati clip, used for **technical acceptance only, nothing
+published anywhere** — and ran it from the paste through **every stage, end to end**. It is the
+first run in this project whose figures cover a **whole source on a second machine-local model
+configuration**, and the first one in which the *detection* stage was the bottleneck rather than
+the transcription.
+
+### What was measured
+
+The figures below are the **verification run** — job `3db75213de894350`, started at **06:56:15 UTC**
+and finished at **08:16:06 UTC** on 2026-11-23, with every fix in the tree.
+
+| Measurement | Value | Note |
+|---|---|---|
+| **Download** | **225,722,498 B in 60,693 ms** | ≈ **3.72 MB/s** on this machine's connection. Format **616+140** (1920×1080 VP9 + mp4a). The **same video** came down in **51,703 ms** the previous day, so the connection was **17%** slower this time — the same source, two different downloads |
+| **Transcription, 574.9 s of real Hindi speech** | **≈1,367 s** | whisper `small`, `compute_type=int8`, CPU only. ≈ **2.38× real time**. `transcript.json`: language `hi`, model `small`, **1,277 words**, **246 segments**. **This one is an interval, not an instrumented measurement**: the download finished at **06:57:17 UTC**, and the job's progress first read **0.4** at **07:20:04 UTC** — and **0.4** is exactly the point at which the prepare stage's **0.05** and the transcribe stage's **0.35** are both complete (`backend/autoclip/pipeline/runner.py`'s `STAGE_WEIGHTS`), so the transcription is bracketed by those two readings |
+| **Highlight detection** | **1,568,608 ms** — window 0 **933,665 ms**, window 1 **634,943 ms** | **Two sequential windows** (`LOCAL_CONCURRENCY = 1`), and `windows_skipped` is **0**. The job's usage ledger records **2** calls, **10,055** input tokens and **1,535** output tokens. **Corroborated**: the two windows together account for **1,568,608 ms**, and the job's progress went from **0.40** at **07:20:04** to **0.55** at **07:46:13** — **1,569 s** — and **0.55** is exactly prepare + transcribe + highlights |
+| **Creative planning** | **765,777 ms** — plan **430,699 ms**, repair **335,078 ms** | The **plan and its schema-repair retry**; the stored plan has `source='ai'` and `problems='[]'`, so the model's own plan was used |
+| **The tail** | **931 s** | reframe → captions → export → diagnostics, measured from the progress reading **0.6** at **08:00:35 UTC** to the job's `finished_at` at **08:16:06 UTC**. **11** ffmpeg runs, **448.5** ffmpeg-seconds, **268,664,639 B** exported |
+| **The whole pipeline** | **4,791 s (79.8 min)** for 574.880 s of source | ≈ **8.33× real time**, measured as the job's own `started_at → finished_at` |
+
+### What it changes in this report
+
+- **The whole-pipeline rate is **≈8.3× real time** on this source, against **≈6.05×** on M5.3's.
+  The difference is almost entirely the **detection stage**: **1,568.6 s** here against **425.1 s**
+  there, for windows of a comparable size. **That gap is not explained**, and it is not explained
+  away here either — the M5.3 source produced a transcript the local model handled in **425 s**
+  across two windows, and this one took **1,568.6 s** across two windows of **900** and **525**
+  words. The prompt sizes are close — this run's two user prompts are **8,402** and **5,264**
+  characters, **13,666** in total — so the extra time is not a larger prompt on its own. It is
+  recorded as an **open question**, and **K29** already says the honest thing: a local model on a
+  CPU can be slow enough to look broken, and the product does not bound that.
+- **P6 is now answered twice.** yt-dlp's **download** time was measured on a second real source:
+  **60,693 ms** for **225.7 MB** (≈ 3.72 MB/s), against **64.55 s** for 140.6 MB (≈ 2.18 MB/s) the
+  day before. The *import* time — the metadata and manifest fetches — is still not measured
+  separately, so P6 stays open.
+- **P4 is still open.** Peak memory, CPU and GPU during a real render were not sampled. This run
+  was long and real, but it was not instrumented for resources.
+
+### The suite, at M5.4
+
+| | M0 | M5 | M5.1 | M5.2 | M5.3 | **M5.4** |
+|---|---|---|---|---|---|---|
+| Mandatory suite (CI selection 1) | 672 passed in 193.77 s | **1,263 passed, 61 deselected in 270.59 s** | **1,270 passed, 69 deselected in 249.81 s** | **1,285 passed, 69 deselected** | **1,351 passed, 70 deselected in 230.28 s** | **1,395 passed, 70 deselected in 225.95 s** |
+| Render suite (CI selection 2) | (not separated) | **37 passed, 1,287 deselected in 232.47 s** | **45 passed, 1,294 deselected in 299.24 s** | **45 passed, 1,309 deselected** | **46 passed, 1,375 deselected in 231.92 s** | **46 passed, 1,419 deselected in 233.26 s** |
+| Whole suite, one invocation | 672 passed in 193.77 s | **1,300 passed in 709.11 s** | **1,315 passed in 534.88 s** | **1,330 passed in 499.52 s** | **1,397 passed in 454.05 s** | **1,441 passed in 452.38 s** |
+
+**No claim of a speed-up is made.** The whole-suite wall clock moved from **454.05 s** to
+**452.38 s** while the suite grew by **44 tests**, and the per-test figure moved from **0.325 s** to
+**0.314 s**. Both of those are **machine load, not a speed-up**: this is a shared four-core laptop.
+The honest reading is **unchanged per test**.
+
+The **44** new tests are all **unit** tests — the M5.4 guards are statements about the
+application's behaviour, not about how a frame is composed, and none of them needs a render. That
+is why the render selection's count is **unchanged at 46** and the unit selection grew by **44**,
+from **1,351** to **1,395**.
+
+### One performance note that belongs here
+
+The M5.4 fix set does **not** change how long a render takes, and it is worth saying so rather
+than letting the numbers imply otherwise. The crop-safety fix moves a **measurement**, not a
+frame; the duplicate fix removes **clips** that would have been rendered (and were, in the
+pre-fix run); the export-name fix adds a **suffix** to a file name; the tracker's tolerance
+change affects **which** face a track locks onto, not how fast it does it. The tail here is
+**931 s** for nine clips, **448.5** ffmpeg-seconds, against the earlier attempt's **≈989 s** for
+the same nine — the difference is the machine, not the code.
+
+### The Linux leg at M5.4
+
+The Linux leg was **not** reproduced locally for M5.4 — the tree's own CI runs the four backend
+legs on every push, and the M5.4 tree is green on all six jobs. What the local machine cannot
+reproduce is the one thing the leg exists for: an **older ffmpeg**. The M5.4 changes touch the
+**filter graph** not at all, so the shape measured against ffmpeg 7.0.2 and ffmpeg 9.0.2 at M5.3 is
+unchanged, and the **structural** graph check still covers both graphs.
 

@@ -4,6 +4,7 @@
 **Amendment:** M5.1 — the ducking matrix and the empty-timeline defect (2026-11-21)
 **Amendment:** M5.2 — the real four-hour ingest, and four more defects (2026-11-21)
 **Amendment:** M5.3 — the complete ten-minute pipeline, and five more defects (2026-11-21)
+**Amendment:** M5.4 — a second real source, and a local model that could not answer (2026-11-23)
 **Branch:** `feature/upgrade-u0-u10`
 **Base commit:** `bf76811` (`feature/autonomous-platform-v2`)
 **Report date:** 2026-11-21
@@ -15,11 +16,11 @@
 
 **Ship it, with the external integrations marked unverified.**
 
-Every milestone from M0 to M5 is complete, and **M5.1**, **M5.2** and **M5.3** closed the last
-closeable partial matrix row and then took the application to real media afterwards — the last of
-them all the way through the **complete pipeline** on a whole source. The full automated suite is
-green — **1,397 tests, zero failures, zero skips, zero xfails** — and the application was exercised
-through its real UI against real media, not only through unit tests.
+Every milestone from M0 to M5 is complete, and **M5.1**, **M5.2**, **M5.3** and **M5.4** closed the
+last closeable partial matrix row and then took the application to real media afterwards — the
+last two of them all the way through the **complete pipeline** on a whole source. The full
+automated suite is green — **1,441 tests, zero failures, zero skips, zero xfails** — and the
+application was exercised through its real UI against real media, not only through unit tests.
 
 The one thing this report will not do is call the live external integrations verified. They were
 not: no authorised ElevenLabs, hosted-LLM, Google or Meta credential was supplied for any part of
@@ -29,16 +30,16 @@ double stands in for the same code path the real service would take — but "the
 
 | | |
 |---|---|
-| **Milestones complete** | **8 of 8** — M0, M0.5, M1, M2, M3, M4a, M4b, M5 — plus **M5.1**, **M5.2** and **M5.3**, post-release increments that are not one of the specification's milestones (see the amendments below) |
+| **Milestones complete** | **8 of 8** — M0, M0.5, M1, M2, M3, M4a, M4b, M5 — plus **M5.1**, **M5.2**, **M5.3** and **M5.4**, post-release increments that are not one of the specification's milestones (see the amendments below) |
 | **Gate items** | 94 across M0–M4b: **91 done**, **1 blocked on the owner**, **2 unverified (external)**. M5's 10 are in §4. |
 | **Feature coverage** | **129 rows**: 110 Implemented · 9 Partial · 1 Blocked · 9 Not Applicable · **0 Missing** |
-| **Tests** | **1,397 passing** — 1,351 in the unit selection, 46 in the render selection — 0 failing, 0 skipped, 0 xfailed, plus 24 real-media e2e tests run against a real source |
-| **Real-media evidence** | A **real 4-hour live recording** ingested twice (360p, and the product's default 1080p); the pipeline exercised on real segments cut from that same file, with a real local model, producing two real clips and two real exports — **and, at M5.3, a real ten-minute video run through every stage end to end**, producing three real clips and three real exports |
+| **Tests** | **1,441 passing** — 1,395 in the unit selection, 46 in the render selection — 0 failing, 0 skipped, 0 xfailed, plus 24 real-media e2e tests run against a real source |
+| **Real-media evidence** | A **real 4-hour live recording** ingested twice (360p, and the product's default 1080p); the pipeline exercised on real segments cut from that same file, with a real local model, producing two real clips and two real exports — **and, at M5.3 and M5.4, two more real videos of about ten minutes each run through every stage end to end**: **three** real clips and **three** real exports from the first, and from the second — after its nine defects were fixed — **nine** real clips and **nine** real exports, every one of them distinct, from **two** separate end-to-end runs |
 | **New runtime dependencies** | **Zero.** The whole upgrade was built on the dependency set the project already had. |
 | **Schema** | v14 → **v27**, 19 → **32 live tables**, thirteen migrations, no user data destroyed |
 | **API surface** | 18 routers / 108 routes → **21 routers / 162 routes** |
 | **CI** | **Every run on this branch since the two failures either passed or was cancelled by a newer push.** Two of the runs failed — both were real defects, diagnosed and fixed rather than explained away — and five were cancelled by a newer push. The release run is green on all six jobs, on all four platforms. See §4.1. |
-| **Defects found by running the application** | **13 product defects** and **1 defect in the CI workflow itself**, all fixed, all guarded by tests that fail without the fix. See §4.2. |
+| **Defects found by running the application** | **22 product defects** and **1 defect in the CI workflow itself**, all fixed, all guarded by tests that fail without the fix. See §4.2. |
 | **Open security findings** | **0** high, **0** medium, **0** low. 4 residual risks documented, 5 things not checked — all in §6. |
 
 ### The three conditions attached to the verdict
@@ -109,6 +110,55 @@ Blocked · 9 Not Applicable · 0 Missing**. What changed is the **defect count**
 the **test count** (1,330 → **1,397**), and the **evidence base**: a complete real source has now
 been ingested, transcribed, highlighted, laid out, captioned and exported **end to end**. See
 **§4.5**, and `docs/M5-APPLICATION-TESTING.md` AT-F-01 … AT-F-15 for the per-journey record.
+
+### Amendment — M5.4, 2026-11-23
+
+M5.3 proved the pipeline runs on a complete source. It did **not** prove the pipeline survives a
+source whose **highlight detection** is the hard part: M5.3's ten-minute podcast produced a
+transcript the local model handled in **425 s**.
+
+M5.4 pointed the application at a **second real, third-party YouTube video** — a **9:35** CarryMinati
+clip, used for **technical acceptance only, nothing published anywhere** — and ran it from the
+paste through the whole pipeline. The highlight stage **failed**, twice, with one line of output:
+
+> *Highlight detection failed in every window. Original error: Ollama timed out.*
+
+Four defects sat behind that one line, and they are a different class from everything before them:
+they are about **the request itself**, not about the content.
+
+* the **600-second timeout was hard-coded**, and one legitimate call over this window was measured
+  at **1,993 s** on this box — so the ceiling cut off calls that were about to succeed, and the
+  advice printed with the failure (*"try again"*) reproduced the failure exactly;
+* the failure message blamed **"a small GPU"** on a machine with `size_vram: 0` — **no GPU at
+  all** — and told a local-only user to *use a hosted provider*;
+* the server was **still generating the abandoned request** when the client gave up, so the next
+  window queued behind the orphan, burned its own 600 s **without ever starting**, and the stage
+  then claimed *every* window had failed;
+* and the request **did not fit the model's context**: window 0's prompt measured **5,861 tokens**
+  against a **4,096-token** context, while the product asked for `num_predict: 4096` — an answer
+  budget as large as the entire context. The model server truncates an overflowing prompt
+  **without saying so**, so this one would have produced **wrong clips rather than no clips**.
+
+The last of those is the important one, and it was settled by an experiment rather than an
+argument: the **same** payload with `num_ctx: 8192` returned **HTTP 200** after **1,992.9 s** with
+`prompt_eval_count: 5862` — the estimate exactly — and a valid JSON answer.
+
+When the pipeline finally finished, **its own diagnostics** found five more defects in its output:
+two clips with the same model-chosen title **overwrote each other's exports**; the crop-safety
+measurement compared the crop against the **largest** face in the shot rather than the face it
+follows, and reported **6 of the 9 clips**; the pipeline's de-duplication compared **word ranges**
+instead of time, and so kept two pairs of clips that were the same footage; a clip could open
+**inside** its first word; and a face track could **jump to a smaller face** beside the speaker.
+Each was read back against the source before anything was changed, each is fixed, and each is
+guarded by a test that was observed failing against the pre-fix code — **17** of the **20** new
+tests, the other three being non-regression guards.
+
+**The verdict does not change.** The matrix is unchanged at **110 Implemented · 9 Partial · 1
+Blocked · 9 Not Applicable · 0 Missing**. What changed is the **defect count** (thirteen →
+**twenty-two**), the **test count** (1,397 → **1,441**), and the **evidence base**: a **second**
+complete real source has now been ingested, transcribed, highlighted, laid out, captioned, exported
+and diagnosed **end to end** — twice, the second time with every fix in the tree. See **§4.6**, and
+`docs/M5-APPLICATION-TESTING.md` AT-G-01 … AT-G-16 for the per-journey record.
 
 ---
 
@@ -236,7 +286,7 @@ missing or wrong.
 
 | # | Deliverable | Where | State |
 |---|---|---|---|
-| 1 | Complete regression report | `docs/M5-REGRESSION-REPORT.md` | Done — 9 gates, 1,397 tests, the CI run history |
+| 1 | Complete regression report | `docs/M5-REGRESSION-REPORT.md` | Done — 9 gates, 1,441 tests, the CI run history |
 | 2 | Security review | `docs/M5-SECURITY-REVIEW.md` | Done — S1–S7 re-verified, 2 new findings, 4 residuals, 5 things not checked |
 | 3 | Performance report | `docs/M5-PERFORMANCE-REPORT.md` | Done — M0 vs M5, plus a like-for-like control on the base commit |
 | 4 | Feature acceptance matrix | `docs/feature-coverage-matrix.md` | Done — 129 rows, recounted by script |
@@ -254,7 +304,7 @@ either passed or was cancelled by a newer push.** The two that failed were **rea
 in the product, one in the CI itself. Neither was a flake, and neither was explained away. Five
 runs were cancelled by a newer push.
 
-**The table below is the run history as it stands at the M5.3 commit.** It is a record, and it
+**The table below is the run history as it stands at the M5.4 commit.** It is a record, and it
 grows; the claim that matters is the one above it, which does not go stale. The numbers are
 **GitHub's own** — each workflow run's `run_number` — so a reader who opens the Actions page for
 the branch finds the same numbering.
@@ -265,7 +315,7 @@ the branch finds the same numbering.
 
 | Runs | Result | What happened |
 |---|---|---|
-| 4, 5, 7–13, 15–17, **22**, **23**, **24**, **25**, **26**, **27**, **28**, **29**, **30**, **31**, **33**, **34**, **35** | **success** | green |
+| 4, 5, 7–13, 15–17, **22**, **23**, **24**, **25**, **26**, **27**, **28**, **29**, **30**, **31**, **33**, **34**, **35**, **36**, **37**, **38**, **39** | **success** | green |
 | 6, 14, 18, **21**, **32** | **cancelled** | each superseded by a newer push — the concurrency group cancelled the older run |
 | **19** (`4cf309b`) | **failure** | the Ubuntu legs failed in **Unit tests**; Windows and macOS passed the same tests. A test wrote to the owner's real OS keyring. On Linux there is no keyring backend, so the token was never stored and the assertion could not hold — the test passed on Windows and macOS *because those machines had a real keyring to write to*. Fixed by `94c6d9c`, an **autouse** isolation fixture so no test can reach the owner's credential store |
 | **20** (`94c6d9c`) | **failure** | the Ubuntu py3.12 leg failed at *"Verify ffmpeg can burn subtitles"*. The check piped the ffmpeg filter list into `grep -q`; `grep -q` exits at the match, the producer gets **SIGPIPE**, and GitHub's `set -o pipefail` turns that into a failed step. The runner's ffmpeg 8 has a filter list large enough to fill the pipe, so CI reported that an ffmpeg **with** the `ass` filter did not have one — the job log shows `printf: Broken pipe` and then the `ass` filter listed on the very next line. **Corrected, not removed**: the check now matches with bash's own pattern matching and never pipes, and a build genuinely without the filter still fails it |
@@ -302,18 +352,28 @@ carries run 32's corrections with it.
 [run 44951500363](https://github.com/Shrishant1cog/autoclip/actions/runs/44951500363)) — the final
 CI run, and then the run history itself.
 
-**Run 35 is the last run in the table, and the table stops there deliberately:** a commit that
-records a CI run is itself run by CI, and recording *its* run would need another commit — which
-would need another. The commits after it change **the record**, not the content it reports; each
-one's own run was verified after the push and is green, and the branch's history can be read
-directly from GitHub, where the run numbers are the same ones used here.
+**Run 35 is the last of the M5.3 runs.** Runs **36**, **37** and **38** are the three
+documentation commits that closed the M5.3 record, each one green on all six jobs, and each one
+verified against GitHub's own API rather than by eye.
+
+**Run 39 is the whole M5.4 code tree — the three M5.4 code commits together — and it is green on
+all six jobs too.** That is the run that first exercised the provider-limit guards, the export-name
+guards, the crop-safety guards, the shared duplicate rule, the boundary clamp and the tracker
+tolerance on every CI job. One commit on this branch has **no workflow run at all** — `9fdc6ae`,
+a documentation-only M5.3 commit — and that is recorded in `docs/M5-REGRESSION-REPORT.md` rather
+than glossed over; the claim that is made is the narrower one that a script checks.
+
+**The table stops at the last run recorded in it, and the commits after it change the record, not
+the content it reports.** Each one's own run was verified after the push and is green, and the
+branch's history can be read directly from GitHub, where the run numbers are the same ones used
+here.
 
 **Both failures were reproduced before they were fixed.** Run 19 was reproduced on a Linux
 environment with no keyring backend. Run 20 was reproduced with a 320 KB filter list: the old body
 fails it, the new body passes it, and a no-`ass` build still fails the new body. A failure that is
 only fixed in CI is a failure that comes back.
 
-### 4.2 Thirteen product defects, found by running the application
+### 4.2 Twenty-two product defects, found by running the application
 
 The full-suite gates were green while the application was broken. These defects were found
 by **running the application and its gates**, not by reading the code, and each is now guarded by a
@@ -334,6 +394,15 @@ test that fails without the fix.
 | 11 | **The webcam's speech emphasis was evaluated against a segment-local clock.** The crop was applied to each PTS-reset segment, so the emphasis expression's `t` restarted at every segment boundary — the webcam only ever magnified in the **first** segment of a clip | the same real clip, read against `croppath.axis_expression`, which subtracts `offset_s` for exactly this reason | applying the crop **after** the concat restores the clip-relative timeline, so the emphasis expression means the same thing it means everywhere else in the product | `tests/test_export_render.py::TestLayoutRender::test_the_speech_emphasis_renders_in_a_later_stretch` — a **behavioural** render test: it compares the webcam strip at a quiet moment with the webcam strip at a talking moment, in the **second** stretch. It **fails without the fix** |
 | 12 | **A caption could be held on screen for twelve seconds.** The caption inherited the recogniser's word timing, and one Whisper alignment estimate stretched a single Hindi word across **7.84 seconds** of silence | the application's **own diagnostic** on a real clip: *"3 word(s) are held on screen too long"*. The exported `.srt` carried a cue of `00:00:09,080 --> 00:00:21,650` — **12.57 seconds** | the caption's lifetime is the **renderer's** business, not the recogniser's: `captions.MAX_CAPTION_S = 2.5` bounds every caption, the grouping breaks on a start-span ceiling, and `captions.caption_spans()` is the single source of the caption timing — shared by the renderer and the diagnostic | 8 tests in `tests/test_captions.py::TestCaptionLifetime` and 2 in `tests/test_diagnostics.py`; **8 fail without the fix**. The longest caption drops **12.57 s → 2.50 s**, with the text fully preserved |
 | 13 | **The export's video graph consumed a filter output once per crop segment.** The source was split in **two**, and then *each* segment read from the same output again — which is invalid, because a filter output may be consumed only once | the **Linux leg**, on **ffmpeg 7.0.2** — the version that reproduces the CI's platform. ffmpeg **9** tolerates it; ffmpeg **7** refuses it with *"Invalid stream specifier"*, so a multi-segment clip exported on the developer's machine and failed on every strict ffmpeg | the source is split **once per consumer**, so every segment has a copy of its own. The shape was measured against **both** ffmpeg builds before it was chosen: `split=64` is accepted by 7.0.2 and 9.0.2 alike, while a multi-output `trim` would need a `setpts` per output because `setpts` has only one | 4 tests in `tests/test_export_graph.py::TestGraphShape`; **3 fail without the fix**. The structural graph check moves to `tests/graph_shape.py` and is now applied to the **video** graph as well as the music graph — it was already written for this class of defect, but only ever looked at the music graph |
+| 14 | **The request timeout was a hard-coded 600 s.** On a machine with **no GPU**, one legitimate detection call over an eight-minute window was measured at **1,993 s** — so the ceiling cut off calls that were about to succeed, and the advice it gave (*"try again"*) reproduced the failure exactly | the **second real source**, at M5.4. The highlight stage failed with *"Ollama timed out."* twice, and the transfer log carries two `highlights` rows of **600,086 ms** and **600,450 ms** — both exactly the ceiling | the timeout is a **per-provider setting** (`ProviderSettings.timeout_s`, 0 = the provider's own default) with a generous **3,600 s** default, and it reaches the HTTP client and the vendor SDKs — Anthropic, OpenAI and Gemini, the last in milliseconds, because that is what its SDK counts | 7 tests in `tests/test_provider_limits.py::TestTheTimeout`; **6 fail without the fix** |
+| 15 | **The timeout message blamed hardware the machine did not have.** It said *"Large transcripts on a small GPU can exceed the limit. Try a smaller model, or use a hosted provider for this video."* — on a machine with **no GPU** (`size_vram: 0`, an Intel Iris Plus iGPU), and for a user with no hosted provider | the same run. The message was read against the machine's own facts | the message now states what happened — *how long it waited* — and the hint says what a local model actually does (it runs on the **CPU** when no GPU is present) and points at the **setting** that changes it | 2 more tests in the same file; **both fail without the fix** |
+| 16 | **A timed-out window left the server still generating the abandoned request**, so the next window queued behind the orphan and burned its own timeout without ever starting — and the stage then reported *"failed in every window"*, when some windows had never been tried at all | the same run: two windows, two timeouts, and the message claiming every window had failed | the stage **stops at the first timeout**, names the windows that were **not analysed**, and records that count in the job's own usage — so a job that analysed part of a video says so | 5 tests in `tests/test_provider_limits.py::TestATimeoutStopsTheStage`; **5 fail without the fix** |
+| 17 | **The detection request did not fit the model's context window.** The prompt for one eight-minute window measured **5,861 tokens** against a **4,096-token** context, and the product asked for `num_predict: 4096` — an answer budget as large as the entire context. The model server truncates a prompt that does not fit **without saying so**, so the model would have answered from a partial transcript | the same run, measured with llama-server's own tokenizer, and then confirmed by an experiment: the **same** payload with `num_ctx: 8192` returned **HTTP 200** after **1,992.9 s** with `prompt_eval_count: 5862` and a valid JSON answer | the request asks for the context it needs (`ProviderSettings.context_tokens`, **8,192** by default), caps the answer to the room that remains (**2,048**), sizes the transcript windows to the provider's budget, and **reports** a prompt that still overflows instead of answering from a partial transcript | 8 tests in `tests/test_provider_limits.py` — the context, the answer budget, the window sizing and the overflow guard; **8 fail without the fix** |
+| 18 | **Two clips with the same title overwrote each other.** The export's file name came from the title alone, and the titles are the **model's** choice — so when the model gave two clips the same title, the second export replaced the first, subtitles and all | the **second real source**, read back from the export directory: clip `61e1d3ec8c3e4dce` was recorded as **14,272,780 B**, and the file on disk was **54,024,088 B** — the *other* clip's — with **one** `.srt` where there should have been two | the name is made unique against the **whole set of the job's clips**: a title that is not shared keeps the user's own words, and a title that is shared gains the clip's **rank**, which is unique within the job. Both the pipeline and the re-export path compute the same name from the same list | 5 tests in `tests/test_export_graph.py::TestExportFilenames` and 2 in `tests/test_api.py::TestClipsWithTheSameTitle`; **6 fail without the fix** |
+| 19 | **The crop-safety diagnostic measured the wrong face.** It took *"the largest face within half a second"* as the subject, while the crop follows the **tracked** speaker — so a clip that tracked its speaker perfectly was reported as cutting a face that was never its subject | the same run's own diagnostics: **6 of the 9 clips** were reported as *"the crop cuts through the detected face"*. Rebuilding the plans and measuring them against the face each one actually followed showed the cut at **0** keyframes in four of the six | the crop plan now carries, **per segment**, the faces that segment was built around — the person it follows, or the people a wide shot holds. The diagnostic measures against those, and keeps the old *"largest face"* rule only as the fallback for plans written before the change | 5 tests in `tests/test_diagnostics.py` (`TestCropSafetyMeasuresTheFollowedFace`, `TestCropSafetyTolerance`); **5 fail without the fix** |
+| 20 | **Two clips of the same footage survived the pipeline.** The de-duplication compared the candidates' **word ranges**, and a clip *inside* another one has almost no words in common with it: the shorter clip of the first real pair covered **14** words, the longer **104**, of which those 14 were a part — a common share of a fifth, well under the threshold. In **time**, though, the shorter clip was wholly inside the longer one | the same run's diagnostics: **4 of the 9 clips** were reported as *"overlaps another one by 100%"*, and the diagnostic's own rule (overlap ≥ half of the shorter) disagreed with the pipeline's | one shared definition of *"the same clip"* — `pipeline/duplicates.py` — used by **both** the pipeline and the diagnostic: two clips are duplicates when the overlap covers at least **half of the shorter one**. The higher score survives | 5 tests in `tests/test_highlights.py::TestDuplicateClips` (new file); **3 fail without the fix** |
+| 21 | **A clip could open in the middle of a word.** The boundary alignment pulls the cut back into the silence before the first word, but it could also push it *past* the word's own start when the silence detector and the recogniser disagreed by a few tens of milliseconds — which breaks the code's own documented invariant, *"alignment only ever widens a clip"* | the same run's diagnostics: **2 of the 9 clips** were reported as *"1 word(s) fall outside the clip"*. Rank 1's first word started at **533.800 s** and the clip opened at **533.852 s** — **52 ms inside the word** | the alignment may only ever widen the clip: the result is clamped to the first word's own start, so the cut is at or before the word, never inside it | 2 tests in `tests/test_boundaries.py::TestSilenceAlignment`; **2 fail without the fix** |
+| 22 | **A face track could jump to a smaller face beside it.** The tracker's proximity fallback scaled its tolerance by the **larger** of the two faces, so a track could hop onto a smaller face-shaped object near the speaker — and the crop would then pan away from the speaker to follow it | found while **verifying defect 19** against the real source: the track of one segment held two different people, and the crop followed the wrong one. A real frame shows what the detector saw: the speaker, leaning forward, and a Pikachu plush on the shelf behind them | the tolerance is scaled by the **smaller** of the two faces — the person's own face width — which is what the rule always said. A track stays with its person | 1 test in `tests/test_reframe.py::TestTracking`; **fails without the fix** |
 
 **Defect 3 is the one that would have shipped.** It rendered on the machine the code was written
 on and would have failed on the CI runners and on every user with an ffmpeg older than 9. It was
@@ -764,6 +833,272 @@ Partial · 1 Blocked · 9 Not Applicable · 0 Missing**. What changed is the **d
 highlighted, laid out, captioned, exported and diagnosed **end to end**, which is what **K22**
 said was missing.
 
+### 4.6 M5.4 — a second real source, and a local model that could not answer
+
+M5.3 proved that the whole pipeline runs on a complete source. It did **not** prove that the
+pipeline survives a source whose **highlight detection** is the hard part: M5.3's ten-minute
+podcast produced a transcript the local model handled in **425 s**.
+
+M5.4 pointed the application at a **second real, third-party YouTube video** — supplied by the
+owner — and ran it from the paste through the whole pipeline. The highlight stage **failed**,
+twice, with the same line and the same two numbers in the transfer log.
+
+> **Rights.** This is another creator's video. It is used here for **technical acceptance only**.
+> Nothing produced from it was published anywhere, no account was connected, and no hosted
+> credential was spent. It is not a release artefact.
+
+**The environment.** A separate application instance on **port 8804** with its own home, so the
+owner's own instance and its database were untouched. The model is the same real local **Ollama**
+(`llama3.1:8b` at `127.0.0.1:11434`), and `active_provider=ollama` means **no hosted call and no
+hosted spend**. The settings are the ones M5.3 used, so the two runs are comparable.
+
+**The source.**
+
+| | |
+|---|---|
+| Video id | `bMTlNeKqV4o` |
+| Title | UNEMPLOYMENT ON PEAK 📈 \| CARRYMINATI |
+| Channel | CarryMinati |
+| Duration | 574.879637 s — **9:35** |
+| Resolution / rate | 1920×1080 at 29.970059515628723 fps |
+| Audio track | Hindi (`hi`), **no manual subtitles** |
+| Source id / job id | `b5bf5a6f740a40ee` / `f65fb40febe141d7` |
+
+#### The failure, as the application's own records show it
+
+The highlight stage failed at **05:23:19 UTC** on **2026-11-22**, at progress **0.55**, with the
+error *"Highlight detection failed in every window. Original error: Ollama timed out."* The
+transfer log carries **two** `highlights` rows, each `failed`, each lasting the provider's whole
+ceiling: **600,086 ms** and **600,450 ms**. The retry was clicked in the browser and it failed
+the same way.
+
+One line of output. Four defects behind it:
+
+| # | What the one line was hiding |
+|---|---|
+| **14** | The **600 s ceiling was hard-coded**, and one legitimate call over this window was measured at **1,993 s** on this box |
+| **15** | The advice printed with the failure blamed **"a small GPU"** — on a machine with `size_vram: 0`, **no GPU at all** — and told a local-only user to *use a hosted provider* |
+| **16** | The server was **still generating the abandoned request** when the client gave up, so the next window queued behind the orphan, burned its own 600 s **without ever starting**, and the stage then claimed *every* window had failed |
+| **17** | The request **did not fit the model's context**: window 0's prompt measured **5,861 tokens** against a **4,096-token** context, and the product asked for `num_predict: 4096` — an answer budget as large as the entire context |
+
+Defect 17 is the one that would have produced **wrong clips rather than no clips**, and it was
+invisible until the request was measured with the model server's **own tokenizer**:
+
+```
+system prompt chars: 3635
+max_output_tokens requested: 4096
+
+== window 0 ==
+  words 0..884 (885)
+  user prompt chars: 8486
+  prompt tokens:     5861
+  context length:    4096
+  room for output:  -1765
+  ** THE PROMPT ALONE DOES NOT FIT THE CONTEXT **
+
+== window 1 ==
+  words 756..1059 (304)
+  user prompt chars: 3182
+  prompt tokens:     2673
+  context length:    4096
+  room for output:  1423
+  ** PROMPT + REQUESTED OUTPUT DO NOT BOTH FIT **
+```
+
+**The model server truncates a prompt that does not fit, without saying so.** So the defect was not
+"the request was slow" — it was "the request was wrong, and the answer would have come from a
+partial transcript".
+
+#### The experiment that closed defect 17
+
+The **same** window-0 payload, sent with `num_ctx: 8192` and `num_predict: 1024`:
+
+| | |
+|---|---|
+| HTTP status | **200** |
+| Elapsed | **1,992.9 s** |
+| `prompt_eval_count` | **5,862** — the estimate exactly |
+| `eval_count` | 875 |
+| `done_reason` | `stop` |
+| The answer | a valid JSON object with **11** clips |
+
+`/api/ps` then reported `context_length: 8192` and the model's resident size growing from
+**5.58 GB** to **6.26 GB** — about **680 MB** of extra KV cache. A context of **16,384** would
+have added roughly **2.7 GB**, which does not fit this **8.4 GB** machine. So the default is the
+largest context that leaves room for the model itself.
+
+#### The fix
+
+| | What changed |
+|---|---|
+| **Defect 14** | The timeout is a **per-provider setting** (`ProviderSettings.timeout_s`, 0 = the provider's own default) with a generous **3,600 s** default. It reaches the HTTP client **and** the vendor SDKs — Anthropic, OpenAI and Gemini, the last in **milliseconds**, because that is what its SDK counts |
+| **Defect 15** | The message states what happened — *how long it waited* — and the hint says what a local model actually does (it runs on the **CPU** when no GPU is present) and points at the **setting** that changes it |
+| **Defect 16** | The stage **stops at the first timeout**, names the windows that were **not analysed**, and records that count in the job's own usage — so a job that analysed part of a video says so |
+| **Defect 17** | The request asks for the context it needs (`ProviderSettings.context_tokens`, **8,192** by default), caps the answer to the room that remains (**2,048**), sizes the transcript windows to the provider's budget, and **reports** a prompt that still overflows instead of answering from a partial transcript |
+
+The window sizing was changed from an **average-per-word estimate** to the **exact per-word
+rendering cost**, so *"a window never exceeds the character budget"* holds exactly rather than
+approximately. The budget itself is measured against the provider's own prompt: **3,886** fixed
+characters (the system prompt and the instructions), leaving **8,402** for the transcript inside
+a **12,288-character** prompt at a **2.0 characters-per-token** bound — the conservative side of
+the measured **2.07** for Devanagari and **≈4** for English.
+
+**The guards.** `tests/test_provider_limits.py` (**22 tests**) and two settings tests in
+`tests/test_api.py`. Against the pre-fix tree, **20 of the 21 original tests fail**; the one that
+passes is a non-regression guard (a provider with no limit keeps its windows as they were). Both
+API tests fail too. The twenty-second test — *"the windows that were not analysed are recorded"* —
+was observed failing against the pre-fix code as well.
+
+#### The re-run
+
+The same job, resumed from the stage that failed. The transcript was **reused** — it had already
+been transcribed, and the runner skips what is done.
+
+| | Before the fix | After the fix |
+|---|---|---|
+| **Window 0** | **600,086 ms** — timed out | **881,989 ms** — answered |
+| **Window 1** | **600,450 ms** — timed out | **426,775 ms** — answered |
+| **The highlight stage** | **failed** — *"Ollama timed out."* | **9 clips**, all inside the 20–90 s window |
+| **Windows not analysed** | not recorded | **0** |
+| **The creative plan** | never reached | the first attempt did not match the schema; the **repair retry** did, and the plan's `source` is **`ai`** |
+
+The creative plan's first answer is worth a line of its own. It named music tracks
+**`track_1` … `track_6`** — identifiers that are not in the library — and the validator refused it:
+*"music_track_id 'track_1' is not in the library"*. The repair retry answered with
+`music_track_id: ""`, and the stored plan has `source='ai'`, `caption_strategy='clean_lower'`,
+`ducking_db=-12.0`. The budget counters say `plan_used=1`, `repair_used=1` — both spent, neither
+overrun. **The plan was the model's, not the fallback's**, and that is the difference from M5.3's
+second job, where the repair also failed and the plan fell back.
+
+#### Then the run's own diagnostics, and five more defects
+
+The pipeline finished. The diagnostics it produced on its own output were not all green, and four
+of the nine clips were reported more than once. **Every one of those reports was read back against
+the source before anything was changed**, because a diagnostic that is wrong is worse than no
+diagnostic — and defect 7 of this upgrade was exactly that.
+
+The measurements were:
+
+| Diagnostic | Clips reported | What the measurement found |
+|---|---|---|
+| `caption_timing` | **2** (ranks 1, 6) | *"1 word(s) fall outside the clip"* — a clip that opened **52 ms inside** its first word |
+| `crop_safety` | **6** (ranks 2, 3, 4, 5, 7, 9) | *"the crop cuts through the detected face"* — against the **largest** face in the shot, not the one the crop follows |
+| `duplicate_clips` | **4** (ranks 1, 2, 7, 8) | *"overlaps another one by 100%"* — the pipeline had kept both clips of each pair |
+| `black_frames` | **2** (ranks 3, 7) | *"0.83 s of black frames"* — and this one is **true**: `blackdetect` on the raw source finds `105.973–106.807` and `572.505–574.774`. The source has black stretches in it. **It was not "fixed".** |
+
+Reading those four numbers against the source produced **five more product defects**:
+
+* **Defect 18 — two clips with the same title overwrote each other.** The export's name came
+  from the title alone, and the titles are the **model's** choice. Two of the nine clips were
+  called *"The language of love in videos"*. The export directory held **one** file for them:
+  the second clip's **54,024,088 B** had replaced the first clip's **14,272,780 B**, and the
+  first clip's subtitles with it. Read back from the database, clip `61e1d3ec8c3e4dce` was
+  recorded as **14,272,780 B** — a file that no longer existed.
+* **Defect 19 — the crop-safety diagnostic measured the wrong face.** It took *"the largest face
+  within half a second"* as the subject, while the crop follows the **tracked** speaker.
+  Rebuilding the plans and measuring them against the face each one actually followed showed the
+  cut at **0** keyframes in four of the six clips.
+* **Defect 20 — two clips of the same footage survived the pipeline.** The de-duplication
+  compared the candidates' **word ranges**, and a clip *inside* another one has almost no words
+  in common with it: the shorter clip of the first pair covered **14** words, the longer **104**,
+  of which those 14 were a part — a common share of a fifth, well under the threshold. In
+  **time**, the shorter clip was wholly inside the longer one.
+* **Defect 21 — a clip could open in the middle of a word.** The boundary alignment pulls the cut
+  back into the silence before the first word, but it could also push it *past* the word's own
+  start when the silence detector and the recogniser disagreed by tens of milliseconds. Rank 1's
+  first word started at **533.800 s**; the clip opened at **533.852 s**.
+* **Defect 22 — a face track could jump to a smaller face beside it.** Found while *verifying*
+  defect 19 against the real source: one segment's track held **two different people**, and the
+  crop followed the wrong one. A frame from the source shows what the detector saw — the
+  speaker, leaning forward, and a Pikachu plush on the shelf behind them.
+
+**The fix.**
+
+| | What changed |
+|---|---|
+| **Defect 18** | The export's name is made unique against the **whole set of the job's clips**: a title that is not shared keeps the user's own words, and a title that is shared gains the clip's **rank**, which is unique within the job. The pipeline and the re-export path compute the same name from the same list |
+| **Defect 19** | The crop plan now carries, **per segment**, the faces that segment was built around — the person it follows, or the people a wide shot holds. The diagnostic measures against those. The old *"largest face"* rule remains only as the fallback for plans written before the change |
+| **Defect 20** | One shared definition of *"the same clip"* — `pipeline/duplicates.py` — used by **both** the pipeline and the diagnostic: two clips are duplicates when the overlap covers at least **half of the shorter one**. The higher score survives |
+| **Defect 21** | The alignment may only ever **widen** the clip: the result is clamped to the first word's own start, so the cut is at or before the word, never inside it |
+| **Defect 22** | The tracker's proximity tolerance is scaled by the **smaller** of the two faces — the person's own face width — which is what the rule always said. A track stays with its person |
+
+**A stated tolerance, and why.** Defect 19's fix measures the followed face against the crop
+window, and it allows a **sliver** of the detector's bounding box outside: the crop must keep at
+least **90%** of the face. Two reasons, both measured rather than assumed. The box is loose — it
+includes hair and chin, and it can run **past the edge of the picture**, because the face is half
+out of shot; no crop can contain what the source does not have. And the crop follows a moving
+subject along a **smoothed** curve, so at the instant the subject moves fastest the curve is a few
+pixels behind. On the real source the worst case is **19 px of a 549 px face (3.5%)** at one
+keyframe, and a second case where the box ran **56 px** past the edge of the frame while the crop
+was the **whole frame**. A sliver of a bounding box is not something a viewer can see; half a face
+is. The measurement is in `diagnostics._face_inside_fraction` and the threshold is
+`diagnostics.FACE_KEEP_RATIO`.
+
+**The guards.** Seventeen new tests, in five files, and every one of them was observed **failing
+against the pre-fix tree** before the fix was written:
+
+| File | Tests | Fail without the fix |
+|---|---|---|
+| `tests/test_export_graph.py::TestExportFilenames` | 5 | **4** |
+| `tests/test_api.py::TestClipsWithTheSameTitle` | 2 | **2** |
+| `tests/test_diagnostics.py::TestCropSafetyMeasuresTheFollowedFace`, `::TestCropSafetyTolerance` | 5 | **5** |
+| `tests/test_highlights.py::TestDuplicateClips` (new file) | 5 | **3** |
+| `tests/test_boundaries.py::TestSilenceAlignment` | 2 | **2** |
+| `tests/test_reframe.py::TestTracking` | 1 | **1** |
+| | **20** | **17** |
+
+The three that pass against the pre-fix tree are non-regression guards: a title that is *not*
+shared keeps its plain name, clips that only **touch** are kept, and clips that share a **quarter**
+are kept.
+
+#### The verification run — the whole pipeline again, with every fix in
+
+The fixes were then committed (`74ec3eb`) and the **whole application was run again, from the
+paste, through the real UI** — a **new** job, not a resumed one, so nothing could be inherited
+from the failed attempt.
+
+| | |
+|---|---|
+| **The paste** | `https://youtu.be/bMTlNeKqV4o?si=lz2Sg0gsR2eGULsP` into the ingest field. `POST /api/sources/youtube` → **201**, body byte-for-byte the pasted URL → source **`651525f6355b4b28`**; `POST /api/jobs` → **201** → job **`3db75213de894350`** |
+| **The job** | `status=done`, `progress=1.0`, `error=null`, started **06:56:15 UTC**, finished **08:16:06 UTC** — **4,791 s (79.8 min)** for **574.880 s** of source, ≈ **8.33× real time** |
+| **The download** | **225,722,498 B in 60,693 ms** — the same video as the first run, **17%** slower on the wire this time |
+| **The transcript** | whisper `small`, language `hi` — **1,277 words** in **246 segments**. The recogniser is **not** bit-deterministic: the first run on this same file produced **1,060 words** in **220 segments** |
+| **The detection** | two windows, **933,665 ms** and **634,943 ms**, both `ok`, **`windows_skipped = 0`**. The windows were **900** and **525** words — **8,402** and **5,264** prompt characters — because the transcript grew |
+| **The creative plan** | the plan (**430,699 ms**) and its **repair retry** (**335,078 ms**); the stored plan has `source='ai'` and `problems='[]'` — **the model's own plan**, not the fallback. `plan_used=1`, `repair_used=1`, `overruns=[]` |
+| **The output** | **9 clips**, all `status='exported'`, **268,664,639 B** over **11** ffmpeg runs and **448.5** ffmpeg-seconds |
+| **The usage ledger** | `llm_calls=2`, `llm_input_tokens=10055`, `llm_output_tokens=1535` — the two detection windows, counted once each |
+
+**The measurements.** Ninety of them — nine clips × ten — and **89 are `ok`**. The one that is not
+is rank 2's `black_frames`: *"The clip goes black for 0.83 seconds."* That is a **true positive
+about the source**, measured rather than asserted: `ffmpeg blackdetect` on the **raw source**
+from 90 s finds `black_start:15.973 black_end:16.807 black_duration:0.834` — source time
+**105.973–106.807 s**, inside that clip's own **90.829–132.750 s**. It was **not** "fixed"; the
+diagnostic is right, and the source has black stretches in it.
+
+**Everything the run's own diagnostics had complained about is now green.** `crop_safety` is `ok`
+on **all nine** — the six that were falsely reported last time are green — and `duplicate_clips`
+is `ok` on **all nine**, with **no pair** overlapping by half of the shorter one, checked by the
+**same shared rule** the pipeline uses.
+
+**And the export-name fix was exercised by the run itself, not only by a test.** The model chose
+the same title twice again — *"Why I'm not like them"*, for ranks 2 and 3 — and the two exports
+came out as `why-im-not-like-them-2_9x16.mp4` and `why-im-not-like-them-3_9x16.mp4`. Under the
+pre-fix code that pair would have been **one file and one set of subtitles**, and the first clip
+would have been gone. **Nine clips, nine distinct names, no collision**; every recorded size
+equals the size on disk; every `.srt` sidecar is present, with **0** overlapping cues and a
+longest cue of **2.500 s**; every export is **1080×1920** at **29.97 fps** with an AAC track and
+**0.000%** of samples at full scale.
+
+#### M5.4 did not change the verdict
+
+No matrix row was closed and none was opened: the count is unchanged at **110 Implemented · 9
+Partial · 1 Blocked · 9 Not Applicable · 0 Missing**. What changed is the **defect count**
+(thirteen → **twenty-two**) and the **evidence base**: a **second** complete real source has now
+been ingested, transcribed, highlighted, laid out, captioned, exported and diagnosed **end to
+end** — **twice**, the second time with every fix in the tree — and the run found a failure mode
+that the first source could not reach, because the first source's transcript was small enough for
+the model's context and this one was not.
+
 ---
 
 ## 5. Every PARTIAL item, named
@@ -826,6 +1161,10 @@ AutoClip cannot re-classify each hop. That is unchanged and still needs a Lane B
 | K25 | **The caption bound hides the symptom rather than correcting the alignment.** A word that genuinely was spoken across a long pause now produces a caption that leaves the screen early, so the words after it appear with a gap in the subtitle. The bound was chosen over rewriting the recogniser's timings because several consumers want the timings as the recogniser reported them; the trade-off is recorded here rather than hidden. Found at M5.3. |
 | K26 | **The ffmpeg command line is still built inline.** ffmpeg 9.0.2 removed `-filter_complex_script`, and neither `-filter_complex @file` nor `-filter_complex /file` reads a file — so there is no way to move a long graph off the command line. The M5.3 fix keeps the graph **0.33×** of the limit for the shape that failed, and the command line is now **refused before ffmpeg runs** rather than failing obscurely, but a clip with very many more segments could still approach the limit. Found at M5.3. |
 | K27 | **The ffmpeg-version coverage is two builds wide.** The export's filter graph was measured against **ffmpeg 7.0.2** and **ffmpeg 9.0.2**, and it now uses only constructs both accept. An ffmpeg **older than 7**, or a build with a different filter set, is **not** covered by evidence. What *is* established is that the graph no longer depends on a newer ffmpeg's leniency — and that the structural check, not the ffmpeg, is what catches this class of defect now. Found at M5.3. |
+| K28 | **The provider's context window is a setting, not a measurement.** The M5.4 default of **8,192** tokens was chosen because it is the largest that leaves room for the model itself on this **8.4 GB** machine — the extra KV cache measured about **680 MB**, and **16,384** would have added roughly **2.7 GB**, which does not fit. On a **smaller** machine the default is too large and the setting must be lowered; on a **larger** one it is conservative. The product reports a prompt that still overflows rather than truncating it, but it cannot know the user's RAM. Found at M5.4. |
+| K29 | **A local model can be slow enough to look broken.** One detection call over an eight-minute window measured **1,993 s** on this box — about **33 minutes** for one request, and the highlight stage makes **two** of them, one after the other. The **3,600 s** default timeout is generous enough for that, but a longer source on a slower CPU is not bounded by anything the product controls. There is no progress message inside a single window. **The verification run did not explain the gap, and this row does not pretend it did**: its two windows took **933,665 ms** and **634,943 ms** against M5.3's **425,100 ms** for two windows of a comparable size, with **13,666** prompt characters against a similar total. The prompts were not materially larger, and the time is still **not accounted for**. Found at M5.4. |
+| K30 | **The crop-safety tolerance is a fixed 90% keep-ratio, not a per-shot judgement.** The crop must keep at least **90%** of the face it follows; a sliver of the detector's bounding box outside is tolerated. That is one constant for every shot, every face size and every camera, and it is a **judgement** — a loose detector box on a small face may make the ratio harsher than the picture deserves. The worst case measured on the real source is **19 px of a 549 px face (3.5%)**. Found at M5.4. |
+| K31 | **"The same clip" is a fixed 50%-overlap threshold.** Two clips are duplicates when the overlap covers at least **half of the shorter one** — one constant, used by both the pipeline and the diagnostic so they cannot disagree. A shorter clip that is a genuine *highlight* inside a longer clip's range will be removed with it. The higher score survives, so the longer clip is the one that is kept. Found at M5.4. |
 
 ### 6.2 Engineering
 
@@ -880,6 +1219,14 @@ behalf.
 | **The M5.3 emphasis-timeline guard** | `tests/test_export_render.py::TestLayoutRender::test_the_speech_emphasis_renders_in_a_later_stretch` — a behavioural render |
 | **The M5.3 caption-lifetime guards** | `tests/test_captions.py::TestCaptionLifetime` and `tests/test_diagnostics.py` |
 | **The M5.3 graph-shape guard — the video graph as well as the music graph** | `tests/graph_shape.py` (new) and `tests/test_export_graph.py::TestGraphShape` |
+| **The M5.4 second-source evidence — a whole second real source, end to end, and nine more defects** | `docs/M5-APPLICATION-TESTING.md` §M5.4, AT-G-01 … AT-G-16 |
+| **The M5.4 provider-limit guards — the timeout, the context, the answer budget, the window sizing and the overflow guard** | `tests/test_provider_limits.py` — 22 tests |
+| **The M5.4 settings-API guards** | `tests/test_api.py::TestSettings` — the timeout is validated, and the stored value is read back |
+| **The M5.4 export-name guards — two clips, one title** | `tests/test_export_graph.py::TestExportFilenames` and `tests/test_api.py::TestClipsWithTheSameTitle` |
+| **The M5.4 crop-safety guards — the face the crop follows, and the stated tolerance** | `tests/test_diagnostics.py::TestCropSafetyMeasuresTheFollowedFace`, `::TestCropSafetyTolerance` |
+| **The M5.4 duplicate-rule guards — one rule, used by the pipeline and the diagnostic** | `tests/test_highlights.py::TestDuplicateClips` (new file) |
+| **The M5.4 boundary guards — a clip may only widen** | `tests/test_boundaries.py::TestSilenceAlignment` |
+| **The M5.4 tracker guard — a track stays with its person** | `tests/test_reframe.py::TestTracking` |
 | **The installation and upgrade guide** | `docs/M5-INSTALLATION.md` |
 | **This report** | `docs/FINAL_UPGRADE_REPORT.md` |
 | The Instagram API evaluation | `docs/INSTAGRAM-API-EVALUATION.md` |
@@ -896,14 +1243,15 @@ behalf.
 ## 8. What a reviewer should do next
 
 1. **Read `docs/M5-APPLICATION-TESTING.md`.** It is the evidence that the application works, and
-   it is also the record of the **thirteen** defects that the application testing and the gates
-   found — three at M5, one at M5.1 (§4.3), four at M5.2 (§4.4) and five at M5.3 (§4.5).
+   it is also the record of the **twenty-two** defects that the application testing and the gates
+   found — three at M5, one at M5.1 (§4.3), four at M5.2 (§4.4), five at M5.3 (§4.5) and **nine** at
+   M5.4 (§4.6).
 2. **Read `docs/M5-SECURITY-REVIEW.md`.** It says what was *not* checked as plainly as what was.
-3. **Read the ledger's M0–M5.3 sections.** Every milestone records its decisions and its
+3. **Read the ledger's M0–M5.4 sections.** Every milestone records its decisions and its
    residuals, and the residuals are the honest edges of this release.
 4. **Run the gates.** `ruff check . && ruff format --check . && pytest -m "not slow and not golden
    and not e2e" && pytest -m "slow and not golden and not e2e"`. About ten minutes.
-5. **Run the gates on an older ffmpeg too, if you can.** Two of the **thirteen** defects this
+5. **Run the gates on an older ffmpeg too, if you can.** Two of the **twenty-two** defects this
    milestone found render on ffmpeg 9 and fail on ffmpeg 7. The suite's structural graph check
    now catches them on any version, but the habit of reproducing the Linux leg locally is what
    found them — and it is what keeps finding things the developer's machine agrees with.
@@ -934,6 +1282,7 @@ touched. The branch was created from `bf76811` and every commit since is in fron
 | M5.1 | `294c274` (the empty-timeline fix and the eight-case ducking matrix, with their tests) |
 | M5.2 | `066bbf6` (the configured yt-dlp format is the one that is used) · `5574a8d` (the download is written to the transfer log) · `78f1781` (the crop-safety check measures the clip's own face) · `a907805` (a load-balanced public host is not a DNS rebinding) |
 | M5.3 | `a7fc82d` (the terminators each script actually uses) · `09f8a29` (the webcam crop is built once, not once per segment) · `a3aecab` (a caption is read, not watched) · `2b5935d` (every segment gets its own copy of the source) |
+| M5.4 | `168f4ee` (the request that fits, and a timeout that tells the truth) · `b4f924a` (a job that analysed part of a video says so) · `74ec3eb` (the five defects the run's own diagnostics found) |
 
 **The M5 commits, in order, and what each one is for.**
 
@@ -975,6 +1324,15 @@ one commit, because they are one change.
 | `2b5935d` | `pipeline/export.py` (the source is split **once per consumer**, so every segment has a copy of its own), the new `tests/graph_shape.py` (the structural graph check, moved out of the music test), `tests/test_export_graph.py::TestGraphShape` and `tests/test_music.py` | The fifth defect, found by the **Linux leg** on **ffmpeg 7.0.2** — the version that reproduces the CI's platform. **3 tests fail without the fix.** The structural check was already written for this class of defect, but only ever looked at the **music** graph; it now looks at the **video** graph too. The shape was measured against **both** ffmpeg builds before it was chosen |
 
 The full, dated list is in `docs/UPGRADE-LEDGER.md` §Change log.
+
+**The three M5.4 commits, and what each one is for.** They are one commit per defect-cluster, and
+each carries its own guards.
+
+| Commit | What it does | Why it is separate |
+|---|---|---|
+| `168f4ee` | `config.py` (`ProviderSettings.timeout_s` and `ProviderSettings.context_tokens`), `providers/base.py` (`PromptBudget`, `CHARS_PER_TOKEN`, `ProviderError.code`, the prompt budget), `providers/ollama_provider.py` (the timeout, the requested context, the answer budget, the overflow guard, the truthful message), `providers/{anthropic,openai,gemini}_provider.py` (the timeout reaches the SDKs — Gemini in milliseconds, because that is what its SDK counts), `providers/__init__.py` and `providers/resolver.py` (both settings, both construction paths), `pipeline/highlights.py` (the exact-cost window budget, the stop-at-first-timeout, the accurate error), `errors.py`, `api/settings.py` (the provider update is validated), and `frontend/src/api.ts` + `frontend/src/pages/Settings.tsx` (the two new fields) — with the new `tests/test_provider_limits.py` (**21 tests**) and two settings tests in `tests/test_api.py` | The four defects are **one failure seen four ways**, and the fix is one change: the request now fits the model's context, and a timeout says what happened. **20 of the 21 new tests fail without the fix**; the one that passes is a non-regression guard. The **same payload** that the product sent, with `num_ctx: 8192`, returned **HTTP 200** after **1,992.9 s** — the experiment that settled the root cause |
+| `b4f924a` | `pipeline/highlights.py` (the windows that were **not analysed** are counted, recorded in the job's usage and said in the log) and one more test in `tests/test_provider_limits.py` | Stopping at the first timeout is only half the answer. A job that analysed the first window and skipped the rest must not look, from the outside, like a job that analysed the whole video. The test was **observed failing** against the pre-fix code |
+| `74ec3eb` | `pipeline/export.py` (`output_filename(suffix=)`, `unique_output_filename`), `pipeline/runner.py` and `api/clips.py` (the two export-name call sites), `pipeline/reframe/croppath.py` (`CropSegment.faces`), `pipeline/reframe/__init__.py` (the faces each segment was built around), `pipeline/reframe/tracker.py` (the tracker's proximity tolerance), `pipeline/diagnostics.py` (`FACE_KEEP_RATIO`, `_faces_at`, `_face_inside_fraction`), the new `pipeline/duplicates.py`, `pipeline/highlights.py` (the time-based de-duplication) and `pipeline/boundaries.py` (the alignment may only widen a clip) — with the new `tests/test_highlights.py` and the additions to `tests/test_export_graph.py`, `tests/test_api.py`, `tests/test_diagnostics.py`, `tests/test_boundaries.py` and `tests/test_reframe.py` | The five defects the run's **own diagnostics** found, after it had finished. They are all in the pipeline's **output**, and they are kept together because they are one story: **the product measured itself, and four of the five measurements were wrong** — or, in the tracker's case, right about the wrong face. **17 of the 20 new tests fail without the fix**; the other three are non-regression guards |
 
 ---
 
@@ -1073,6 +1431,70 @@ statement about how the product behaves in the world rather than about its inter
 Every one of those was found by measuring the real thing, not by reading the code and feeling
 satisfied. The tests that caught them are in the tree, and they will catch them again.
 
+M5.4 added four more, and they are a class the previous sixteen did not contain: they are not
+about the **content**, they are about the **request**.
+
+* **The timeout was a hard-coded 600 seconds.** One legitimate call over an eight-minute window
+  was measured at **1,993 s** on this box — so the ceiling cut off calls that were about to
+  succeed, and the advice printed with the failure (*"try again"*) reproduced the failure exactly.
+* **The failure message blamed a GPU the machine did not have.** It said *"Large transcripts on a
+  small GPU can exceed the limit"*, on a machine with `size_vram: 0`, and told a local-only user
+  to *use a hosted provider* — advice the product's own settings screen does not let that user
+  follow.
+* **A timed-out window left the server still generating the abandoned request.** The next window
+  queued behind the orphan, burned its own 600 s without ever starting, and the stage then
+  reported *"failed in every window"* — including the window that was never tried.
+* And **the request did not fit the model's context.** Window 0's prompt measured **5,861 tokens**
+  against a **4,096-token** context, while the product asked for `num_predict: 4096` — an answer
+  budget as large as the entire context. The model server truncates an overflowing prompt
+  **without saying so**. This is the one that would have shipped as a *success*: the pipeline would
+  have produced clips, and they would have been clips of a **partial transcript**.
+
+That last one is the strongest argument in this report for the way the release was produced. The
+defect was not visible in the code, because the code was asking for a reasonable thing — a prompt
+and an answer — and the *combination* was impossible. It was not visible in the logs, because the
+server truncates silently. It was found by **measuring the request with the model server's own
+tokenizer**, and it was settled by **re-running the same payload with a context that fits**:
+HTTP 200, after **1,992.9 s**, with `prompt_eval_count: 5862` — the estimate exactly.
+
+And then, **after the run had finally finished**, the pipeline's own diagnostics found **five more**
+— and this time they were in the pipeline's **output**:
+
+* **Two clips with the same title overwrote each other.** The export's name came from the title
+  alone, and the titles are the **model's** choice. Two of the nine clips were called *"The
+  language of love in videos"*; the export directory held **one** file for them, and the second
+  clip's **54,024,088 B** had replaced the first clip's **14,272,780 B** — with its subtitles
+  gone too. The database still said the first clip was **14,272,780 B**: a file that no longer
+  existed.
+* **The crop-safety diagnostic measured the wrong face.** It took *"the largest face within half
+  a second"* as the subject, while the crop follows the **tracked** speaker, and it reported **6
+  of the 9 clips** as cutting a face that was never their subject.
+* **The pipeline and the diagnostic had two different definitions of "the same clip".** The
+  pipeline compared **word ranges**; a clip *inside* another one has almost no words in common
+  with it, so two pairs of the same footage were both kept — and the diagnostic, which compares
+  **time**, said so.
+* **A clip could open in the middle of a word** — **52 ms** inside, on rank 1 — which breaks the
+  code's own documented invariant, *"alignment only ever widens a clip"*.
+* And **a face track could jump to a smaller face beside it.** The tracker's proximity tolerance
+  was scaled by the **larger** of the two faces, so a track could hop onto a smaller face-shaped
+  object near the speaker — a **Pikachu plush** on the shelf behind them — and the crop panned
+  away from the speaker to follow it.
+
+Every one of those five reports was read back against the source **before** anything was changed.
+That is the discipline the whole upgrade has followed, and this increment is where it mattered
+most: four of the five were the **measurement** being wrong, not the product. A diagnostic that
+reports failures that did not happen sends the user looking for a fault that is not there — and
+defect 7 of this upgrade was exactly that. The **tolerance** the new measurement allows is
+stated, measured and defended in §4.6: the crop must keep **90%** of the face, and the worst case
+on the real source is **19 px of a 549 px face (3.5%)**.
+
+The lesson is the same one the last milestone taught, in a different place. A passing test is not
+evidence unless it checks the right *property* on the right *thing*; a green run is not evidence
+unless it ran the thing that was broken. The structural graph check was the fix for defect 3 and
+it only ever looked at the **music** graph. The prompt-budget check is the fix for defect 17 and
+it has to look at the **request the provider actually receives** — because that is where the
+constraint lives.
+
 One of them deserves its own note, because it is the kind of defect that hides behind a *passing*
 test. The structural check that found the last one — "no filter output is consumed twice" — was
 **already in the tree**. It was the fix for defect 3. But it only ever looked at the **music**
@@ -1081,5 +1503,19 @@ checks the right *property* on the right *thing* is worth more than a test that 
 *different* property; so the check moved to `tests/graph_shape.py` and now covers both graphs. It
 also caught a label collision in the first version of the fix, before any render — which is the
 whole argument for a parser rather than a screenshot.
+
+And the last thing to say is the **verification run**, because a fix that is only ever proved by a
+test is a fix whose *proof* is the test. The application was pointed at the **same** video again —
+a **new** job, from the paste, through the real UI — with every fix in the tree. It finished
+**done**, in **4,791 s**, with **nine** clips, **nine distinct exports**, and **89 of 90**
+measurements `ok`. The one that is not is a **true positive about the source**: the video really
+does go black for **0.83 s** in the middle of one of its own clips, and `blackdetect` on the raw
+file says so.
+
+And the run **reproduced the condition that caused the defect**: the model chose the **same title
+twice** again — *"Why I'm not like them"* — so the export-name fix was exercised by the run
+itself, not only by a test. Under the code as it was, that pair would have been one file and one
+set of subtitles, and the first clip would have been gone. It was not gone. That is the difference
+between a fix that is **proven** and a fix that is **assumed**.
 
 That is the main reason to trust this release. Not the feature count.

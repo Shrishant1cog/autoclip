@@ -253,6 +253,57 @@ was contacted and no hosted credential was spent** — the run used a local
 Ollama and local whisper throughout, and the log is the proof of that rather
 than an assertion.
 
+**What the M5.4 real run actually left in the log.** The second complete real
+source — the **9:35** CarryMinati video, used for technical acceptance only —
+produced **8 rows**, and they are the same paths:
+
+| # | Operation | Destination | Class | Outcome | Duration |
+|---|---|---|---|---|---|
+| 1 | `media_download` | `https://youtu.be/bMTlNeKqV4o` | public | `ok` | 51,703 ms |
+| 2 | `highlights` | `http://127.0.0.1:11434` | loopback | **`failed`** | 600,086 ms |
+| 3 | `highlights` | `http://127.0.0.1:11434` | loopback | **`failed`** | 600,450 ms |
+| 4 | `highlights` | `http://127.0.0.1:11434` | loopback | `ok` | 881,989 ms |
+| 5 | `highlights` | `http://127.0.0.1:11434` | loopback | `ok` | 426,775 ms |
+| 6 | `creative_planning` | `http://127.0.0.1:11434` | loopback | `ok` | 408,594 ms |
+| 7 | `creative_planning` | `http://127.0.0.1:11434` | loopback | `ok` | 303,493 ms |
+| 8 | `model_download` | `https://storage.googleapis.com/mediapipe-models/…/face_landmarker.task` | public | `ok` | 0 ms |
+
+Rows **2** and **3** are the failed attempts, before the timeout fix; rows
+**4** to **7** are the same two stages after it. **No hosted provider was
+contacted and no hosted credential was spent** — the log is the proof of that
+rather than an assertion, and every row is one of the paths above.
+
+The two failed rows are worth keeping in the record rather than deleting. They
+are the **evidence** for the M5.4 timeout defect: both lasted exactly the
+provider's ceiling, and both carried the same detail — *"Ollama timed out."*
+followed by the hint that blamed a small GPU on a machine with no GPU. A log
+that only kept the successes would not have shown that.
+
+**And what the M5.4 verification run added.** After the nine defects were fixed,
+the application was pointed at the **same** video again — a **new** job, from
+the paste, through the real UI — and the log grew by **five** rows:
+
+| # | Operation | Destination | Class | Outcome | Duration |
+|---|---|---|---|---|---|
+| 9 | `media_download` | `https://youtu.be/bMTlNeKqV4o` | public | `ok` | 60,693 ms |
+| 10 | `highlights` | `http://127.0.0.1:11434` | loopback | `ok` | 933,665 ms |
+| 11 | `highlights` | `http://127.0.0.1:11434` | loopback | `ok` | 634,943 ms |
+| 12 | `creative_planning` | `http://127.0.0.1:11434` | loopback | `ok` | 430,699 ms |
+| 13 | `creative_planning` | `http://127.0.0.1:11434` | loopback | `ok` | 335,078 ms |
+
+**Thirteen rows in all, across both runs, and the shape did not change.** The
+second download is **row 9** — the *same* URL, the *same* `media_download`
+operation, **60,693 ms** against the first run's **51,703 ms**: the same file,
+downloaded twice, **17%** apart on the wire. Rows **10** and **11** are the two
+detection windows, both **`ok`**, and both **under** the new **3,600 s** ceiling
+— the first attempt's two failures had each lasted the whole old **600 s**.
+Rows **12** and **13** are the creative plan and its **repair retry**.
+
+**No hosted host appears anywhere in the thirteen rows.** Every destination is
+either `youtu.be` (public), `storage.googleapis.com` (public, the MediaPipe
+model) or `127.0.0.1` (loopback). The log is the proof that no hosted provider
+was contacted and no hosted credential was spent, rather than an assertion.
+
 ## 6. Where the enforcement lives
 
 | Concern | Module |
