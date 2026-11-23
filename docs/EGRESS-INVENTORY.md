@@ -299,6 +299,16 @@ detection windows, both **`ok`**, and both **under** the new **3,600 s** ceiling
 — the first attempt's two failures had each lasted the whole old **600 s**.
 Rows **12** and **13** are the creative plan and its **repair retry**.
 
+**The two downloads are the same file, and that was checked at the byte level.**
+Both are **225,722,498 B**, and they differ in **exactly one byte** — offset
+**407**, the mp4 creation-date metadata (`on: 11/21/2026` against
+`on: 11/22/2026`). Decoded to 16 kHz mono PCM they are **byte-identical**
+(**18,396,148 B**, sha256 `4a87c5bd…8b7`, **574.880 s**). So the two
+`media_download` rows are two fetches of **one** piece of media, and the
+difference between the two runs is **not** a different file — it is the
+**recogniser** (see **K32**), which is what the byte-level comparison in
+`docs/M5-APPLICATION-TESTING.md` AT-G-17 measures.
+
 **No hosted host appears anywhere in the thirteen rows.** Every destination is
 either `youtu.be` (public), `storage.googleapis.com` (public, the MediaPipe
 model) or `127.0.0.1` (loopback). The log is the proof that no hosted provider

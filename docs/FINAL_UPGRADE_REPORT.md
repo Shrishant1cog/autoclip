@@ -158,7 +158,7 @@ Blocked · 9 Not Applicable · 0 Missing**. What changed is the **defect count**
 **twenty-two**), the **test count** (1,397 → **1,441**), and the **evidence base**: a **second**
 complete real source has now been ingested, transcribed, highlighted, laid out, captioned, exported
 and diagnosed **end to end** — twice, the second time with every fix in the tree. See **§4.6**, and
-`docs/M5-APPLICATION-TESTING.md` AT-G-01 … AT-G-16 for the per-journey record.
+`docs/M5-APPLICATION-TESTING.md` AT-G-01 … AT-G-17 for the per-journey record.
 
 ---
 
@@ -315,7 +315,7 @@ the branch finds the same numbering.
 
 | Runs | Result | What happened |
 |---|---|---|
-| 4, 5, 7–13, 15–17, **22**, **23**, **24**, **25**, **26**, **27**, **28**, **29**, **30**, **31**, **33**, **34**, **35**, **36**, **37**, **38**, **39** | **success** | green |
+| 4, 5, 7–13, 15–17, **22**, **23**, **24**, **25**, **26**, **27**, **28**, **29**, **30**, **31**, **33**, **34**, **35**, **36**, **37**, **38**, **39**, **40** | **success** | green |
 | 6, 14, 18, **21**, **32** | **cancelled** | each superseded by a newer push — the concurrency group cancelled the older run |
 | **19** (`4cf309b`) | **failure** | the Ubuntu legs failed in **Unit tests**; Windows and macOS passed the same tests. A test wrote to the owner's real OS keyring. On Linux there is no keyring backend, so the token was never stored and the assertion could not hold — the test passed on Windows and macOS *because those machines had a real keyring to write to*. Fixed by `94c6d9c`, an **autouse** isolation fixture so no test can reach the owner's credential store |
 | **20** (`94c6d9c`) | **failure** | the Ubuntu py3.12 leg failed at *"Verify ffmpeg can burn subtitles"*. The check piped the ffmpeg filter list into `grep -q`; `grep -q` exits at the match, the producer gets **SIGPIPE**, and GitHub's `set -o pipefail` turns that into a failed step. The runner's ffmpeg 8 has a filter list large enough to fill the pipe, so CI reported that an ffmpeg **with** the `ass` filter did not have one — the job log shows `printf: Broken pipe` and then the `ass` filter listed on the very next line. **Corrected, not removed**: the check now matches with bash's own pattern matching and never pipes, and a build genuinely without the filter still fails it |
@@ -362,6 +362,10 @@ guards, the crop-safety guards, the shared duplicate rule, the boundary clamp an
 tolerance on every CI job. One commit on this branch has **no workflow run at all** — `9fdc6ae`,
 a documentation-only M5.3 commit — and that is recorded in `docs/M5-REGRESSION-REPORT.md` rather
 than glossed over; the claim that is made is the narrower one that a script checks.
+
+**Run 40 is the M5.4 documentation tree — the eight files that carry the second source's evidence —
+and it is green on all six jobs too**
+([run 45146983505](https://github.com/Shrishant1cog/autoclip/actions/runs/45146983505)).
 
 **The table stops at the last run recorded in it, and the commits after it change the record, not
 the content it reports.** Each one's own run was verified after the push and is green, and the
@@ -1062,11 +1066,59 @@ from the failed attempt.
 | **The paste** | `https://youtu.be/bMTlNeKqV4o?si=lz2Sg0gsR2eGULsP` into the ingest field. `POST /api/sources/youtube` → **201**, body byte-for-byte the pasted URL → source **`651525f6355b4b28`**; `POST /api/jobs` → **201** → job **`3db75213de894350`** |
 | **The job** | `status=done`, `progress=1.0`, `error=null`, started **06:56:15 UTC**, finished **08:16:06 UTC** — **4,791 s (79.8 min)** for **574.880 s** of source, ≈ **8.33× real time** |
 | **The download** | **225,722,498 B in 60,693 ms** — the same video as the first run, **17%** slower on the wire this time |
-| **The transcript** | whisper `small`, language `hi` — **1,277 words** in **246 segments**. The recogniser is **not** bit-deterministic: the first run on this same file produced **1,060 words** in **220 segments** |
+| **The transcript** | whisper `small`, language `hi` — **1,277 words** in **246 segments**. The recogniser is **not** bit-deterministic: the first run on this same file produced **1,060 words** in **220 segments**. That is **measured, not asserted** — the byte-level comparison and the recogniser's own fallback log are below, and the finding is recorded as **K32** |
 | **The detection** | two windows, **933,665 ms** and **634,943 ms**, both `ok`, **`windows_skipped = 0`**. The windows were **900** and **525** words — **8,402** and **5,264** prompt characters — because the transcript grew |
 | **The creative plan** | the plan (**430,699 ms**) and its **repair retry** (**335,078 ms**); the stored plan has `source='ai'` and `problems='[]'` — **the model's own plan**, not the fallback. `plan_used=1`, `repair_used=1`, `overruns=[]` |
 | **The output** | **9 clips**, all `status='exported'`, **268,664,639 B** over **11** ffmpeg runs and **448.5** ffmpeg-seconds |
 | **The usage ledger** | `llm_calls=2`, `llm_input_tokens=10055`, `llm_output_tokens=1535` — the two detection windows, counted once each |
+
+**The two runs, compared at the byte level.** The verification run was the **second** time this
+source went through the pipeline, so the two runs can be compared — and the comparison is the
+sharpest evidence in this report, because it separates what the **media** did from what the
+**recogniser** did.
+
+| | First attempt (`f65fb40febe141d7`) | Verification run (`3db75213de894350`) |
+|---|---|---|
+| The source row | `b5bf5a6f740a40ee` | `651525f6355b4b28` — the same URL, ingested again |
+| The download | **225,722,498 B in 51,703 ms** | **225,722,498 B in 60,693 ms** |
+| The container | the two files differ in **exactly one byte** — offset **407**, the mp4 creation-date metadata | the same |
+| The decoded audio | **byte-identical** 16 kHz mono PCM — **18,396,148 B**, sha256 `4a87c5bd…8b7`, **574.880 s** | the same |
+| `audio.wav` | **18,396,226 B**, sha256 `5e468f32…` | **byte-identical** |
+| `silences.json` · `shots.json` · `webcam_report.json` | **2,812 B** · **9,437 B** · **45,951 B** | **byte-identical** |
+| The **115** thumbnails | folder sha256 `a7eb34b3…` | **byte-identical** |
+| `transcript.json` | **110,326 B** — **1,060 words**, **220** segments | **131,534 B** — **1,277 words**, **246** segments |
+| `speech_timeline.json` | **6,123 B** | **5,756 B** |
+| The detection windows | **885** and **304** words — **8,233** and **2,926** prompt characters | **900** and **525** words — **8,402** and **5,264** prompt characters |
+| The detection time | **881,989 ms** + **426,775 ms** = **1,308,764 ms** | **933,665 ms** + **634,943 ms** = **1,568,608 ms** |
+| The usage ledger | `llm_input_tokens=8536`, `llm_output_tokens=1623` | `llm_input_tokens=10055`, `llm_output_tokens=1535` |
+| The export | **9** ffmpeg runs, **490.4** ffmpeg-seconds, **328,836,840 B** | **11** ffmpeg runs, **448.5** ffmpeg-seconds, **268,664,639 B** |
+
+**Everything the pipeline derives from the media is identical; the transcript is not** — and the
+difference is in the **recogniser**, not in the media. Read word record by word record, the two
+transcripts are **identical for the first 246 records**, up to **101.02 s**, and then they part: at
+**101.02 s** the first attempt says `बलवेंदर` and the verification run says `बलविंदर`, and the
+**timings do not move at all** — segment 55 is `101.02 → 104.38` in both. Only **248 of the 1,060**
+word records match at the same index, and the speech the two transcripts cover is **348.12 s**
+against **414.86 s**.
+
+**The mechanism was measured, not guessed.** A **40 s** excerpt of the same audio was decoded
+**twice**, with the product's exact call and with the recogniser's own logging captured. The two
+decodes differ — **10** segments against **9** — and the log says why:
+
+| The recogniser's own log | Run 1 | Run 2 |
+|---|---|---|
+| The segments decoded | **10** | **9** |
+| `Compression ratio threshold is not met with temperature 0.0` | **6.897436 > 2.400000** | **6.897436 > 2.400000** |
+| `… with temperature 0.2` | **6.460317 > 2.400000** | **4.840909 > 2.400000** |
+| `… with temperature 0.4` | **8.479167 > 2.400000** | **16.370370 > 2.400000** |
+| `… with temperature 0.6` | **9.767442 > 2.400000** | **6.490566 > 2.400000** |
+| The pass at 0.8 | `Reset prompt. prompt_reset_on_temperature threshold is met 0.800000 > 0.500000` | `Log probability threshold is not met with temperature 0.8 (-1.533331 < -1.000000)` |
+
+The recogniser's confidence check **fails** on this passage even at temperature 0, so it falls back
+— and every fallback pass above zero **samples** (`beam_size=1`, `sampling_topk=0`,
+`sampling_temperature=temperature`) from a generator that faster-whisper **1.2.1** does not seed;
+that version has no `seed` argument to pin it with. Two runs of the same audio therefore take
+different branches. The full detail, and what it would cost to fix, is **K32**.
 
 **The measurements.** Ninety of them — nine clips × ten — and **89 are `ok`**. The one that is not
 is rank 2's `black_frames`: *"The clip goes black for 0.83 seconds."* That is a **true positive
@@ -1162,9 +1214,10 @@ AutoClip cannot re-classify each hop. That is unchanged and still needs a Lane B
 | K26 | **The ffmpeg command line is still built inline.** ffmpeg 9.0.2 removed `-filter_complex_script`, and neither `-filter_complex @file` nor `-filter_complex /file` reads a file — so there is no way to move a long graph off the command line. The M5.3 fix keeps the graph **0.33×** of the limit for the shape that failed, and the command line is now **refused before ffmpeg runs** rather than failing obscurely, but a clip with very many more segments could still approach the limit. Found at M5.3. |
 | K27 | **The ffmpeg-version coverage is two builds wide.** The export's filter graph was measured against **ffmpeg 7.0.2** and **ffmpeg 9.0.2**, and it now uses only constructs both accept. An ffmpeg **older than 7**, or a build with a different filter set, is **not** covered by evidence. What *is* established is that the graph no longer depends on a newer ffmpeg's leniency — and that the structural check, not the ffmpeg, is what catches this class of defect now. Found at M5.3. |
 | K28 | **The provider's context window is a setting, not a measurement.** The M5.4 default of **8,192** tokens was chosen because it is the largest that leaves room for the model itself on this **8.4 GB** machine — the extra KV cache measured about **680 MB**, and **16,384** would have added roughly **2.7 GB**, which does not fit. On a **smaller** machine the default is too large and the setting must be lowered; on a **larger** one it is conservative. The product reports a prompt that still overflows rather than truncating it, but it cannot know the user's RAM. Found at M5.4. |
-| K29 | **A local model can be slow enough to look broken.** One detection call over an eight-minute window measured **1,993 s** on this box — about **33 minutes** for one request, and the highlight stage makes **two** of them, one after the other. The **3,600 s** default timeout is generous enough for that, but a longer source on a slower CPU is not bounded by anything the product controls. There is no progress message inside a single window. **The verification run did not explain the gap, and this row does not pretend it did**: its two windows took **933,665 ms** and **634,943 ms** against M5.3's **425,100 ms** for two windows of a comparable size, with **13,666** prompt characters against a similar total. The prompts were not materially larger, and the time is still **not accounted for**. Found at M5.4. |
+| K29 | **A local model can be slow enough to look broken.** One detection call over an eight-minute window measured **1,993 s** on this box — about **33 minutes** for one request, and the highlight stage makes **two** of them, one after the other. The **3,600 s** default timeout is generous enough for that, but a longer source on a slower CPU is not bounded by anything the product controls. There is no progress message inside a single window. **The gap is measured, not guessed.** The four M5.4 detection windows fit a straight line — **time ≈ 165 s + 0.089 s per prompt character** — to within **2.1 %**, so the difference *between the two M5.4 runs* is explained by their prompts. The gap *against* M5.3 is not: M5.3's first window — the opening **480 s** of a **1,128-word** transcript — took **174.8 s**, where M5.4's **885**-word window took **882.0 s**. It is **not** machine load — the transcription rate on this machine was **2.17×** real time at M5.3 and **2.38×** at M5.4 — and it is **not** the request shape alone, because the **same** payload, hand-sent to the same server with `num_ctx: 8192`, took **1,992.9 s** against the application's **881,989 ms**, a **2.26×** spread on identical work. The request shape **did** change between the two increments (`num_ctx` **4,096 → 8,192**, the change defect 17 introduced), and it remains a candidate; it is **not** proven. Found at M5.4. |
 | K30 | **The crop-safety tolerance is a fixed 90% keep-ratio, not a per-shot judgement.** The crop must keep at least **90%** of the face it follows; a sliver of the detector's bounding box outside is tolerated. That is one constant for every shot, every face size and every camera, and it is a **judgement** — a loose detector box on a small face may make the ratio harsher than the picture deserves. The worst case measured on the real source is **19 px of a 549 px face (3.5%)**. Found at M5.4. |
 | K31 | **"The same clip" is a fixed 50%-overlap threshold.** Two clips are duplicates when the overlap covers at least **half of the shorter one** — one constant, used by both the pipeline and the diagnostic so they cannot disagree. A shorter clip that is a genuine *highlight* inside a longer clip's range will be removed with it. The higher score survives, so the longer clip is the one that is kept. Found at M5.4. |
+| K32 | **The transcript is not reproducible from run to run.** The same file, transcribed twice, gave **two different transcripts**: identical word records for the first **246** — up to **101.02 s** — and then different text with the **same timings** (**1,060** words in **220** segments against **1,277** in **246**). The media were byte-identical and the code was unchanged, so the difference is in the **recogniser**: faster-whisper's confidence check **fails** on hard passages — measured on a **40 s** excerpt of this very source, where `Compression ratio threshold is not met with temperature 0.0 (6.897436 > 2.400000)` — and every fallback pass above zero **samples** from a generator faster-whisper **1.2.1** does not seed; that version has no `seed` argument to pin it with. Two decodes of the same excerpt gave **10** segments against **9**. **What it costs:** the transcript — and therefore the windows, the prompts and the clips — differ between runs, which is why the two M5.4 runs are not a one-to-one comparison. **What it would cost to fix:** pinning the sampler's seed makes the transcript repeatable, and that was **measured, not assumed** — seeding CTranslate2's generator before the call made two decodes of the same real excerpt **identical**, with the fallback still running and the quality escape it provides intact. It is **not** applied in this increment, because it changes the transcript the acceptance evidence was gathered on, and the evidence would then no longer describe the shipped code; it needs its own acceptance run. The end-to-end output was never promised to be reproducible — the highlight model runs at temperature **0.3** — so this is recorded as a limitation, not as a broken promise. Found at M5.4. |
 
 ### 6.2 Engineering
 
@@ -1219,7 +1272,7 @@ behalf.
 | **The M5.3 emphasis-timeline guard** | `tests/test_export_render.py::TestLayoutRender::test_the_speech_emphasis_renders_in_a_later_stretch` — a behavioural render |
 | **The M5.3 caption-lifetime guards** | `tests/test_captions.py::TestCaptionLifetime` and `tests/test_diagnostics.py` |
 | **The M5.3 graph-shape guard — the video graph as well as the music graph** | `tests/graph_shape.py` (new) and `tests/test_export_graph.py::TestGraphShape` |
-| **The M5.4 second-source evidence — a whole second real source, end to end, and nine more defects** | `docs/M5-APPLICATION-TESTING.md` §M5.4, AT-G-01 … AT-G-16 |
+| **The M5.4 second-source evidence — a whole second real source, end to end, and nine more defects** | `docs/M5-APPLICATION-TESTING.md` §M5.4, AT-G-01 … AT-G-17 |
 | **The M5.4 provider-limit guards — the timeout, the context, the answer budget, the window sizing and the overflow guard** | `tests/test_provider_limits.py` — 22 tests |
 | **The M5.4 settings-API guards** | `tests/test_api.py::TestSettings` — the timeout is validated, and the stored value is read back |
 | **The M5.4 export-name guards — two clips, one title** | `tests/test_export_graph.py::TestExportFilenames` and `tests/test_api.py::TestClipsWithTheSameTitle` |
@@ -1227,6 +1280,7 @@ behalf.
 | **The M5.4 duplicate-rule guards — one rule, used by the pipeline and the diagnostic** | `tests/test_highlights.py::TestDuplicateClips` (new file) |
 | **The M5.4 boundary guards — a clip may only widen** | `tests/test_boundaries.py::TestSilenceAlignment` |
 | **The M5.4 tracker guard — a track stays with its person** | `tests/test_reframe.py::TestTracking` |
+| **The M5.4 two-run comparison — the same source, byte by byte, and the recogniser's own fallback log** | `docs/M5-APPLICATION-TESTING.md` §M5.4, AT-G-17 |
 | **The installation and upgrade guide** | `docs/M5-INSTALLATION.md` |
 | **This report** | `docs/FINAL_UPGRADE_REPORT.md` |
 | The Instagram API evaluation | `docs/INSTAGRAM-API-EVALUATION.md` |
@@ -1333,6 +1387,7 @@ each carries its own guards.
 | `168f4ee` | `config.py` (`ProviderSettings.timeout_s` and `ProviderSettings.context_tokens`), `providers/base.py` (`PromptBudget`, `CHARS_PER_TOKEN`, `ProviderError.code`, the prompt budget), `providers/ollama_provider.py` (the timeout, the requested context, the answer budget, the overflow guard, the truthful message), `providers/{anthropic,openai,gemini}_provider.py` (the timeout reaches the SDKs — Gemini in milliseconds, because that is what its SDK counts), `providers/__init__.py` and `providers/resolver.py` (both settings, both construction paths), `pipeline/highlights.py` (the exact-cost window budget, the stop-at-first-timeout, the accurate error), `errors.py`, `api/settings.py` (the provider update is validated), and `frontend/src/api.ts` + `frontend/src/pages/Settings.tsx` (the two new fields) — with the new `tests/test_provider_limits.py` (**21 tests**) and two settings tests in `tests/test_api.py` | The four defects are **one failure seen four ways**, and the fix is one change: the request now fits the model's context, and a timeout says what happened. **20 of the 21 new tests fail without the fix**; the one that passes is a non-regression guard. The **same payload** that the product sent, with `num_ctx: 8192`, returned **HTTP 200** after **1,992.9 s** — the experiment that settled the root cause |
 | `b4f924a` | `pipeline/highlights.py` (the windows that were **not analysed** are counted, recorded in the job's usage and said in the log) and one more test in `tests/test_provider_limits.py` | Stopping at the first timeout is only half the answer. A job that analysed the first window and skipped the rest must not look, from the outside, like a job that analysed the whole video. The test was **observed failing** against the pre-fix code |
 | `74ec3eb` | `pipeline/export.py` (`output_filename(suffix=)`, `unique_output_filename`), `pipeline/runner.py` and `api/clips.py` (the two export-name call sites), `pipeline/reframe/croppath.py` (`CropSegment.faces`), `pipeline/reframe/__init__.py` (the faces each segment was built around), `pipeline/reframe/tracker.py` (the tracker's proximity tolerance), `pipeline/diagnostics.py` (`FACE_KEEP_RATIO`, `_faces_at`, `_face_inside_fraction`), the new `pipeline/duplicates.py`, `pipeline/highlights.py` (the time-based de-duplication) and `pipeline/boundaries.py` (the alignment may only widen a clip) — with the new `tests/test_highlights.py` and the additions to `tests/test_export_graph.py`, `tests/test_api.py`, `tests/test_diagnostics.py`, `tests/test_boundaries.py` and `tests/test_reframe.py` | The five defects the run's **own diagnostics** found, after it had finished. They are all in the pipeline's **output**, and they are kept together because they are one story: **the product measured itself, and four of the five measurements were wrong** — or, in the tracker's case, right about the wrong face. **17 of the 20 new tests fail without the fix**; the other three are non-regression guards |
+| `722afb7` | The eight documents that carry M5.4's evidence: `docs/FINAL_UPGRADE_REPORT.md`, `docs/M5-APPLICATION-TESTING.md`, `docs/M5-REGRESSION-REPORT.md`, `docs/M5-PERFORMANCE-REPORT.md`, `docs/upgrade-audit.md`, `docs/UPGRADE-LEDGER.md`, `docs/EGRESS-INVENTORY.md` and `docs/feature-coverage-matrix.md` | The M5.4 record: the second real source, the **22** defects, the verification run with every fix in, the gates and the CI runs. **Run 40** is that tree, green on all six jobs |
 
 ---
 

@@ -438,17 +438,78 @@ and finished at **08:16:06 UTC** on 2026-11-23, with every fix in the tree.
 | **The tail** | **931 s** | reframe → captions → export → diagnostics, measured from the progress reading **0.6** at **08:00:35 UTC** to the job's `finished_at` at **08:16:06 UTC**. **11** ffmpeg runs, **448.5** ffmpeg-seconds, **268,664,639 B** exported |
 | **The whole pipeline** | **4,791 s (79.8 min)** for 574.880 s of source | ≈ **8.33× real time**, measured as the job's own `started_at → finished_at` |
 
+### The same source, run twice
+
+The verification run was the **second** time this source went through the pipeline: the first
+attempt (`f65fb40febe141d7`) had failed at the detection stage and was then run again with the
+timeout and context fixes in place. The two runs are therefore directly comparable, and the
+comparison is worth having in full — it is the only place in this project where the same media
+went through the same code twice.
+
+| | First attempt (`f65fb40febe141d7`) | Verification run (`3db75213de894350`) |
+|---|---|---|
+| The source row | `b5bf5a6f740a40ee` | `651525f6355b4b28` — the same URL, ingested again |
+| The download | **225,722,498 B in 51,703 ms** | **225,722,498 B in 60,693 ms** |
+| The container | the two files differ in **exactly one byte** — offset **407**, the mp4 creation-date metadata | the same |
+| The decoded audio | **byte-identical** 16 kHz mono PCM — **18,396,148 B**, sha256 `4a87c5bd…8b7`, **574.880 s** | the same |
+| `audio.wav` | **18,396,226 B**, sha256 `5e468f32…` | **byte-identical** |
+| `silences.json` · `shots.json` · `webcam_report.json` | **2,812 B** · **9,437 B** · **45,951 B** | **byte-identical** |
+| The **115** thumbnails | folder sha256 `a7eb34b3…` | **byte-identical** |
+| `transcript.json` | **110,326 B** — **1,060 words**, **220** segments | **131,534 B** — **1,277 words**, **246** segments |
+| `speech_timeline.json` | **6,123 B** | **5,756 B** |
+| The detection windows | **885** and **304** words — **8,233** and **2,926** prompt characters | **900** and **525** words — **8,402** and **5,264** prompt characters |
+| The detection time | **881,989 ms** + **426,775 ms** = **1,308,764 ms** | **933,665 ms** + **634,943 ms** = **1,568,608 ms** |
+| The usage ledger | `llm_input_tokens=8536`, `llm_output_tokens=1623` | `llm_input_tokens=10055`, `llm_output_tokens=1535` |
+| The creative plan | **408,594 ms** + **303,493 ms** | **430,699 ms** + **335,078 ms** |
+| The export | **9** ffmpeg runs, **490.4** ffmpeg-seconds, **328,836,840 B** | **11** ffmpeg runs, **448.5** ffmpeg-seconds, **268,664,639 B** |
+
+**Everything the pipeline derives from the media is identical; the transcript is not.** The two
+containers differ by one byte of metadata, they decode to byte-identical PCM, and every artefact
+the prepare stage wrote from that PCM — the extracted audio, the silence list, the shot list, the
+webcam report and all **115** thumbnails — is byte-for-byte the same. Only the transcript, and the
+speech timeline it feeds, differ. The cause is in the recogniser and is measured in **K32**.
+
+### The detection time is the prompt size
+
+The four measured M5.4 detection windows — two per run — fit a straight line:
+
+> **time ≈ 165 s + 0.089 s per prompt character** (≈ **0.36 s** per estimated token)
+
+| Window | Prompt characters | Measured | Fitted | Error |
+|---|---|---|---|---|
+| attempt 1, window 0 | **8,233** | **882.0 s** | **900.5 s** | **+2.1 %** |
+| attempt 1, window 1 | **2,926** | **426.8 s** | **426.1 s** | **−0.2 %** |
+| verification, window 0 | **8,402** | **933.7 s** | **915.6 s** | **−1.9 %** |
+| verification, window 1 | **5,264** | **634.9 s** | **635.1 s** | **+0.0 %** |
+
+So the difference between the two M5.4 runs is **explained**: the verification run's transcript was
+**20.5 %** larger — **1,277 words** against **1,060** — because the recogniser is not reproducible
+(**K32**), which made its prompts **22.5 %** larger, and its detection time **19.9 %** larger, in
+near-exact proportion.
+
+**What is still open is the gap against M5.3.** M5.3's first window covered the opening **480 s**
+of a **1,128-word** transcript and was answered in **174.8 s**; M5.4's comparable window took
+**882.0 s** — **five times** the time for the same kind of work. It is not machine load: the
+transcription rate on this machine was **2.17×** real time at M5.3 and **2.38×** at M5.4. Nor can
+the request shape be the whole of it: the **same** payload, hand-sent to the same server with the
+same `num_ctx: 8192`, took **1,992.9 s** against the application's **881,989 ms** — a **2.26×**
+spread on identical work. **K29** keeps this open, and this report does not pretend it is closed.
+
 ### What it changes in this report
 
 - **The whole-pipeline rate is **≈8.3× real time** on this source, against **≈6.05×** on M5.3's.
   The difference is almost entirely the **detection stage**: **1,568.6 s** here against **425.1 s**
-  there, for windows of a comparable size. **That gap is not explained**, and it is not explained
+  there, for windows of a comparable size. **The gap is not explained**, and it is not explained
   away here either — the M5.3 source produced a transcript the local model handled in **425 s**
   across two windows, and this one took **1,568.6 s** across two windows of **900** and **525**
   words. The prompt sizes are close — this run's two user prompts are **8,402** and **5,264**
   characters, **13,666** in total — so the extra time is not a larger prompt on its own. It is
   recorded as an **open question**, and **K29** already says the honest thing: a local model on a
   CPU can be slow enough to look broken, and the product does not bound that.
+  **Amended at the second run:** the difference **between the two M5.4 runs** is now explained — the
+  prompts grew with the transcript and the time grew with the prompts (see *The detection time is
+  the prompt size*) — and the gap **against M5.3** is measured rather than guessed: it is **not**
+  machine load, and it is **not** explained by the request shape alone.
 - **P6 is now answered twice.** yt-dlp's **download** time was measured on a second real source:
   **60,693 ms** for **225.7 MB** (≈ 3.72 MB/s), against **64.55 s** for 140.6 MB (≈ 2.18 MB/s) the
   day before. The *import* time — the metadata and manifest fetches — is still not measured

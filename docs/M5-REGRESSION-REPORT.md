@@ -254,6 +254,7 @@ grows; the claim that matters is the one under it, which does not go stale.
 | 37 | `7f02638` | docs: M5.3 — the run numbers, read back against GitHub's own | **success** — all six jobs green — [run 44953586655](https://github.com/Shrishant1cog/autoclip/actions/runs/44953586655) |
 | 38 | `0a39623` | docs: M5.3 — a claim that contradicted the count next to it | **success** — all six jobs green — [run 44954553153](https://github.com/Shrishant1cog/autoclip/actions/runs/44954553153). The last run before the M5.4 work |
 | 39 | `74ec3eb` | Exports: five defects the run's own diagnostics found | **success** — all six jobs green — [run 45144508403](https://github.com/Shrishant1cog/autoclip/actions/runs/45144508403). The whole M5.4 code tree — the three M5.4 code commits together: the provider limits, the export names, the crop-safety measurement, the shared duplicate rule, the boundary clamp and the tracker tolerance, all exercised on every CI job |
+| 40 | `722afb7` | docs: M5.4 — a second real source, run twice, and nine defects | **success** — all six jobs green — [run 45146983505](https://github.com/Shrishant1cog/autoclip/actions/runs/45146983505). The M5.4 documentation tree — the eight files that carry the second source's evidence |
 
 > **One commit on this branch has no workflow run at all.** `9fdc6ae` — *"docs: M5.3 — a count
 > that did not survive being read back"* — is on the branch, between runs 35 and 36, and GitHub's
@@ -264,7 +265,7 @@ grows; the claim that matters is the one under it, which does not go stale.
 > narrower one below, and it is checked by a script rather than by eye.
 
 
-**Runs 31, 33, 34, 35, 36, 37, 38 and 39 are green on all six jobs, and run 32 was cancelled.** Run 31
+**Runs 31, 33, 34, 35, 36, 37, 38, 39 and 40 are green on all six jobs, and run 32 was cancelled.** Run 31
 was the first to exercise the defect-13 fix on every CI job. Run 32 is the evidence-correction
 commit — it was **cancelled** by the concurrency group when the next commit was pushed, with five
 of its six jobs already green: a cancellation, not a failure, and the sixth (Windows) was cancelled
@@ -274,7 +275,7 @@ runs. Runs 36, 37 and 38 are the three documentation commits that closed the M5.
 green on all six jobs. **Run 39 is the whole M5.4 code tree** — the three M5.4 code commits
 together — and it is green on all six jobs, so every M5.4 guard was exercised on the Ubuntu 3.11,
 Ubuntu 3.12, macOS 3.12 and Windows 3.12 legs, and the Docker image built and smoke-tested on top
-of it.
+of it. **Run 40 is the M5.4 documentation tree**, and it is green on all six jobs too.
 
 > **Why this table stops here.** A commit that records a CI run is itself run by CI, and
 > recording *its* run would need another commit — which would need another. The table therefore
@@ -652,7 +653,7 @@ is the suite, the defect count and the evidence base.
 
 The application was pointed at a **second real YouTube video** — a **9:35** CarryMinati clip, used
 for **technical acceptance only, nothing published anywhere** — and run through **every stage, end
-to end**. The full details are in `docs/M5-APPLICATION-TESTING.md` §M5.4 (AT-G-01 … AT-G-16) and
+to end**. The full details are in `docs/M5-APPLICATION-TESTING.md` §M5.4 (AT-G-01 … AT-G-17) and
 `docs/FINAL_UPGRADE_REPORT.md` §4.6; the regression-relevant facts are:
 
 | | |
@@ -761,3 +762,40 @@ them"*, ranks 2 and 3 — and they were exported as `why-im-not-like-them-2_9x16
 `why-im-not-like-them-3_9x16.mp4`. Under the pre-fix code that pair would have been one file and
 one set of subtitles, and the first clip would have been gone. **The fix was exercised by the run
 itself, not only by a test.**
+
+### And the two runs, compared byte by byte
+
+Because the source was run **twice**, the two runs could be compared — and the comparison is what
+turned "the recogniser is not bit-deterministic" from a remark into a **measurement**.
+
+| | First attempt (`f65fb40febe141d7`) | Verification run (`3db75213de894350`) |
+|---|---|---|
+| The container | **225,722,498 B** | **225,722,498 B** — and the two differ in **exactly one byte**, offset **407**, the mp4 creation-date metadata |
+| The decoded audio | **byte-identical** 16 kHz mono PCM — **18,396,148 B**, sha256 `4a87c5bd…8b7`, **574.880 s** | the same |
+| `audio.wav` · `silences.json` · `shots.json` · `webcam_report.json` · the **115** thumbnails | **18,396,226 B** · **2,812 B** · **9,437 B** · **45,951 B** · folder sha256 `a7eb34b3…` | **byte-identical**, every one of them |
+| `transcript.json` | **110,326 B** — **1,060 words**, **220** segments | **131,534 B** — **1,277 words**, **246** segments |
+| The detection windows | **885** and **304** words — **8,233** and **2,926** prompt characters | **900** and **525** words — **8,402** and **5,264** prompt characters |
+| The detection time | **881,989 ms** + **426,775 ms** = **1,308,764 ms** | **933,665 ms** + **634,943 ms** = **1,568,608 ms** |
+| The usage ledger | `llm_input_tokens=8536`, `llm_output_tokens=1623` | `llm_input_tokens=10055`, `llm_output_tokens=1535` |
+
+**Everything the pipeline derives from the media is identical; the transcript is not** — and the
+difference is in the **recogniser**. The two transcripts agree for the first **246** word records,
+up to **101.02 s**, and then part company at the same timings: `बलवेंदर` against `बलविंदर`, segment
+55 still `101.02 → 104.38` in both. A **40 s** excerpt of the same audio was decoded **twice** with
+the product's exact call and the recogniser's own logging captured: **10** segments against **9**,
+and the log shows the confidence check **failing even at temperature 0**
+(`Compression ratio threshold is not met with temperature 0.0 (6.897436 > 2.400000)`) and the
+fallback **sampling** at temperatures 0.2–0.8. faster-whisper **1.2.1** has no `seed` argument, so
+its sampler cannot be pinned from the call site. The fix — seeding CTranslate2's generator before
+the call — was **measured**: two seeded decodes of the same real excerpt came out **identical**,
+with the fallback still running. It is **not** applied in this increment, because it changes the
+transcript the acceptance evidence was gathered on; it is recorded as **K32** and **R8**.
+
+**What the comparison explained.** The four M5.4 detection windows fit a straight line — **time ≈
+165 s + 0.089 s per prompt character** — to within **2.1 %**, so the **19.9 %** difference between
+the two M5.4 runs is exactly the **22.5 %** difference between their prompts, which is itself the
+**20.5 %** difference between their transcripts. The gap **against M5.3** is not explained by any of
+that: it is **not** machine load (the transcription rate was **2.17×** real time at M5.3 and
+**2.38×** at M5.4), and it is **not** the request shape alone (the **same** payload hand-sent to the
+same server with `num_ctx: 8192` took **1,992.9 s** against the application's **881,989 ms** — a
+**2.26×** spread on identical work). **R6** keeps that open.

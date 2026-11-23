@@ -1386,7 +1386,7 @@ M5.3 used, so the two runs are comparable.
 | **Test ID** | AT-G-05 |
 | **User input** | Wait for the transcription |
 | **Expected** | The **whole** file is transcribed, in its own language, with word timings |
-| **Actual** | whisper `small`, language **`hi`**, **1,060 words** in **220 segments**, written at 05:03:15 UTC |
+| **Actual** | whisper `small`, language **`hi`**, **1,060 words** in **220 segments**, written at 05:03:15 UTC. The **same file** transcribed again, in the verification run, gave **1,277 words** in **246 segments** — the recogniser is **not** reproducible, and that is measured in **AT-G-17** |
 | **Result** | **VERIFIED** |
 | **Screenshot** | `AT-G-04-transcribing.png` |
 | **Logs** | The application's own log |
@@ -1542,10 +1542,17 @@ M5.3 used, so the two runs are comparable.
 | **Expected** | The pipeline runs from the paste to the finished clips, and every workflow node passes its own checks |
 | **Actual** | It did. `POST /api/sources/youtube` → **201**, body `{"url":"https://youtu.be/bMTlNeKqV4o?si=lz2Sg0gsR2eGULsP","cookies_from_browser":null}` → source **`651525f6355b4b28`**. `POST /api/jobs` → **201**, body `{"source_id":"651525f6355b4b28","settings":{}}` → job **`3db75213de894350`**. The job finished at **08:16:06 UTC** with `status=done`, `progress=1.0`, `error=null`, in **4,791 s (79.8 min)** for **574.880 s** of source — **8.33× real time**. **Nine** clips, all `status='exported'`, **268,664,639 B** exported over **11** ffmpeg runs and **448.5** ffmpeg-seconds |
 | **Result** | **VERIFIED** — the whole pipeline, end to end, on the second real source, with every fix in place |
-| **Screenshot** | `AT-G-16-run-started.png` — the job started, 5 %, stage **01 Prepare**. `AT-G-16-review-clips.jpeg` — the finished job: **DONE 100 %**, the nine ranked clips, the plan (**source: ai**) and the measurements, every line green |
+| **Screenshot** | `AT-G-16-run-started.png` — the job started, 5 %, stage **01 Prepare**. `AT-G-16-review-clips.jpeg` — the finished job: **DONE 100 %**, the nine ranked clips, the plan (**source: ai**) and the measurements for rank 1, every line green |
 | **Logs** | The application's own log; the transfer log |
 | **Backend evidence** | The job row (`status`, `progress`, `error`, `started_at`, `finished_at`); `job_resources` (`windows_skipped=0`, `llm_calls=2`, `llm_input_tokens=10055`, `llm_output_tokens=1535`, `ffmpeg_runs=11`, `ffmpeg_seconds=448.5`, `export_bytes=268664639`); `job_ai_budget` (`plan_used=1`, `repair_used=1`, `overruns=[]`); the two `highlights` and two `creative_planning` transfer rows, all `ok`, all against `127.0.0.1:11434` |
 | **Export inspection** | **Nine exports, nine distinct names, no collision**; every recorded size equals the size on disk; every `.srt` sidecar present, longest cue **2.500 s**, **0** overlapping cues; every clip **1080×1920** at **29.97 fps** |
+
+> **The title's emoji is intact, and the screenshot's empty box is the font's, not the data's.** The
+> stored title is exactly `'UNEMPLOYMENT ON PEAK 📈 | CARRYMINATI'` — **U+1F4C8**, 36 characters,
+> **no U+FFFD**, no lone surrogates — read back from the scratch database. The screenshot shows an
+> empty box where the chart emoji is, because the browser's font on this machine has no glyph for it.
+> It is a **rendering** artefact and not a defect, and it is recorded here so that a reader who
+> compares the screenshot with the database does not have to work that out alone.
 
 **Every measurement on every clip is `ok` — with one exception, and the exception is the source's
 fault.** The run made **90** measurements (nine clips × ten) and **89** of them are green. The one
@@ -1567,6 +1574,26 @@ of the recogniser at **1,277 words** in **246 segments** — **217 more words** 
 on the same video, because the recogniser is not bit-deterministic. The two windows were therefore
 larger — **900** and **525** words — and the calls took **933,665 ms** and **634,943 ms**. Both
 answered, and `windows_skipped` is **0**: the job analysed the whole video and says so.
+
+**And the two runs were then compared, byte by byte — see AT-G-17.** The media were identical to
+the byte, the transcript was not, and the difference was measured, attributed to the recogniser's
+**unseeded sampling fallback**, and recorded as **K32**.
+
+---
+
+#### AT-G-17 — The same file, transcribed twice
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-G-17 |
+| **User input** | Point the application at the **same URL a second time**, on purpose, so the two runs could be compared |
+| **Expected** | Two runs over the same media produce the same transcript — or, if they do not, the difference is measured, attributed and recorded rather than left as a shrug |
+| **Actual** | The **media** are the same to the byte: the two containers differ in **one byte** (offset **407**, the mp4 creation-date metadata), they decode to **byte-identical** 16 kHz mono PCM (**18,396,148 B**, sha256 `4a87c5bd…8b7`, **574.880 s**), and every artefact the prepare stage wrote from that PCM — `audio.wav` (**18,396,226 B**, sha256 `5e468f32…`), `silences.json` (**2,812 B**), `shots.json` (**9,437 B**), `webcam_report.json` (**45,951 B**) and all **115** thumbnails (folder sha256 `a7eb34b3…`) — is byte-for-byte the same. The **transcripts** are not: the first attempt's is **1,060 words** in **220 segments** (`transcript.json`, **110,326 B**) and the verification run's is **1,277 words** in **246 segments** (**131,534 B**). Read word record by word record, they are identical for the first **246** records — up to **101.02 s** — and then they part: `बलवेंदर` against `बलविंदर`, with segment 55 still `101.02 → 104.38` in both. A **40 s** excerpt of the same audio was then decoded **twice** with the product's exact call and the recogniser's own logging captured: **10** segments against **9**, and the log shows the confidence check **failing even at temperature 0** — `Compression ratio threshold is not met with temperature 0.0 (6.897436 > 2.400000)` — and the fallback **sampling** at temperatures 0.2–0.8. faster-whisper **1.2.1** has no `seed` argument, so its sampler cannot be pinned from the call site. The fix — seeding CTranslate2's generator before the call — was **measured**: two seeded decodes of the same real excerpt came out **identical**, with the fallback still running |
+| **Result** | **PARTIAL** — the media are provably identical, the difference is **measured and attributed** to the recogniser, and the fix is **verified** against the real audio. It is **not** applied in this increment, because it changes the transcript the acceptance evidence was gathered on; it is recorded as **K32** and **R8** |
+| **Screenshot** | n/a — a measurement |
+| **Logs** | The recogniser's own logging, captured for the two excerpt decodes (`faster_whisper DEBUG Compression ratio threshold is not met with temperature …`) |
+| **Backend evidence** | `transcript.json` and `speech_timeline.json` from both jobs' work directories; the sha256 of the two containers' decoded PCM, of `audio.wav` and of the thumbnail folder; the two `transcript.json` files read record by record |
+| **Export inspection** | n/a — nothing was exported for this measurement |
 
 ---
 
@@ -1657,6 +1684,12 @@ of them are covered by tests that fail without the fix.
 | 20 | **Two clips of the same footage survived the pipeline.** The de-duplication compared the candidates' **word ranges**, and a clip *inside* another one has almost no words in common with it: the shorter clip of the first real pair covered **14** words, the longer **104**, of which those 14 were a part — a common share of a fifth, well under the threshold. In **time**, though, the shorter clip was wholly inside the longer one. | The same run's diagnostics: **4 of the 9 clips** were reported as *"overlaps another one by 100%"*, and the diagnostic's own rule (overlap ≥ half of the shorter) disagreed with the pipeline's (AT-G-13). | One shared definition of *"the same clip"* — `pipeline/duplicates.py` — used by **both** the pipeline and the diagnostic: two clips are duplicates when the overlap covers at least **half of the shorter one**. The higher score survives. | 5 tests in `tests/test_highlights.py::TestDuplicateClips` (new file); **3 fail without the fix** |
 | 21 | **A clip could open in the middle of a word.** The boundary alignment pulls the cut back into the silence before the first word, but it could also push it *past* the word's own start when the silence detector and the recogniser disagreed by a few tens of milliseconds — which breaks the code's own documented invariant, *"alignment only ever widens a clip"*. | The same run's diagnostics: **2 of the 9 clips** were reported as *"1 word(s) fall outside the clip"*. Rank 1's first word started at **533.800 s** and the clip opened at **533.852 s** — **52 ms inside the word** (AT-G-14). | The alignment may only ever **widen** the clip: the result is clamped to the first word's own start, so the cut is at or before the word, never inside it. | 2 tests in `tests/test_boundaries.py::TestSilenceAlignment`; **2 fail without the fix** |
 | 22 | **A face track could jump to a smaller face beside it.** The tracker's proximity fallback scaled its tolerance by the **larger** of the two faces, so a track could hop onto a smaller face-shaped object near the speaker — and the crop would then pan away from the speaker to follow it. | Found while **verifying defect 19** against the real source: the track of one segment held two different people, and the crop followed the wrong one. A real frame shows what the detector saw: the speaker, leaning forward, and a Pikachu plush on the shelf behind them (AT-G-12). | The tolerance is scaled by the **smaller** of the two faces — the person's own face width — which is what the rule always said. A track stays with its person. | 1 test in `tests/test_reframe.py::TestTracking`; **fails without the fix** |
+
+**And one finding that is **not** a defect, because nothing the product promises was broken.** The
+same source, run twice, gave **two different transcripts** from **byte-identical** media — the
+recogniser's confidence fallback **samples** without a seed, and the product inherits that. It is
+measured in **AT-G-17**, the fix is **verified** against the real audio, and it is recorded as
+**K32** and **R8** rather than presented as a pass.
 
 **Defect 3 is the one that would have shipped.** It rendered on the machine the code was written
 on, and it would have failed on the CI runners and on every user with an ffmpeg older than 9. It
