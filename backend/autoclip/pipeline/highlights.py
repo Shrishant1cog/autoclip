@@ -284,6 +284,19 @@ async def detect(
             usage.llm.add(usage_before.delta(provider.total_usage))
     candidates = [c for group in results for c in group]
 
+    if not_attempted:
+        # Some windows were never sent, because an earlier request timed out
+        # and the server was still working on it. Saying so is the difference
+        # between "the whole video was analysed" and the truth, and the job
+        # records the count the same way the detection budget does.
+        log.warning(
+            "%d window(s) of this video were not analysed: a request timed out "
+            "and the model server was still working on it.",
+            not_attempted,
+        )
+        if usage is not None:
+            usage.windows_skipped += not_attempted
+
     if not candidates:
         # Reporting "no clips" when every request actually failed hides the real
         # cause (bad model, revoked key, outage) behind a misleading suggestion.

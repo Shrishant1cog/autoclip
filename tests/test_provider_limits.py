@@ -370,6 +370,47 @@ class _TimingOutProvider(LLMProvider):
         )
 
 
+class _PartlyTimingOutProvider(LLMProvider):
+    """The first window answers; the second times out."""
+
+    name = "ollama"
+    requires_key = False
+    DEFAULT_ENDPOINT = "http://localhost:11434"
+
+    def __init__(self) -> None:
+        super().__init__("test-model")
+        self.calls: list[TranscriptWindow] = []
+
+    async def _complete(self, system: str, user: str, config: DetectionConfig) -> str:
+        return '{"clips": []}'
+
+    async def health_check(self) -> ProviderStatus:
+        return ProviderStatus(name=self.name, available=True)
+
+    async def detect_highlights(
+        self, window: TranscriptWindow, config: DetectionConfig
+    ) -> ClipCandidates:
+        self.calls.append(window)
+        if len(self.calls) == 1:
+            return ClipCandidates.model_validate(
+                {
+                    "clips": [
+                        {
+                            "start_word_index": window.first_word,
+                            "end_word_index": window.first_word + 100,
+                            "title": "Answered window",
+                            "score": 80,
+                        }
+                    ]
+                }
+            )
+        raise ProviderError(
+            "Ollama did not answer within 600 s.",
+            provider=self.name,
+            code=TIMEOUT,
+        )
+
+
 class TestATimeoutStopsTheStage:
     def test_the_windows_after_the_timeout_are_not_sent(self) -> None:
         """The local server keeps generating the abandoned request; the next
@@ -421,3 +462,21 @@ class TestATimeoutStopsTheStage:
             )
 
         assert "did not answer within" in str(caught.value)
+
+    def test_the_windows_that_were_not_analysed_are_recorded(self) -> None:
+        """One window answered and one timed out: the job must still say that
+        part of the video was never looked at."""
+        from autoclip import resources
+
+        transcript = _transcript(2000)
+        provider = _PartlyTimingOutProvider()
+        usage = resources.Usage()
+
+        clips = asyncio.run(
+            highlights.detect(
+                transcript, provider, DetectionConfig(), job_id="job", usage=usage
+            ),
+        )
+
+        assert clips
+        assert usage.windows_skipped == 1
