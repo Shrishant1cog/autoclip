@@ -297,6 +297,148 @@ class TestTrackWebcam:
 
 
 # --------------------------------------------------------------------------
+# The path of the webcam's own frame
+# --------------------------------------------------------------------------
+
+
+class TestTheWebcamPath:
+    """The path has to be small enough to be rendered.
+
+    The path becomes an ffmpeg expression, and an expression with a
+    thousand nested conditionals is evaluated at every frame of the clip.
+    The measured boxes come at the detector's sample rate, so a clip that
+    is ninety seconds long can easily produce hundreds of them — and the
+    path only has to say where the frame *was*, not where it was in
+    every one of the fifteen samples a second that were looked at.
+    """
+
+    def _boxes(self, count: int) -> list:
+        from autoclip.pipeline.reframe.webcam import WebcamBox
+
+        return [
+            WebcamBox(
+                t=index * 0.067,
+                rect=Rect(x=1200.0 + index * 0.5, y=0.0, width=700.0, height=440.0),
+            )
+            for index in range(count)
+        ]
+
+    def test_a_long_path_is_thinned_down(self) -> None:
+        from autoclip.pipeline.reframe.webcam import (
+            MAX_WEBCAM_PATH_KEYFRAMES,
+            build_webcam_path,
+        )
+
+        path = build_webcam_path(self._boxes(600), source_width=WIDTH, source_height=HEIGHT)
+
+        assert path is not None
+        assert len(path.keyframes) <= MAX_WEBCAM_PATH_KEYFRAMES
+
+    def test_the_thinned_path_still_starts_and_ends_where_it_did(self) -> None:
+        from autoclip.pipeline.reframe.webcam import build_webcam_path
+
+        boxes = self._boxes(600)
+        path = build_webcam_path(boxes, source_width=WIDTH, source_height=HEIGHT)
+
+        assert path is not None
+        assert path.keyframes[0].t == pytest.approx(boxes[0].t)
+        assert path.keyframes[-1].t == pytest.approx(boxes[-1].t)
+
+    def test_the_thinned_path_still_follows_the_frame(self) -> None:
+        """Thinning must not throw away the movement."""
+        from autoclip.pipeline.reframe.webcam import build_webcam_path
+
+        path = build_webcam_path(self._boxes(600), source_width=WIDTH, source_height=HEIGHT)
+
+        assert path is not None
+        centres = {round(keyframe.cx) for keyframe in path.keyframes}
+        assert len(centres) > 1
+
+    def test_a_short_path_is_left_alone(self) -> None:
+        """A path that is already small keeps every turning point."""
+        from autoclip.pipeline.reframe.webcam import WebcamBox, build_webcam_path
+
+        boxes = [
+            WebcamBox(t=0.0, rect=Rect(x=1200.0, y=0.0, width=700.0, height=440.0)),
+            WebcamBox(t=1.0, rect=Rect(x=1300.0, y=0.0, width=700.0, height=440.0)),
+            WebcamBox(t=2.0, rect=Rect(x=1200.0, y=0.0, width=700.0, height=440.0)),
+            WebcamBox(t=3.0, rect=Rect(x=1300.0, y=0.0, width=700.0, height=440.0)),
+        ]
+
+        path = build_webcam_path(boxes, source_width=WIDTH, source_height=HEIGHT)
+
+        assert path is not None
+        assert len(path.keyframes) == 4
+
+    def test_a_straight_path_says_it_once(self) -> None:
+        """A path that never turns says the same thing once."""
+        from autoclip.pipeline.reframe.webcam import build_webcam_path
+
+        path = build_webcam_path(self._boxes(20), source_width=WIDTH, source_height=HEIGHT)
+
+        assert path is not None
+        assert len(path.keyframes) == 2
+        assert path.keyframes[0].t == pytest.approx(0.0)
+
+    def test_the_rendered_expression_stays_short(self) -> None:
+        """The expression is what ffmpeg has to parse and evaluate."""
+        from autoclip.pipeline import captions as captions_module
+        from autoclip.pipeline.export import ExportRequest, build_video_filtergraph
+        from autoclip.pipeline.reframe.croppath import centre_crop
+        from autoclip.pipeline.reframe.layout import (
+            LayoutPath,
+            LayoutSegment,
+            LayoutSlot,
+            LayoutVariant,
+        )
+        from autoclip.pipeline.reframe.webcam import WebcamPath, build_webcam_path
+
+        path = build_webcam_path(self._boxes(600), source_width=WIDTH, source_height=HEIGHT)
+        assert path is not None
+
+        strip = LayoutSlot(x=0, y=0, width=1080, height=768)
+        gameplay = LayoutSlot(x=0, y=768, width=1080, height=1152)
+        layout = LayoutPath(
+            source_width=WIDTH,
+            source_height=HEIGHT,
+            output_width=1080,
+            output_height=1920,
+            segments=[
+                LayoutSegment(
+                    start_s=0.0,
+                    end_s=40.0,
+                    variant=LayoutVariant.ABOVE,
+                    gameplay_slot=gameplay,
+                    webcam_slot=strip,
+                    webcam_strip=strip,
+                    gameplay_source=Rect(x=0.0, y=0.0, width=1012.0, height=1080.0),
+                    webcam_source=Rect(x=1200.0, y=0.0, width=700.0, height=440.0),
+                    webcam_path=WebcamPath(
+                        source_width=WIDTH,
+                        source_height=HEIGHT,
+                        width=path.width,
+                        height=path.height,
+                        keyframes=path.keyframes,
+                    ),
+                )
+            ],
+        )
+        request = ExportRequest(
+            source=Path("source.mp4"),
+            destination=Path("out.mp4"),
+            start_s=0.0,
+            end_s=40.0,
+            crop_path=centre_crop(WIDTH, HEIGHT, 40.0),
+            words=[],
+            style=captions_module.get_style("bold_pop"),
+            layout=layout,
+        )
+
+        graph = build_video_filtergraph(request, subtitle_name=None)
+
+        assert len(graph) < 8000
+
+
 # Slicing a track for one clip
 # --------------------------------------------------------------------------
 

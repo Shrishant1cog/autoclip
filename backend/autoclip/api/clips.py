@@ -641,14 +641,27 @@ def _export_settings_for(clip, source, export_settings):
 def _crop_path_for(workspace: JobWorkspace, clip, source, ratio: str) -> CropPath:
     """Reuse the job's cached crop path, falling back to a centre crop.
 
-    A re-export at a different ratio can't reuse a path computed for the
-    original one, so the geometry is recomputed rather than stretched.
+    A saved plan is a crop *for an aspect ratio*, so it is only reused when
+    it is the right shape for the ratio being exported. A stacked layout
+    leaves the bottom of the frame for gameplay, and that area is not the
+    whole 9:16 — a plan made for it cannot be stretched into a 9:16 frame.
     """
-    cached = workspace.crop_path(clip.id)
-    if cached.exists() and ratio == "9:16":
-        return CropPath.load(cached)
-
     aspect = {"9:16": (9, 16), "1:1": (1, 1), "16:9": (16, 9)}[ratio]
+
+    cached = workspace.crop_path(clip.id)
+    if cached.exists():
+        try:
+            path = CropPath.load(cached)
+        except Exception:  # noqa: BLE001 - an unreadable cache is not a failure
+            path = None
+        if path is not None and _has_aspect(path, aspect):
+            return path
+        if path is not None:
+            log.info(
+                "The saved crop plan is not the right shape for %s; cropping for it instead.",
+                ratio,
+            )
+
     return centre_crop(
         source.width or 1920,
         source.height or 1080,
@@ -656,3 +669,21 @@ def _crop_path_for(workspace: JobWorkspace, clip, source, ratio: str) -> CropPat
         aspect_w=aspect[0],
         aspect_h=aspect[1],
     )
+
+
+def _has_aspect(path: CropPath, aspect: tuple[int, int]) -> bool:
+    """True when the plan's own shape is the shape asked for.
+
+    The plan's segments are scaled to the output before they are
+    concatenated, so every segment has the same shape; the first one
+    decides. The comparison is on the ratio rather than on the pixels,
+    because the shape is rounded to even numbers.
+    """
+    if not path.segments:
+        return False
+    segment = path.segments[0]
+    if segment.width <= 0 or segment.height <= 0:
+        return False
+    wanted = aspect[0] / aspect[1]
+    actual = segment.width / segment.height
+    return abs(actual - wanted) <= 0.02 * wanted

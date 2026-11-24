@@ -55,7 +55,7 @@ from . import (
     language as subtitle_language,
 )
 from .prepare import Silence
-from .reframe import ReframeConfig, build_crop_path, layout_store
+from .reframe import ReframeConfig, build_crop_path, layout_store, plan_fingerprint
 from .reframe.croppath import CropPath
 from .reframe.layout import (
     LayoutConfig,
@@ -65,7 +65,13 @@ from .reframe.layout import (
     plan_layout,
 )
 from .reframe.scenes import Shot, detect_shots
-from .reframe.webcam import Rect, WebcamReport, WebcamTrack, detect_webcam
+from .reframe.webcam import (
+    REPORT_VERSION,
+    Rect,
+    WebcamReport,
+    WebcamTrack,
+    detect_webcam,
+)
 from .transcript import Transcript
 
 log = logging.getLogger(__name__)
@@ -233,9 +239,71 @@ def _crop_aspect(layout: LayoutPath | None, ratio: str) -> tuple[int, int]:
     return (width, height)
 
 
+def _webcam_region(layout: LayoutPath | None) -> Rect | None:
+    """The webcam's own region, when the layout has one.
+
+    The gameplay crop is kept clear of it: a webcam that is shown twice —
+    once in the strip above the gameplay and once inside the gameplay — is
+    the most obvious fault a split-screen layout can have.
+    """
+    if layout is None:
+        return None
+    for segment in layout.segments:
+        if segment.webcam_region is not None:
+            return segment.webcam_region
+    return None
+
+
 def _source_size(report: WebcamReport) -> tuple[int, int]:
     """The frame size the report was made against."""
     return (report.source_width, report.source_height)
+
+
+def _same_windows(
+    saved: list[tuple[float, float]] | None,
+    wanted: list[tuple[float, float]] | None,
+) -> bool:
+    """True when a saved report was made about the stretches that are wanted.
+
+    The report is written to disk with its times rounded to three decimal
+    places, while a clip's own times are whatever the detector measured —
+    ``1303.9599999999998`` and ``1303.96`` are the same moment. Comparing
+    the two exactly would throw the report away for a rounding difference
+    and make every retry pay for the detection again, so the comparison is
+    made to a hundredth of a second. A stretch that is *really* different
+    differs by far more than that.
+    """
+    if not saved or not wanted:
+        return True
+    if len(saved) != len(wanted):
+        return False
+    return all(
+        abs(a[0] - b[0]) <= 0.01 and abs(a[1] - b[1]) <= 0.01
+        for a, b in zip(saved, wanted, strict=True)
+    )
+
+
+def _load_crop_path(cached: Path, fingerprint: str) -> CropPath | None:
+    """The saved plan for a clip, when it was built for the same settings.
+
+    ``None`` means there is nothing usable saved: either there is no plan,
+    or the plan was built for a different aspect ratio, or for a different
+    webcam region, and a plan for one of those is a different plan.
+    """
+    if not cached.exists():
+        return None
+    try:
+        path = CropPath.load(cached)
+    except Exception:  # noqa: BLE001 - a broken artifact is built again
+        log.warning("Could not read the saved crop plan %s; building it again.", cached.name)
+        return None
+    if path.config_fingerprint != fingerprint:
+        log.info(
+            "The saved crop plan %s was built for different settings; building it again.",
+            cached.name,
+        )
+        return None
+    return path
 
 
 ProgressHandler = Callable[[ProgressEvent], None]
@@ -1090,7 +1158,17 @@ class PipelineRunner:
         # is persistent — it is in the same place in every shot — so one
         # detection sliced per clip is both faster and steadier than
         # detecting again for every clip.
-        report = self._detect_webcam(source_path)
+        #
+        # The detector only walks the stretches the clips actually use. A
+        # source that is half an hour long and a set of clips that use five
+        # minutes of it do not need the other twenty-five minutes looked at:
+        # the webcam is the same wherever it is found, and the boxes are
+        # measured where the clips are.
+        # The windows are in the source's own order, not the clips' rank
+        # order: the detector walks the source forwards, and a decoder
+        # cannot seek backwards.
+        windows = sorted((clip.start_s, clip.end_s) for clip in clips)
+        report = self._detect_webcam(source_path, windows=windows)
 
         for index, clip in enumerate(clips):
             self._check_cancelled()
@@ -1113,12 +1191,18 @@ class PipelineRunner:
             # stacked layout leaves the bottom sixty per cent for gameplay,
             # and the crop has to match that or the two would not line up.
             aspect_w, aspect_h = _crop_aspect(layout, ratio)
-            config = ReframeConfig(aspect_w=aspect_w, aspect_h=aspect_h)
+            config = ReframeConfig(
+                aspect_w=aspect_w, aspect_h=aspect_h, avoid=_webcam_region(layout)
+            )
 
+            # A saved plan is only reused when it was built for the same
+            # settings. The webcam's region changes the aspect the gameplay
+            # is cropped to, and a plan made for the old aspect would be
+            # the wrong shape for the new slot.
+            fingerprint = plan_fingerprint(config)
             cached = self.workspace.crop_path(clip.id)
-            if cached.exists():
-                crop_path = CropPath.load(cached)
-            else:
+            crop_path = _load_crop_path(cached, fingerprint)
+            if crop_path is None:
                 crop_path = build_crop_path(
                     source_path,
                     start_s=clip.start_s,
@@ -1133,7 +1217,9 @@ class PipelineRunner:
         self._finish_stage(stage)
         return compositions
 
-    def _detect_webcam(self, source_path: Path) -> WebcamReport:
+    def _detect_webcam(
+        self, source_path: Path, *, windows: list[tuple[float, float]] | None = None
+    ) -> WebcamReport:
         """Find the webcam region in the source, once.
 
         The result is cached in the job's workspace so a retry does not pay
@@ -1144,7 +1230,20 @@ class PipelineRunner:
         cached = self.workspace.webcam_report
         if cached.exists():
             report = WebcamReport.load(cached)
-            if report.track is not None or report.unavailable_reason:
+            # A report made for a different set of windows says nothing about
+            # this one, so it is only reused when the windows match.
+            #
+            # A report that says the detection *failed* is not an answer
+            # either: the detector could not look, which is not the same as
+            # there being no webcam. That one is tried again — and so is a
+            # report written by another version of the detector, which
+            # cannot say whether it failed.
+            if (
+                report.version == REPORT_VERSION
+                and not report.failed
+                and (report.track is not None or report.unavailable_reason)
+                and _same_windows(report.windows, windows)
+            ):
                 return report
 
         info = ffmpeg.probe(source_path)
@@ -1155,7 +1254,9 @@ class PipelineRunner:
                 source_path,
                 width=info.width,
                 height=info.height,
+                windows=windows,
             )
+            report.windows = list(windows or [])
             report.save(cached)
 
         if report.track is not None:

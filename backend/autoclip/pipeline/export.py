@@ -20,9 +20,9 @@ from ..system import report
 from . import captions as captions_module
 from . import ffmpeg
 from .captions import CaptionStyle
-from .reframe.croppath import CropPath, CropSegment, segment_crop_filter
+from .reframe.croppath import CropPath, CropSegment, segment_crop_filter, series_expression
 from .reframe.layout import LayoutPath, LayoutSlot
-from .reframe.webcam import Rect
+from .reframe.webcam import Rect, WebcamPath
 from .speech_timeline import SpeechInterval
 from .transcript import Word
 
@@ -159,8 +159,8 @@ def unique_output_filename(
 class Composition:
     """How the webcam and the gameplay sit together in the render.
 
-    Everything here is in output pixels, except ``webcam_source``, which is
-    a rectangle in the source video.
+    Everything here is in output pixels, except ``webcam_source`` and
+    ``webcam_path``, which are in the source video.
     """
 
     #: Where the gameplay goes. The crop path is scaled to this.
@@ -169,6 +169,10 @@ class Composition:
     webcam_slot: LayoutSlot | None = None
     #: Which part of the source the webcam comes from.
     webcam_source: Rect | None = None
+    #: Where the webcam's own frame was, over time. When it is here the
+    #: crop follows the frame rather than sitting on one fixed rectangle,
+    #: because a streamer changes the size of their webcam mid-clip.
+    webcam_path: WebcamPath | None = None
     #: When the webcam is on screen, in clip-relative seconds.
     spans: list[tuple[float, float]] = field(default_factory=list)
     #: When the webcam is drawn larger, in clip-relative seconds. These come
@@ -196,16 +200,20 @@ def composition_from_layout(layout: LayoutPath | None) -> Composition | None:
     first = with_webcam[0]
     spans: list[tuple[float, float]] = []
     emphasis: list[tuple[float, float]] = []
+    path: WebcamPath | None = None
     for segment in layout.segments:
         if segment.webcam_slot is None:
             continue
         spans.append((segment.start_s, segment.end_s))
         emphasis.extend(segment.speech_spans)
+        if path is None and segment.webcam_path is not None:
+            path = segment.webcam_path
 
     return Composition(
         gameplay_slot=first.gameplay_slot,
         webcam_slot=first.webcam_slot,
         webcam_source=first.webcam_source,
+        webcam_path=path,
         spans=spans,
         emphasis=emphasis,
         gain=first.emphasis_gain,
@@ -272,7 +280,15 @@ def build_video_filtergraph(
             parts.append(prefix)
 
         if segment.fit:
-            parts.extend(_fit_chain(source_label, index, target_w, target_h))
+            parts.extend(
+                _fit_chain(
+                    source_label,
+                    index,
+                    target_w,
+                    target_h,
+                    pre=_fit_pre_crop(segment, request.crop_path),
+                )
+            )
             continue
 
         chain = [segment_crop_filter(segment)]
@@ -404,21 +420,84 @@ def _webcam_branch(
         current = "[wcat]"
 
     crop = _webcam_crop_filter(composition)
-    parts.append(f"{current}{crop},scale={webcam.width}:{webcam.height}:flags=lanczos[laycam]")
+    parts.append(f"{current}{crop},{_webcam_scale_filter(composition)}[laycam]")
     return parts
+
+
+def _webcam_scale_filter(composition: Composition) -> str:
+    """The scale that puts the cropped webcam into its slot.
+
+    While somebody is speaking the webcam is drawn a little larger. The
+    zoom is done by the scale rather than by the crop when the crop is
+    following a path: the window the crop takes is then the webcam's own
+    frame, and making it smaller would show the inside of the streamer's
+    background rather than their face.
+
+    The zoom follows the speech, so it has to be worked out **per frame**.
+    ffmpeg works a scale's width and height out once, when the graph is
+    built, and ``t`` — the clock the speech is written against — is not a
+    valid thing to ask for there: *"Expressions with frame variables 'n',
+    't', 'pos' are not valid in init eval_mode."* ``eval=frame`` says to
+    work it out on every frame instead. The frame is then larger than the
+    slot, and the crop that follows takes the middle of it, so the face
+    stays in the middle of the strip while the picture around it grows.
+    """
+    webcam = composition.webcam_slot
+    if webcam is None:
+        return "null"
+
+    factor = None if _crop_carries_emphasis(composition) else _emphasis_factor(composition)
+    if factor is None:
+        return f"scale={webcam.width}:{webcam.height}:flags=lanczos"
+    return (
+        f"scale=w='{webcam.width}*({factor})':h='{webcam.height}*({factor})':"
+        f"flags=lanczos:eval=frame,"
+        f"crop={webcam.width}:{webcam.height}:"
+        f"x='(iw-{webcam.width})/2':y='(ih-{webcam.height})/2'"
+    )
+
+
+def _crop_carries_emphasis(composition: Composition) -> bool:
+    """True when the crop itself already magnifies the webcam during speech."""
+    path = composition.webcam_path
+    if path is not None and path.keyframes:
+        # The path's crop keeps the webcam's own frame whole, so the zoom
+        # has to happen in the scale instead.
+        return False
+    speech = _speech_term(composition.emphasis)
+    return bool(speech) and composition.gain > 0
+
+
+def _emphasis_factor(composition: Composition) -> str | None:
+    """The expression for the emphasis factor, or ``None`` when there is none."""
+    speech = _speech_term(composition.emphasis)
+    if not speech or composition.gain <= 0:
+        return None
+    return f"1+{composition.gain:.4f}*({speech})"
 
 
 def _webcam_crop_filter(composition: Composition) -> str:
     """The crop that takes the webcam region out of the source.
 
-    During speech the window is a little smaller, so the face is magnified
-    when it is scaled up into the slot. The window stays centred on the
-    region, and the scale that follows is a fixed size, so the overlay never
-    has to be rebuilt while somebody is talking.
+    When the webcam's own frame was measured over time, the crop follows
+    it: the window moves with the frame, so a streamer who changes the size
+    of their webcam is still framed correctly. The window keeps the size it
+    had for most of the clip — a filter graph cannot change the size of its
+    output halfway through — and it is kept inside the source.
+
+    Without a path the crop is the region itself, and during speech the
+    window is a little smaller, so the face is magnified when it is scaled
+    up into the slot. The window stays centred on the region, and the scale
+    that follows is a fixed size, so the overlay never has to be rebuilt
+    while somebody is talking.
     """
     webcam_source = composition.webcam_source
     if webcam_source is None:
         return "null"
+
+    path = composition.webcam_path
+    if path is not None and path.keyframes:
+        return _webcam_path_crop_filter(path)
 
     source_w = _even(webcam_source.width)
     source_h = _even(webcam_source.height)
@@ -441,6 +520,34 @@ def _webcam_crop_filter(composition: Composition) -> str:
     crop_x = f"{x}+({source_w}-{width})/2"
     crop_y = f"{y}+({source_h}-{height})/2"
     return f"crop=w='{width}':h='{height}':x='{crop_x}':y='{crop_y}'"
+
+
+def _webcam_path_crop_filter(path: WebcamPath) -> str:
+    """The crop that follows the webcam's own frame over time.
+
+    The window is as big as the frame was for most of the clip, and its
+    centre follows the frame's centre. The position is clamped to the
+    source, so a frame that runs off the edge of the picture gives a window
+    that stops at the edge rather than one that runs off it.
+    """
+    width = _even(path.width)
+    height = _even(path.height)
+
+    limit_x = max(0, path.source_width - width)
+    limit_y = max(0, path.source_height - height)
+
+    x_expression = series_expression(
+        [(keyframe.t, keyframe.cx - width / 2) for keyframe in path.keyframes]
+    )
+    y_expression = series_expression(
+        [(keyframe.t, keyframe.cy - height / 2) for keyframe in path.keyframes]
+    )
+
+    # The commas inside the expressions are escaped, because the filtergraph
+    # parser would otherwise read them as separators.
+    x_expression = f"max(0\\,min({x_expression}\\,{limit_x}))"
+    y_expression = f"max(0\\,min({y_expression}\\,{limit_y}))"
+    return f"crop=w={width}:h={height}:x='{x_expression}':y='{y_expression}'"
 
 
 def _even(value: float) -> int:
@@ -476,15 +583,37 @@ def _speech_term(spans: list[tuple[float, float]]) -> str:
     return "+".join(terms)
 
 
-def _fit_chain(source_label: str, index: int, out_w: int, out_h: int) -> list[str]:
+def _fit_pre_crop(segment: CropSegment, crop_path: CropPath) -> str:
+    """The crop that runs before a fitted frame is scaled into its slot.
+
+    A fitted frame is the whole source, and the whole source holds the
+    webcam. When the plan has already taken the webcam out of the fitted
+    frame, the crop is applied here so the webcam is not shown twice.
+    """
+    source_w = crop_path.source_width
+    source_h = crop_path.source_height
+    if segment.width >= source_w and segment.height >= source_h:
+        return ""
+    first = segment.keyframes[0] if segment.keyframes else None
+    x = int(first.x) if first is not None else 0
+    y = int(first.y) if first is not None else 0
+    return f"crop={segment.width}:{segment.height}:{x}:{y},"
+
+
+def _fit_chain(
+    source_label: str, index: int, out_w: int, out_h: int, *, pre: str = ""
+) -> list[str]:
     """Fit the whole frame into the output over a blurred copy of itself.
 
     Used when the subjects are spread wider than any crop can hold. Plain black
     bars would be honest but look cheap on a phone; a blurred fill is what
     viewers are used to seeing and keeps the frame full-bleed.
+
+    ``pre`` is a chain that runs before the split — the crop that keeps a
+    webcam out of the fitted frame, for instance.
     """
     return [
-        f"{source_label}split=2[fitbg{index}][fitfg{index}]",
+        f"{source_label}{pre}split=2[fitbg{index}][fitfg{index}]",
         (
             f"[fitbg{index}]scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
             f"crop={out_w}:{out_h},boxblur=24:2[bg{index}]"

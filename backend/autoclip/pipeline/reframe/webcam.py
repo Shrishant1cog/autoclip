@@ -38,22 +38,28 @@ from __future__ import annotations
 import json
 import logging
 import statistics
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from .faces import FaceObservation, sample_faces
+from .faces import FACE_TILE_PX, FaceObservation, sample_faces
 from .scenes import Shot, detect_shots
 
 log = logging.getLogger(__name__)
 
 __all__ = [
     "Rect",
+    "FacePoint",
+    "WebcamBox",
     "WebcamCandidate",
+    "WebcamKeyframe",
+    "WebcamPath",
     "WebcamReport",
     "WebcamSpan",
     "WebcamTrack",
+    "MAX_WEBCAM_PATH_KEYFRAMES",
     "adaptive_sample_fps",
+    "build_webcam_path",
     "detect_webcam",
     "estimate_webcam_rect",
     "track_webcam",
@@ -77,6 +83,24 @@ MAX_SAMPLE_FPS = 15.0
 #: Every shot gets at least this many samples. A shot seen once is a shot the
 #: detector cannot make a decision about.
 MIN_SAMPLES_PER_SHOT = 2
+
+#: The report's format. A saved report written by another version says
+#: nothing reliable about the current detector — it may have failed, and the
+#: older format could not say so — so it is detected again rather than reused.
+REPORT_VERSION = 2
+
+#: Cap on the keyframes in the webcam's own path. The path becomes an ffmpeg
+#: expression, and an expression with hundreds of nested conditionals is
+#: evaluated at every frame of the clip — and, on Windows, can push the
+#: command line past the operating system's own length limit. The measured
+#: boxes arrive at the detector's sample rate, so a long clip produces
+#: hundreds of them; the path only has to say where the frame *was*, not
+#: where it was in every one of the fifteen samples a second that were
+#: looked at. The same budget the gameplay crop path uses.
+MAX_WEBCAM_PATH_KEYFRAMES = 48
+
+#: Movement below this many pixels is dropped while thinning the path.
+WEBCAM_PATH_EPSILON_PX = 1.0
 
 #: Cuts per minute above which the footage is treated as fast-cut and the
 #: sampling rate goes up. Below it, the base rate is enough.
@@ -177,6 +201,152 @@ class Rect:
             y=float(data.get("y", 0.0)),
             width=float(data.get("width", 0.0)),
             height=float(data.get("height", 0.0)),
+        )
+
+
+@dataclass(frozen=True)
+class FacePoint:
+    """Where the face was, at one moment, in source pixels.
+
+    The crop follows the face inside the webcam's own frame, so the crop
+    stays on the streamer rather than on the middle of the box.
+    """
+
+    t: float
+    cx: float
+    cy: float
+    width: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "t": round(self.t, 3),
+            "cx": round(self.cx, 2),
+            "cy": round(self.cy, 2),
+            "width": round(self.width, 2),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> FacePoint:
+        return cls(
+            t=float(data.get("t", 0.0)),
+            cx=float(data.get("cx", 0.0)),
+            cy=float(data.get("cy", 0.0)),
+            width=float(data.get("width", 0.0)),
+        )
+
+
+@dataclass(frozen=True)
+class WebcamBox:
+    """Where the webcam's own frame was, at one moment.
+
+    A webcam overlay is not always the same size: the streamer changes the
+    layout, the source is a screen recording, the box is scaled by the
+    player. A single rectangle for the whole clip is therefore wrong for
+    part of it. This is one measurement of the box, with the time it was
+    taken.
+    """
+
+    #: When the box was measured, in the track's own time base.
+    t: float
+    #: The box, in source pixels.
+    rect: Rect
+    #: How many of the four edges were seen in the picture rather than
+    #: guessed from the face: left, top, right, bottom.
+    edges_found: tuple[bool, bool, bool, bool] = (False, False, False, False)
+
+    @property
+    def measured(self) -> int:
+        """How many of the four edges came from the picture."""
+        return sum(1 for found in self.edges_found if found)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "t": round(self.t, 3),
+            "rect": self.rect.to_dict(),
+            "edges_found": list(self.edges_found),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> WebcamBox:
+        raw_rect = data.get("rect")
+        rect = Rect.from_dict(raw_rect) if isinstance(raw_rect, dict) else Rect(0, 0, 0, 0)
+        raw_edges = data.get("edges_found")
+        edges = raw_edges if isinstance(raw_edges, list) else []
+        flags = [bool(flag) for flag in edges[:4]]
+        while len(flags) < 4:
+            flags.append(False)
+        found = (flags[0], flags[1], flags[2], flags[3])
+        return cls(t=float(data.get("t", 0.0)), rect=rect, edges_found=found)
+
+
+@dataclass(frozen=True)
+class WebcamKeyframe:
+    """Where the middle of the webcam's own frame was, at one moment."""
+
+    t: float
+    cx: float
+    cy: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "t": round(self.t, 3),
+            "cx": round(self.cx, 2),
+            "cy": round(self.cy, 2),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> WebcamKeyframe:
+        return cls(
+            t=float(data.get("t", 0.0)),
+            cx=float(data.get("cx", 0.0)),
+            cy=float(data.get("cy", 0.0)),
+        )
+
+
+@dataclass
+class WebcamPath:
+    """The webcam's own frame, followed over time.
+
+    The frame is not one rectangle: the streamer changes the layout, the
+    source is scaled by the player, the box grows and shrinks. The path
+    says where the middle of the box was at each moment, and how big the
+    box was over the clip.
+
+    The size is the median of the measurements rather than a per-frame
+    value, because a filter graph cannot change the size of its output
+    halfway through: the crop follows the box, and the size it is drawn at
+    is the one the box had for most of the clip.
+    """
+
+    source_width: int
+    source_height: int
+    width: float
+    height: float
+    keyframes: list[WebcamKeyframe] = field(default_factory=list)
+
+    @property
+    def duration_s(self) -> float:
+        return self.keyframes[-1].t if self.keyframes else 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_width": self.source_width,
+            "source_height": self.source_height,
+            "width": round(self.width, 2),
+            "height": round(self.height, 2),
+            "keyframes": [keyframe.to_dict() for keyframe in self.keyframes],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> WebcamPath:
+        raw = data.get("keyframes")
+        items = raw if isinstance(raw, list) else []
+        return cls(
+            source_width=int(data.get("source_width", 0)),
+            source_height=int(data.get("source_height", 0)),
+            width=float(data.get("width", 0.0)),
+            height=float(data.get("height", 0.0)),
+            keyframes=[WebcamKeyframe.from_dict(item) for item in items if isinstance(item, dict)],
         )
 
 
@@ -284,10 +454,30 @@ class WebcamTrack:
     reason: str = ""
     #: The median face width inside the region, in source pixels.
     face_width: float = 0.0
+    #: Where the webcam's own frame was, over time. Empty when the box
+    #: could not be measured in the picture, in which case the region is
+    #: used as it is.
+    boxes: list[WebcamBox] = field(default_factory=list)
+    #: Where the face was, over time — in source pixels, in the track's time
+    #: base. The crop follows the face inside the box.
+    faces: list[FacePoint] = field(default_factory=list)
 
     @property
     def duration_s(self) -> float:
         return self.end_s - self.start_s
+
+    @property
+    def region(self) -> Rect:
+        """The rectangle that should be shown to the viewer.
+
+        When the webcam's own frame was seen in the picture, that frame is
+        the region: it is the true edge of the webcam, and a crop built
+        from the face alone spills outside it. When it was not seen, the
+        region around the face is the best guess there is.
+        """
+        if not self.boxes:
+            return self.rect
+        return _median_box(self.boxes)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -298,6 +488,8 @@ class WebcamTrack:
             "uncertain": self.uncertain,
             "reason": self.reason,
             "face_width": round(self.face_width, 2),
+            "boxes": [box.to_dict() for box in self.boxes],
+            "faces": [face.to_dict() for face in self.faces],
             "spans": [span.to_dict() for span in self.spans],
         }
 
@@ -307,6 +499,10 @@ class WebcamTrack:
         rect = Rect.from_dict(raw_rect) if isinstance(raw_rect, dict) else Rect(0, 0, 0, 0)
         raw_spans = data.get("spans")
         items = raw_spans if isinstance(raw_spans, list) else []
+        raw_boxes = data.get("boxes")
+        box_items = raw_boxes if isinstance(raw_boxes, list) else []
+        raw_faces = data.get("faces")
+        face_items = raw_faces if isinstance(raw_faces, list) else []
         return cls(
             rect=rect,
             confidence=float(data.get("confidence", 0.0)),
@@ -316,6 +512,8 @@ class WebcamTrack:
             uncertain=bool(data.get("uncertain", False)),
             reason=str(data.get("reason", "")),
             face_width=float(data.get("face_width", 0.0)),
+            boxes=[WebcamBox.from_dict(item) for item in box_items if isinstance(item, dict)],
+            faces=[FacePoint.from_dict(item) for item in face_items if isinstance(item, dict)],
         )
 
     def slice(self, start_s: float, end_s: float) -> WebcamTrack:
@@ -364,6 +562,12 @@ class WebcamTrack:
             uncertain=uncertain,
             reason=reason,
             face_width=self.face_width,
+            boxes=[
+                replace(box, t=box.t - offset) for box in self.boxes if start_s <= box.t < end_s
+            ],
+            faces=[
+                replace(face, t=face.t - offset) for face in self.faces if start_s <= face.t < end_s
+            ],
         )
 
 
@@ -371,6 +575,9 @@ class WebcamTrack:
 class WebcamReport:
     """Everything the detector found, and how it decided."""
 
+    #: The report's own format. A saved report written by another version
+    #: says nothing reliable about the current detector, so it is not reused.
+    version: int = REPORT_VERSION
     #: The best region, if one was confident enough to use.
     track: WebcamTrack | None = None
     #: Every region considered, best first.
@@ -385,9 +592,19 @@ class WebcamReport:
     observations: int = 0
     #: Set when detection could not run at all.
     unavailable_reason: str = ""
+    #: Set when the detection *failed* rather than finding nothing.
+    #:
+    #: "There is no webcam in this footage" is an answer, and a saved one is
+    #: worth keeping. "The detector could not run" is not an answer: it is
+    #: the absence of one, and it may well be over next time. The two are
+    #: kept apart so that a failure is tried again and a negative is not.
+    failed: bool = False
     #: The frame size the report was made against, in source pixels.
     source_width: int = 0
     source_height: int = 0
+    #: The stretches of the source that were actually looked at, in the
+    #: source's own clock. Empty when the whole source was used.
+    windows: list[tuple[float, float]] = field(default_factory=list)
 
     @property
     def found(self) -> bool:
@@ -395,6 +612,7 @@ class WebcamReport:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "version": self.version,
             "found": self.found,
             "track": self.track.to_dict() if self.track else None,
             "candidates": [candidate.to_dict() for candidate in self.candidates],
@@ -404,8 +622,10 @@ class WebcamReport:
             "cuts_per_minute": round(self.cuts_per_minute, 3),
             "observations": self.observations,
             "unavailable_reason": self.unavailable_reason,
+            "failed": self.failed,
             "source_width": self.source_width,
             "source_height": self.source_height,
+            "windows": [[round(low, 3), round(high, 3)] for low, high in self.windows],
         }
 
     @classmethod
@@ -413,7 +633,14 @@ class WebcamReport:
         raw_track = data.get("track")
         raw_candidates = data.get("candidates")
         candidates = raw_candidates if isinstance(raw_candidates, list) else []
+        raw_windows = data.get("windows")
+        windows = [
+            (float(item[0]), float(item[1]))
+            for item in (raw_windows if isinstance(raw_windows, list) else [])
+            if isinstance(item, (list, tuple)) and len(item) == 2
+        ]
         return cls(
+            version=int(data.get("version", 0)),
             track=WebcamTrack.from_dict(raw_track) if isinstance(raw_track, dict) else None,
             candidates=[
                 WebcamCandidate.from_dict(item) for item in candidates if isinstance(item, dict)
@@ -424,8 +651,10 @@ class WebcamReport:
             cuts_per_minute=float(data.get("cuts_per_minute", 0.0)),
             observations=int(data.get("observations", 0)),
             unavailable_reason=str(data.get("unavailable_reason", "")),
+            failed=bool(data.get("failed", False)),
             source_width=int(data.get("source_width", 0)),
             source_height=int(data.get("source_height", 0)),
+            windows=windows,
         )
 
     def save(self, path: Path) -> None:
@@ -439,9 +668,9 @@ class WebcamReport:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            return cls(unavailable_reason="the saved report could not be read")
+            return cls(unavailable_reason="the saved report could not be read", failed=True)
         if not isinstance(data, dict):
-            return cls(unavailable_reason="the saved report could not be read")
+            return cls(unavailable_reason="the saved report could not be read", failed=True)
         return cls.from_dict(data)
 
 
@@ -528,6 +757,9 @@ def detect_webcam(
     width: int = 0,
     height: int = 0,
     shots: list[Shot] | None = None,
+    tile_px: int = FACE_TILE_PX,
+    max_sample_fps: float = MAX_SAMPLE_FPS,
+    windows: list[tuple[float, float]] | None = None,
 ) -> WebcamReport:
     """Find the webcam region in a piece of footage.
 
@@ -538,12 +770,26 @@ def detect_webcam(
     With no ``end_s`` the whole video is used, and its length and frame size
     are measured rather than assumed — so ``detect_webcam(path)`` works on
     its own.
-    """
-    duration = (end_s - start_s) if end_s is not None else 0.0
 
-    if end_s is None:
-        end_s = _probe_duration(video)
+    ``windows`` looks only at the stretches given, in the source's own
+    clock. A source that is an hour long and a set of clips that use five
+    minutes of it do not need the detector to walk the other fifty-five:
+    the webcam is the same wherever it is found, and the boxes are measured
+    where the clips actually are.
+
+    The face is looked for in tiles rather than in the whole frame: a
+    webcam overlay's face is small, and MediaPipe misses a small face in a
+    large frame. The tiles make the detector's job the same size as the face
+    it is looking for.
+    """
+    if windows:
+        spans = [(float(low), float(high)) for low, high in windows if high > low]
+        duration = sum(high - low for low, high in spans)
+    else:
+        if end_s is None:
+            end_s = _probe_duration(video)
         duration = max(0.0, end_s - start_s)
+        spans = [(start_s, end_s)]
 
     if duration <= 0:
         return WebcamReport(unavailable_reason="the clip has no duration")
@@ -554,11 +800,14 @@ def detect_webcam(
         height = height or probed_height
 
     if shots is None:
-        shots = detect_shots(video, start_s=start_s, end_s=end_s)
+        shots = detect_shots(video, start_s=start_s, end_s=end_s, windows=windows)
     if not shots:
         shots = [Shot(0.0, duration)]
 
     sample_fps, reason = adaptive_sample_fps(shots, duration)
+    if sample_fps > max_sample_fps:
+        sample_fps = max_sample_fps
+        reason = f"{reason}; capped at {max_sample_fps:.0f} frames a second"
     cut_count = max(0, len(shots) - 1)
 
     report = WebcamReport(
@@ -574,11 +823,55 @@ def detect_webcam(
         report.unavailable_reason = "the frame size was not known"
         return report
 
+    measured: list[WebcamBox] = []
+    face_points: list[FacePoint] = []
+
+    def _measure(t: float, frame, observations: list[FaceObservation]) -> None:
+        """Measure the webcam's own frame, once per sampled picture."""
+        if frame is None:
+            return
+        for observation in observations:
+            face = Rect(
+                x=observation.left,
+                y=observation.top,
+                width=observation.width,
+                height=observation.height,
+            )
+            estimate = _estimate_box(frame, face, width=width, height=height)
+            if estimate is None:
+                continue
+            measured.append(
+                WebcamBox(
+                    t=t,
+                    rect=estimate.rect,
+                    edges_found=estimate.edges_found,
+                )
+            )
+            face_points.append(
+                FacePoint(
+                    t=t,
+                    cx=observation.cx,
+                    cy=observation.cy,
+                    width=observation.width,
+                )
+            )
+
     try:
-        observations = sample_faces(video, start_s=start_s, end_s=end_s, sample_fps=sample_fps)
+        observations = sample_faces(
+            video,
+            start_s=start_s,
+            end_s=end_s,
+            sample_fps=sample_fps,
+            tile_px=tile_px,
+            frame_sink=_measure,
+            windows=windows,
+        )
     except Exception as exc:  # noqa: BLE001 - a detector failure is a report, not a crash
         log.warning("Webcam detection could not run on %s: %s", video.name, exc)
         report.unavailable_reason = str(exc)
+        # The detector could not look. That is not the same answer as "there
+        # is no webcam here", and it must not be kept as one.
+        report.failed = True
         return report
 
     report.observations = len(observations)
@@ -605,9 +898,154 @@ def detect_webcam(
         shots=shots,
         width=width,
         height=height,
+        covered_s=duration,
     )
+    track.boxes = _boxes_for(track.rect, measured)
+    track.faces = _faces_for(track.rect, face_points)
     report.track = track
     return report
+
+
+def _estimate_box(frame, face: Rect, *, width: int, height: int):
+    """The webcam's own frame in one picture, or ``None``."""
+    try:
+        from .webcambox import estimate_cam_box
+    except ImportError:  # pragma: no cover - the module is part of the package
+        return None
+    try:
+        return estimate_cam_box(frame, face, source_width=width, source_height=height)
+    except Exception as exc:  # noqa: BLE001 - a measurement failure is a fallback
+        log.debug("Could not measure the webcam box: %s", exc)
+        return None
+
+
+def _boxes_for(region: Rect, measured: list[WebcamBox]) -> list[WebcamBox]:
+    """The measured boxes that belong to this region."""
+    return [box for box in measured if region.contains_point(box.rect.cx, box.rect.cy)]
+
+
+def _faces_for(region: Rect, points: list[FacePoint]) -> list[FacePoint]:
+    """The face measurements that belong to this region."""
+    return [point for point in points if region.contains_point(point.cx, point.cy)]
+
+
+def _median(values: list[float]) -> float:
+    """The middle value, or zero when there is none."""
+    if not values:
+        return 0.0
+    return float(statistics.median(values))
+
+
+def _median_box(boxes: list[WebcamBox]) -> Rect:
+    """The middle of the measured boxes.
+
+    Each side is taken on its own, because a box that was measured badly
+    on one side should not drag the other three with it.
+    """
+    return Rect(
+        x=_median([box.rect.x for box in boxes]),
+        y=_median([box.rect.y for box in boxes]),
+        width=_median([box.rect.width for box in boxes]),
+        height=_median([box.rect.height for box in boxes]),
+    )
+
+
+def _smooth(values: list[float], window: int = 5) -> list[float]:
+    """A median filter over a window of neighbours.
+
+    One bad measurement — a frame where the edge search found the wrong
+    line — would otherwise be believed for as long as the clip lasts.
+    """
+    if window < 3 or len(values) < 3:
+        return list(values)
+    half = window // 2
+    smoothed: list[float] = []
+    for index in range(len(values)):
+        low = max(0, index - half)
+        high = min(len(values), index + half + 1)
+        smoothed.append(_median(values[low:high]))
+    return smoothed
+
+
+def build_webcam_path(
+    boxes: list[WebcamBox],
+    *,
+    source_width: int,
+    source_height: int,
+) -> WebcamPath | None:
+    """The path of the webcam's own frame, from the measured boxes.
+
+    ``None`` when no box was measured: the caller then uses the plain
+    region, which is the face plus its headroom.
+    """
+    if not boxes:
+        return None
+
+    ordered = sorted(boxes, key=lambda box: box.t)
+    times = [box.t for box in ordered]
+    centres_x = _smooth([box.rect.cx for box in ordered])
+    centres_y = _smooth([box.rect.cy for box in ordered])
+
+    keyframes = _thin_keyframes(
+        [
+            WebcamKeyframe(t=t, cx=cx, cy=cy)
+            for t, cx, cy in zip(times, centres_x, centres_y, strict=True)
+        ]
+    )
+
+    size = _median_box(ordered)
+    return WebcamPath(
+        source_width=source_width,
+        source_height=source_height,
+        width=size.width,
+        height=size.height,
+        keyframes=keyframes,
+    )
+
+
+def _thin_keyframes(
+    keyframes: list[WebcamKeyframe],
+    *,
+    limit: int = MAX_WEBCAM_PATH_KEYFRAMES,
+) -> list[WebcamKeyframe]:
+    """Reduce the path to at most ``limit`` keyframes.
+
+    Keyframes whose position is within :data:`WEBCAM_PATH_EPSILON_PX` of the
+    straight line between their neighbours are dropped first — they say
+    nothing the neighbours do not already say. If that is not enough, the
+    path is thinned uniformly. The endpoints are always kept, so the path
+    still covers the whole clip.
+    """
+    if len(keyframes) <= 2:
+        return list(keyframes)
+
+    kept: list[WebcamKeyframe] = [keyframes[0]]
+    for previous, current, following in zip(keyframes, keyframes[1:], keyframes[2:], strict=False):
+        span = following.t - previous.t
+        if span <= 0:
+            continue
+        ratio = (current.t - previous.t) / span
+        predicted_x = previous.cx + (following.cx - previous.cx) * ratio
+        predicted_y = previous.cy + (following.cy - previous.cy) * ratio
+        if (
+            abs(current.cx - predicted_x) > WEBCAM_PATH_EPSILON_PX
+            or abs(current.cy - predicted_y) > WEBCAM_PATH_EPSILON_PX
+        ):
+            kept.append(current)
+    kept.append(keyframes[-1])
+
+    if len(kept) <= limit:
+        return kept
+
+    step = len(kept) / (limit - 1)
+    thinned = [kept[min(len(kept) - 1, round(index * step))] for index in range(limit - 1)]
+    thinned.append(kept[-1])
+
+    deduped: list[WebcamKeyframe] = []
+    for frame in thinned:
+        if not deduped or frame.t > deduped[-1].t:
+            deduped.append(frame)
+    return deduped
 
 
 def _clusters(observations: list[FaceObservation], radius: float) -> list[list[FaceObservation]]:
@@ -796,6 +1234,7 @@ def track_webcam(
     shots: list[Shot],
     width: int,
     height: int,
+    covered_s: float | None = None,
 ) -> WebcamTrack:
     """Follow a region across the clip, and say where it was not seen.
 
@@ -804,9 +1243,14 @@ def track_webcam(
     reported as a span with ``present=False`` rather than being quietly
     dropped, because "we could not see the webcam here" is a different fact
     from "there was no webcam here".
+
+    ``covered_s`` is how much of the clip was actually looked at. It is
+    the sum of the windows when the detector skipped the gaps between them,
+    and it is what the "how much was missing" judgement is made against.
     """
     rect = candidate.rect
     duration = shots[-1].end_s if shots else 0.0
+    looked_at = duration if covered_s is None else covered_s
 
     spans: list[WebcamSpan] = []
     for shot in shots:
@@ -837,14 +1281,14 @@ def track_webcam(
 
     if not missing:
         reason = ""
-    elif missing_s >= duration * 0.5:
+    elif missing_s >= looked_at * 0.5:
         reason = "the region held a face for less than half the clip"
     else:
         reason = f"the region held no face for {missing_s:.1f}s"
 
     confidence = candidate.confidence
-    if uncertain and duration > 0:
-        confidence *= max(0.0, 1.0 - missing_s / duration)
+    if uncertain and looked_at > 0:
+        confidence *= max(0.0, 1.0 - missing_s / looked_at)
 
     return WebcamTrack(
         rect=rect,

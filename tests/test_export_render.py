@@ -28,7 +28,7 @@ from autoclip.pipeline.reframe.layout import (
     LayoutSlot,
     LayoutVariant,
 )
-from autoclip.pipeline.reframe.webcam import Rect
+from autoclip.pipeline.reframe.webcam import Rect, WebcamKeyframe, WebcamPath
 from autoclip.pipeline.transcript import Word
 
 pytestmark = pytest.mark.slow
@@ -437,6 +437,40 @@ class TestLayoutRender:
             ],
         )
 
+    def _moving(self, *, speech_spans: list[tuple[float, float]] | None = None) -> LayoutPath:
+        """A stacked layout whose webcam moves while the clip runs."""
+        strip = LayoutSlot(x=0, y=0, width=1080, height=768)
+        gameplay = LayoutSlot(x=0, y=768, width=1080, height=1152)
+        return LayoutPath(
+            source_width=SOURCE_W,
+            source_height=SOURCE_H,
+            output_width=1080,
+            output_height=1920,
+            segments=[
+                LayoutSegment(
+                    start_s=0.0,
+                    end_s=5.0,
+                    variant=LayoutVariant.ABOVE,
+                    gameplay_slot=gameplay,
+                    webcam_slot=strip,
+                    webcam_strip=strip,
+                    gameplay_source=Rect(x=134.0, y=0.0, width=1012.0, height=720.0),
+                    webcam_source=Rect(x=CAM_X, y=CAM_Y + 9, width=CAM_W, height=242),
+                    speech_spans=speech_spans or [],
+                    webcam_path=WebcamPath(
+                        source_width=SOURCE_W,
+                        source_height=SOURCE_H,
+                        width=CAM_W,
+                        height=242,
+                        keyframes=[
+                            WebcamKeyframe(t=0.0, cx=CAM_X + CAM_W / 2, cy=CAM_Y + 9 + 121),
+                            WebcamKeyframe(t=5.0, cx=CAM_X + CAM_W / 2 - 40, cy=CAM_Y + 9 + 121),
+                        ],
+                    ),
+                )
+            ],
+        )
+
     def test_the_stacked_layout_renders(self, marked_source, words, tmp_path) -> None:
         destination = tmp_path / "stacked.mp4"
         crop_path = centre_crop(SOURCE_W, SOURCE_H, 5.0, aspect_w=15, aspect_h=16)
@@ -455,6 +489,95 @@ class TestLayoutRender:
         info = ffmpeg.probe(destination)
         assert (info.width, info.height) == (1080, 1920)
         assert info.duration_s == pytest.approx(5.0, abs=0.35)
+
+    def test_a_webcam_that_moves_renders(self, marked_source, words, tmp_path) -> None:
+        """The crop that follows the webcam has to survive contact with ffmpeg.
+
+        The expression is the whole point: the window's position is a
+        function of time, and ffmpeg has to be able to evaluate it on every
+        frame of the clip.
+        """
+        destination = tmp_path / "moving.mp4"
+        crop_path = centre_crop(SOURCE_W, SOURCE_H, 5.0, aspect_w=15, aspect_h=16)
+
+        export.export_clip(
+            make_request(
+                marked_source,
+                destination,
+                crop_path,
+                words,
+                layout=self._moving(),
+            ),
+            work_dir=tmp_path / "work",
+        )
+
+        info = ffmpeg.probe(destination)
+        assert (info.width, info.height) == (1080, 1920)
+        assert info.duration_s == pytest.approx(5.0, abs=0.35)
+
+    def test_the_webcam_stays_on_the_face_while_it_moves(
+        self, marked_source, words, tmp_path
+    ) -> None:
+        """The marker is still in the webcam's strip at the end of the clip.
+
+        The window follows the box, so the marker does not drift out of the
+        webcam strip. A crop that did not follow would show the marker's
+        background at the end of the clip instead.
+        """
+        destination = tmp_path / "moving_followed.mp4"
+        crop_path = centre_crop(SOURCE_W, SOURCE_H, 5.0, aspect_w=15, aspect_h=16)
+
+        export.export_clip(
+            make_request(
+                marked_source,
+                destination,
+                crop_path,
+                words,
+                layout=self._moving(),
+            ),
+            work_dir=tmp_path / "work",
+        )
+
+        # The marker is red; the background behind the webcam is not.
+        at_start = _region_signature(destination, 0.5, 0, 0, 1080, 768)
+        at_end = _region_signature(destination, 4.5, 0, 0, 1080, 768)
+
+        assert at_start != at_end
+        assert _is_red(destination, 4.5, 540, 384)
+
+    def test_a_moving_webcam_with_speech_renders(self, marked_source, words, tmp_path) -> None:
+        """A webcam that follows a path, with the speech emphasis on top.
+
+        The zoom that follows the speech is worked out in the scale rather
+        than in the crop, because the crop's window is the webcam's own
+        frame. A scale's width and height are worked out **once**, when the
+        graph is built, and ``t`` — the clock the speech is written against
+        — is not a valid thing to ask for there. ffmpeg refuses the whole
+        render: *"Expressions with frame variables 'n', 't', 'pos' are not
+        valid in init eval_mode."*
+        """
+        destination = tmp_path / "moving_with_speech.mp4"
+        crop_path = centre_crop(SOURCE_W, SOURCE_H, 5.0, aspect_w=15, aspect_h=16)
+
+        export.export_clip(
+            make_request(
+                marked_source,
+                destination,
+                crop_path,
+                words,
+                layout=self._moving(speech_spans=[(1.0, 3.0)]),
+            ),
+            work_dir=tmp_path / "work",
+        )
+
+        info = ffmpeg.probe(destination)
+        assert (info.width, info.height) == (1080, 1920)
+        assert info.duration_s == pytest.approx(5.0, abs=0.35)
+
+        # The emphasis still changes the picture while somebody is speaking.
+        quiet = _region_signature(destination, 0.3, 0, 0, 1080, 768)
+        talking = _region_signature(destination, 2.0, 0, 0, 1080, 768)
+        assert quiet != talking
 
     def test_the_corner_layout_renders(self, marked_source, words, tmp_path) -> None:
         destination = tmp_path / "corner.mp4"
@@ -822,6 +945,44 @@ def _region_signature(video: Path, timestamp: float, x: int, y: int, w: int, h: 
         check=True,
     )
     return result.stdout.strip()
+
+
+def _is_red(video: Path, timestamp: float, x: int, y: int) -> bool:
+    """True when the pixel at that place is the red marker.
+
+    A two-by-two block is read rather than a single pixel: ffmpeg rounds a
+    crop's size down to a whole number of chroma samples, and a one-pixel
+    crop of a yuv420p picture is no pixels at all.
+    """
+    result = subprocess.run(
+        [
+            ffmpeg.ffmpeg_path(),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            str(timestamp),
+            "-i",
+            str(video),
+            "-frames:v",
+            "1",
+            "-vf",
+            f"crop=2:2:{x}:{y}",
+            "-pix_fmt",
+            "rgb24",
+            "-f",
+            "rawvideo",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+    )
+    if len(result.stdout) < 6:
+        return False
+    red = sum(result.stdout[0::3]) / 2
+    green = sum(result.stdout[1::3]) / 2
+    blue = sum(result.stdout[2::3]) / 2
+    return red > 120 and red > green * 1.5 and red > blue * 1.5
 
 
 # --------------------------------------------------------------------------

@@ -128,6 +128,11 @@ class CropPath:
     #: so, rather than leaving a stale rectangle from somewhere else to be
     #: compared against.
     faces: list[FaceRect] = field(default_factory=list)
+    #: A fingerprint of the settings the plan was built for — the aspect
+    #: ratio it was made for and the region it was kept clear of. A plan
+    #: built for different settings is a different plan, so a saved one is
+    #: only reused when the settings still match.
+    config_fingerprint: str = ""
 
     @property
     def duration_s(self) -> float:
@@ -146,6 +151,7 @@ class CropPath:
                 for s in self.segments
             ],
             "faces": [asdict(f) for f in self.faces],
+            "config_fingerprint": self.config_fingerprint,
         }
 
     @classmethod
@@ -171,6 +177,7 @@ class CropPath:
             source_height=data["source_height"],
             segments=segments,
             faces=[FaceRect(**f) for f in data.get("faces", [])],
+            config_fingerprint=str(data.get("config_fingerprint", "")),
         )
 
     def save(self, path: Path) -> Path:
@@ -302,10 +309,26 @@ def axis_expression(keyframes: list[CropKeyframe], axis: str, *, offset_s: float
     Preconditions:
         keyframes are sorted by ``t`` and non-empty; axis is "x" or "y".
     """
-    if not keyframes:
+    return series_expression(
+        [(keyframe.t, getattr(keyframe, axis)) for keyframe in keyframes],
+        offset_s=offset_s,
+    )
+
+
+def series_expression(points: list[tuple[float, float]], *, offset_s: float = 0.0) -> str:
+    """Build a piecewise-linear ffmpeg expression for a series of values.
+
+    The points are ``(time, value)`` pairs, sorted by time. ``offset_s`` is
+    subtracted from the times, which is what makes an expression usable
+    inside a ``trim``-ed segment whose PTS was reset to zero.
+
+    Preconditions:
+        the points are sorted by ``t`` and not empty.
+    """
+    if not points:
         return "0"
 
-    values = [(round(k.t - offset_s, 4), round(getattr(k, axis), 2)) for k in keyframes]
+    values = [(round(t - offset_s, 4), round(value, 2)) for t, value in points]
 
     if len(values) == 1:
         return str(values[0][1])

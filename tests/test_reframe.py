@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import json
 import math
+import subprocess
 
 import pytest
+from autoclip.pipeline import ffmpeg
 from autoclip.pipeline.reframe import croppath, smoothing
 from autoclip.pipeline.reframe.croppath import (
     CropKeyframe,
@@ -23,6 +25,7 @@ from autoclip.pipeline.reframe.croppath import (
 )
 from autoclip.pipeline.reframe.faces import FaceObservation
 from autoclip.pipeline.reframe.tracker import build_tracks
+from autoclip.pipeline.reframe.webcam import Rect
 
 
 class TestTargetCropSize:
@@ -467,6 +470,102 @@ class TestTracking:
         )[0]
 
         assert talking.mouth_activity(0.0, 4.0) > still.mouth_activity(0.0, 4.0)
+
+
+# --------------------------------------------------------------------------
+# Keeping the webcam out of the gameplay
+# --------------------------------------------------------------------------
+
+#: A webcam in the top right of a 1080p frame.
+WEBCAM = Rect(x=1274.0, y=0.0, width=638.0, height=435.0)
+
+
+class TestTheWebcamIsKeptOutOfTheGameplay:
+    """The webcam must not be shown twice.
+
+    It is drawn in the strip above the gameplay, so the gameplay crop has
+    to stay clear of it. A 9:16 crop of a 16:9 frame sits in the middle of
+    the picture, and a webcam in the top right is just outside it — until
+    the crop is built for the shorter gameplay slot, when the window is
+    wider and the webcam falls inside it.
+    """
+
+    def test_the_clear_side_of_the_frame_is_the_wider_one(self) -> None:
+        from autoclip.pipeline.reframe import _safe_x_range
+
+        safe = _safe_x_range(1920, WEBCAM)
+
+        assert safe == (0.0, 1274.0)
+
+    def test_the_crop_is_pushed_clear_of_the_webcam(self) -> None:
+        from autoclip.pipeline.reframe import _constrain_x
+
+        # The 15:16 crop of the gameplay slot is 1012 pixels wide, and it
+        # starts in the middle of the frame — right on top of the webcam.
+        middle = (1920 - 1012) / 2
+
+        x = _constrain_x(middle, 1012, 1920, WEBCAM)
+
+        assert x + 1012 <= WEBCAM.x
+
+    def test_a_crop_that_is_already_clear_is_left_alone(self) -> None:
+        from autoclip.pipeline.reframe import _constrain_x
+
+        assert _constrain_x(0.0, 1012, 1920, WEBCAM) == 0.0
+
+    def test_the_whole_plan_is_held_clear(self) -> None:
+        """The rule is applied to the finished plan, fallbacks included."""
+        from autoclip.pipeline.reframe import _keep_clear
+
+        path = centre_crop(1920, 1080, 5.0, aspect_w=15, aspect_h=16)
+        before = path.segments[0].keyframes[0].x
+
+        _keep_clear(path, WEBCAM)
+
+        keyframe = path.segments[0].keyframes[0]
+        assert keyframe.x + path.segments[0].width <= WEBCAM.x
+        assert keyframe.x != before
+
+    def test_a_plan_with_no_webcam_is_left_alone(self) -> None:
+        from autoclip.pipeline.reframe import _keep_clear
+
+        path = centre_crop(1920, 1080, 5.0, aspect_w=15, aspect_h=16)
+        before = path.segments[0].keyframes[0].x
+
+        _keep_clear(path, None)
+
+        assert path.segments[0].keyframes[0].x == before
+
+    def test_the_crop_path_of_a_clip_avoids_the_webcam(self, tmp_path) -> None:
+        """The same rule, through the public entry point."""
+        from autoclip.pipeline.reframe import ReframeConfig, build_crop_path
+
+        video = tmp_path / "source.mp4"
+        subprocess.run(
+            [
+                ffmpeg.ffmpeg_path(),
+                "-y",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=1920x1080:rate=10:duration=2",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                str(video),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+        config = ReframeConfig(aspect_w=15, aspect_h=16, centre_only=True, avoid=WEBCAM)
+        path = build_crop_path(video, start_s=0.0, end_s=1.0, config=config)
+
+        segment = path.segments[0]
+        assert segment.keyframes[0].x + segment.width <= WEBCAM.x
 
 
 def _evaluate(expression: str, t: float) -> float:

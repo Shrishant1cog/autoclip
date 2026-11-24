@@ -32,7 +32,14 @@ from autoclip.pipeline.reframe.layout import (
     plan_layout,
     transition_frequency,
 )
-from autoclip.pipeline.reframe.webcam import Rect, WebcamSpan, WebcamTrack
+from autoclip.pipeline.reframe.webcam import (
+    Rect,
+    WebcamBox,
+    WebcamKeyframe,
+    WebcamPath,
+    WebcamSpan,
+    WebcamTrack,
+)
 
 WIDTH = 1920
 HEIGHT = 1080
@@ -55,6 +62,7 @@ def _track(
     face_width: float = BIG_FACE,
     spans: list[WebcamSpan] | None = None,
     duration_s: float = DURATION,
+    boxes: list[WebcamBox] | None = None,
 ) -> WebcamTrack:
     """A webcam track, as the detector would have produced it."""
     if spans is None:
@@ -66,6 +74,7 @@ def _track(
         end_s=duration_s,
         spans=spans,
         face_width=face_width,
+        boxes=boxes or [],
     )
 
 
@@ -361,6 +370,135 @@ class TestTheSpeechTimeline:
 
 
 # --------------------------------------------------------------------------
+# The split screen
+# --------------------------------------------------------------------------
+
+
+#: A webcam that cannot fill a strip on its own without turning the face
+#: into a blur: filling the strip would need more than the three times the
+#: face is allowed to be blown up.
+PARTIAL_RECT = Rect(x=1400.0, y=40.0, width=300.0, height=200.0)
+PARTIAL_FACE = 100.0
+
+#: A webcam so small that it would sit in the strip like a postage stamp.
+POSTAGE_RECT = Rect(x=1700.0, y=40.0, width=160.0, height=100.0)
+POSTAGE_FACE = 30.0
+
+
+class TestTheSplitScreen:
+    """The streamer preset: forty per cent of the frame for the face."""
+
+    def test_a_webcam_that_cannot_fill_the_strip_still_gets_the_strip(self) -> None:
+        """The strip is the layout, not a reward for a big webcam.
+
+        A webcam that would have to be blown up past the limit to fill the
+        strip is drawn smaller inside it. The alternative — putting it in a
+        corner — is what the old planner did, and it is not what a streamer
+        asked for.
+        """
+        path = _plan(webcam=_track(PARTIAL_RECT, face_width=PARTIAL_FACE))
+
+        segment = path.segments[0]
+        assert segment.variant is LayoutVariant.ABOVE
+        assert segment.webcam_strip is not None
+        assert segment.webcam_slot is not None
+
+    def test_the_partial_webcam_never_spills_out_of_the_strip(self) -> None:
+        """The webcam stays inside the band reserved for it."""
+        path = _plan(webcam=_track(PARTIAL_RECT, face_width=PARTIAL_FACE))
+
+        segment = path.segments[0]
+        assert segment.webcam_strip is not None
+        assert segment.webcam_slot is not None
+
+        strip = segment.webcam_strip
+        slot = segment.webcam_slot
+
+        assert slot.width <= strip.width
+        assert slot.height <= strip.height
+        assert slot.x >= strip.x
+        assert slot.y >= strip.y
+        assert slot.x + slot.width <= strip.x + strip.width
+        assert slot.y + slot.height <= strip.y + strip.height
+
+    def test_the_still_is_forty_sixty_even_when_the_webcam_is_partial(self) -> None:
+        path = _plan(webcam=_track(PARTIAL_RECT, face_width=PARTIAL_FACE))
+
+        segment = path.segments[0]
+        assert segment.webcam_strip is not None
+
+        assert segment.webcam_strip.height / path.output_height == pytest.approx(0.40, abs=0.01)
+        assert segment.gameplay_slot.height / path.output_height == pytest.approx(0.60, abs=0.01)
+
+    def test_the_face_is_never_blurred_to_fill_the_strip(self) -> None:
+        path = _plan(webcam=_track(PARTIAL_RECT, face_width=PARTIAL_FACE))
+
+        segment = path.segments[0]
+        assert segment.webcam_slot is not None
+        assert segment.webcam_source is not None
+
+        scale = segment.webcam_slot.width / segment.webcam_source.width
+        assert scale <= MAX_FACE_SCALE
+
+    def test_a_webcam_too_small_for_the_strip_goes_to_a_corner(self) -> None:
+        """A postage stamp in a band of its own looks worse than a corner."""
+        path = _plan(webcam=_track(POSTAGE_RECT, face_width=POSTAGE_FACE))
+
+        assert path.segments[0].variant is LayoutVariant.CORNER
+
+    def test_the_measured_frame_is_the_region_that_is_shown(self) -> None:
+        """The webcam's own frame is the region, not the face's headroom.
+
+        A crop built from the face alone spills outside the webcam and shows
+        a strip of gameplay above and below it.
+        """
+        measured = Rect(x=1200.0, y=0.0, width=700.0, height=440.0)
+        track = _track(
+            BIG_RECT,
+            boxes=[
+                WebcamBox(
+                    t=1.0,
+                    rect=measured,
+                    edges_found=(True, True, True, True),
+                )
+            ],
+        )
+
+        path = _plan(webcam=track)
+
+        segment = path.segments[0]
+        assert segment.webcam_region is not None
+        assert segment.webcam_region.x == pytest.approx(measured.x)
+        assert segment.webcam_region.width == pytest.approx(measured.width)
+
+    def test_the_path_of_the_webcam_reaches_the_layout(self) -> None:
+        """The crop follows the webcam's frame, so the path has to travel."""
+        track = _track(
+            BIG_RECT,
+            boxes=[
+                WebcamBox(t=1.0, rect=Rect(x=1200.0, y=0.0, width=700.0, height=440.0)),
+                WebcamBox(t=2.0, rect=Rect(x=1150.0, y=0.0, width=700.0, height=440.0)),
+            ],
+        )
+
+        path = _plan(webcam=track)
+
+        segment = path.segments[0]
+        assert segment.webcam_path is not None
+        assert len(segment.webcam_path.keyframes) == 2
+        assert segment.webcam_path.keyframes[0].t == pytest.approx(1.0)
+        assert segment.webcam_path.width == pytest.approx(700.0)
+
+    def test_a_webcam_with_no_measured_frame_keeps_the_face_region(self) -> None:
+        path = _plan(webcam=_track(BIG_RECT))
+
+        segment = path.segments[0]
+        assert segment.webcam_region is not None
+        assert segment.webcam_region.x == pytest.approx(BIG_RECT.x)
+        assert segment.webcam_path is None
+
+
+# --------------------------------------------------------------------------
 # The render
 # --------------------------------------------------------------------------
 
@@ -464,6 +602,80 @@ class TestTheRender:
 
         assert "split=2" not in graph
         assert "overlay" not in graph
+
+
+# --------------------------------------------------------------------------
+# The webcam that moves
+# --------------------------------------------------------------------------
+
+
+def _moving_path() -> LayoutPath:
+    """A layout whose webcam changes place while the clip runs."""
+    strip = LayoutSlot(x=0, y=0, width=1080, height=768)
+    gameplay = LayoutSlot(x=0, y=768, width=1080, height=1152)
+    return LayoutPath(
+        source_width=WIDTH,
+        source_height=HEIGHT,
+        output_width=1080,
+        output_height=1920,
+        segments=[
+            LayoutSegment(
+                start_s=0.0,
+                end_s=DURATION,
+                variant=LayoutVariant.ABOVE,
+                gameplay_slot=gameplay,
+                webcam_slot=strip,
+                webcam_strip=strip,
+                gameplay_source=Rect(x=0.0, y=0.0, width=1012.0, height=1080.0),
+                webcam_source=Rect(x=1200.0, y=0.0, width=700.0, height=440.0),
+                webcam_path=WebcamPath(
+                    source_width=WIDTH,
+                    source_height=HEIGHT,
+                    width=700.0,
+                    height=440.0,
+                    keyframes=[
+                        WebcamKeyframe(t=0.0, cx=1550.0, cy=220.0),
+                        WebcamKeyframe(t=DURATION, cx=1450.0, cy=220.0),
+                    ],
+                ),
+            )
+        ],
+    )
+
+
+class TestTheWebcamThatMoves:
+    """A streamer changes the size of their webcam mid-clip.
+
+    The crop has to follow it: one fixed rectangle is wrong for part of the
+    clip, and the part where it is wrong is the part where the face is cut
+    off or the gameplay is shown instead.
+    """
+
+    def test_the_crop_is_the_measured_frame(self) -> None:
+        graph = export.build_video_filtergraph(_request(_moving_path()), subtitle_name=None)
+
+        assert "crop=w=700:h=440" in graph
+
+    def test_the_crop_moves_with_the_webcam(self) -> None:
+        graph = export.build_video_filtergraph(_request(_moving_path()), subtitle_name=None)
+
+        # The window's position is an expression over time, not a number.
+        assert "if(lt(t," in graph
+        assert "x='max(0\\,min(" in graph
+        assert "y='max(0\\,min(" in graph
+
+    def test_the_window_stays_inside_the_source(self) -> None:
+        graph = export.build_video_filtergraph(_request(_moving_path()), subtitle_name=None)
+
+        # 1920 - 700 across, 1080 - 440 down.
+        assert "1220" in graph
+        assert "640" in graph
+
+    def test_a_fixed_webcam_still_gets_a_fixed_crop(self) -> None:
+        graph = export.build_video_filtergraph(_request(_stacked_path()), subtitle_name=None)
+
+        assert "crop=380:270:1500:65" in graph
+        assert "if(lt(t," not in graph
 
 
 # --------------------------------------------------------------------------

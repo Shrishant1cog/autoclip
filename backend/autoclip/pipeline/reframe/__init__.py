@@ -37,6 +37,7 @@ from .scenes import Shot, detect_shots
 from .smoothing import SmoothingConfig, smooth_series
 from .speaker import assign_speakers, map_tracks_to_speakers
 from .tracker import FaceTrack, build_tracks
+from .webcam import Rect
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +75,106 @@ class ReframeConfig:
     smoothing: SmoothingConfig | None = None
     #: Skip face detection entirely and centre-crop everything.
     centre_only: bool = False
+    #: The webcam's own region, in source pixels. The gameplay crop is kept
+    #: clear of it, so the webcam is never shown twice: once in the strip
+    #: above the gameplay, and once inside the gameplay itself.
+    avoid: Rect | None = None
+
+
+def _safe_x_range(source_w: int, avoid: Rect | None) -> tuple[float, float] | None:
+    """The stretch of the frame the gameplay crop may use.
+
+    The crop is a tall window in a wide frame, so the only way to keep it
+    clear of a webcam is to keep it to one side of it. The wider side is
+    the one that is used.
+    """
+    if avoid is None or avoid.area <= 0:
+        return None
+
+    left = max(0.0, min(avoid.x, float(source_w)))
+    right = max(left, min(avoid.right, float(source_w)))
+    if right <= left:
+        # The webcam covers the whole width; there is nowhere to go.
+        return None
+
+    left_width = left
+    right_width = source_w - right
+    if right_width >= left_width:
+        return (right, float(source_w))
+    return (0.0, left)
+
+
+def _constrain_x(x: float, crop_w: int, source_w: int, avoid: Rect | None) -> float:
+    """Keep the crop window clear of the webcam."""
+    safe = _safe_x_range(source_w, avoid)
+    if safe is None:
+        return x
+    low, high = safe
+    if high - low < crop_w:
+        # The clear side is narrower than the crop. The window is pushed as
+        # far clear as it can go, and the overlap that is left is smaller
+        # than the webcam is wide.
+        return max(0.0, min(x, max(0.0, high - crop_w)))
+    return max(low, min(x, high - crop_w))
+
+
+def _safe_window(
+    source_w: int,
+    source_h: int,
+    crop_w: int,
+    crop_h: int,
+    avoid: Rect | None,
+) -> tuple[float, float, int, int] | None:
+    """The largest window of the right shape that stays clear of the webcam.
+
+    This is what the wide-shot fallback uses when a webcam is on screen:
+    showing the whole frame would show the webcam twice.
+    """
+    safe = _safe_x_range(source_w, avoid)
+    if safe is None:
+        return None
+    low, high = safe
+
+    width = min(crop_w, int(high - low))
+    height = crop_h
+    if width < crop_w:
+        # The clear side is too narrow for the full-height window, so the
+        # window is shortened rather than widened into the webcam.
+        height = _even(int(width * crop_h / crop_w))
+        width = _even(int(height * crop_w / crop_h))
+    if width <= 0 or height <= 0:
+        return None
+    x = max(low, min((low + high - width) / 2, high - width))
+    return x, (source_h - height) / 2, width, height
+
+
+def _even(value: float) -> int:
+    number = int(value)
+    if number % 2:
+        number -= 1
+    return max(2, number)
+
+
+def plan_fingerprint(config: ReframeConfig) -> str:
+    """A short description of the settings a crop plan was built for.
+
+    A crop plan is not just a crop: it is a crop *for an aspect ratio* and
+    *clear of a region*. Change either and the plan is a different plan, so
+    a saved one may only be reused when the settings still match.
+    """
+    avoid = config.avoid
+    if avoid is None or avoid.area <= 0:
+        avoid_part = "none"
+    else:
+        avoid_part = f"{avoid.x:.1f},{avoid.y:.1f},{avoid.width:.1f},{avoid.height:.1f}"
+    smoothing = repr(config.smoothing) if config.smoothing is not None else "none"
+    return (
+        f"aspect={config.aspect_w}x{config.aspect_h};"
+        f"fps={config.sample_fps};"
+        f"centre={config.centre_only};"
+        f"avoid={avoid_part};"
+        f"smoothing={smoothing}"
+    )
 
 
 def build_crop_path(
@@ -85,6 +186,37 @@ def build_crop_path(
     config: ReframeConfig | None = None,
 ) -> CropPath:
     """Compute the crop path for one clip.
+
+    The plan records the settings it was built for, so that a saved plan is
+    only reused when those settings still hold.
+
+    Falls back to a centred crop whenever face detection is unavailable or finds
+    nothing — a centre crop is an acceptable result, an exception is not.
+
+    Preconditions:
+        video exists; 0 <= start_s < end_s <= source duration.
+    """
+    config = config or ReframeConfig()
+    path = _build_crop_path(
+        video,
+        start_s=start_s,
+        end_s=end_s,
+        transcript=transcript,
+        config=config,
+    )
+    path.config_fingerprint = plan_fingerprint(config)
+    return path
+
+
+def _build_crop_path(
+    video: Path,
+    *,
+    start_s: float,
+    end_s: float,
+    transcript: Transcript | None = None,
+    config: ReframeConfig | None = None,
+) -> CropPath:
+    """The plan itself, without the settings it was built for.
 
     Falls back to a centred crop whenever face detection is unavailable or finds
     nothing — a centre crop is an acceptable result, an exception is not.
@@ -103,8 +235,11 @@ def build_crop_path(
     crop_w, crop_h = target_crop_size(source_w, source_h, config.aspect_w, config.aspect_h)
 
     if config.centre_only:
-        return centre_crop(
-            source_w, source_h, duration, aspect_w=config.aspect_w, aspect_h=config.aspect_h
+        return _held_clear(
+            centre_crop(
+                source_w, source_h, duration, aspect_w=config.aspect_w, aspect_h=config.aspect_h
+            ),
+            config.avoid,
         )
 
     try:
@@ -113,24 +248,30 @@ def build_crop_path(
         )
     except FaceDetectionUnavailable as exc:
         log.warning("Face detection unavailable (%s); using a centre crop.", exc)
-        return centre_crop(
-            source_w,
-            source_h,
-            duration,
-            aspect_w=config.aspect_w,
-            aspect_h=config.aspect_h,
-            zoom=GENERAL_ZOOM,
+        return _held_clear(
+            centre_crop(
+                source_w,
+                source_h,
+                duration,
+                aspect_w=config.aspect_w,
+                aspect_h=config.aspect_h,
+                zoom=GENERAL_ZOOM,
+            ),
+            config.avoid,
         )
 
     if not observations:
         log.info("No faces detected in %s; using a centre crop.", video.name)
-        return centre_crop(
-            source_w,
-            source_h,
-            duration,
-            aspect_w=config.aspect_w,
-            aspect_h=config.aspect_h,
-            zoom=GENERAL_ZOOM,
+        return _held_clear(
+            centre_crop(
+                source_w,
+                source_h,
+                duration,
+                aspect_w=config.aspect_w,
+                aspect_h=config.aspect_h,
+                zoom=GENERAL_ZOOM,
+            ),
+            config.avoid,
         )
 
     tracks = build_tracks(observations)
@@ -156,8 +297,11 @@ def build_crop_path(
         )
 
     if not segments:
-        return centre_crop(
-            source_w, source_h, duration, aspect_w=config.aspect_w, aspect_h=config.aspect_h
+        return _held_clear(
+            centre_crop(
+                source_w, source_h, duration, aspect_w=config.aspect_w, aspect_h=config.aspect_h
+            ),
+            config.avoid,
         )
 
     # Guarantee the segments tile the clip exactly; a gap or overlap would
@@ -179,12 +323,53 @@ def build_crop_path(
     # only face rectangles that belong to this clip, in this clip's time base;
     # anything measured elsewhere cannot say whether *this* crop kept the face.
     faces = [_face_rect(o) for o in observations]
-    return CropPath(
+    path = CropPath(
         source_width=source_w,
         source_height=source_h,
         segments=segments,
         faces=faces,
     )
+    _keep_clear(path, config.avoid)
+    return path
+
+
+def _held_clear(path: CropPath, avoid: Rect | None) -> CropPath:
+    """The plan, with its windows held clear of the webcam."""
+    _keep_clear(path, avoid)
+    return path
+
+
+def _keep_clear(path: CropPath, avoid: Rect | None) -> None:
+    """Move the crop windows clear of the webcam.
+
+    This is the last word on where the gameplay crop may sit: it is applied
+    to the finished plan, so the fallbacks — the centre crop when no face
+    was found, the whole frame when the shot is too wide — are held clear of
+    the webcam as well. A webcam that is shown twice is a worse fault than
+    a crop that is a little off centre.
+    """
+    if avoid is None or avoid.area <= 0:
+        return
+
+    source_w = path.source_width
+    for segment in path.segments:
+        if segment.fit:
+            safe = _safe_x_range(source_w, avoid)
+            if safe is None:
+                continue
+            low, high = safe
+            width = _even(high - low)
+            if width <= 0:
+                continue
+            segment.width = width
+            segment.height = path.source_height
+            for keyframe in segment.keyframes:
+                keyframe.x = low
+                keyframe.y = 0.0
+            continue
+
+        for keyframe in segment.keyframes:
+            keyframe.x = _constrain_x(keyframe.x, segment.width, source_w, avoid)
 
 
 def _clip_relative_turns(
@@ -252,6 +437,7 @@ def _segments_for_shot(
                     source_h=source_h,
                     crop_w=crop_w,
                     crop_h=crop_h,
+                    avoid=config.avoid,
                 )
             )
         else:
@@ -263,6 +449,7 @@ def _segments_for_shot(
                     source_h=source_h,
                     crop_w=crop_w,
                     crop_h=crop_h,
+                    avoid=config.avoid,
                 )
             )
 
@@ -290,12 +477,15 @@ def _track_segment(
             source_h=source_h,
             crop_w=crop_w,
             crop_h=crop_h,
+            avoid=config.avoid,
         )
 
     raw = [
         (
             o.t,
-            _clamp(o.cx - crop_w / 2, 0, source_w - crop_w),
+            _constrain_x(
+                _clamp(o.cx - crop_w / 2, 0, source_w - crop_w), crop_w, source_w, config.avoid
+            ),
             _clamp(o.eye_y - EYE_LINE_RATIO * crop_h, 0, source_h - crop_h),
         )
         for o in observations
@@ -348,6 +538,7 @@ def _wide_segment(
     source_h: int,
     crop_w: int,
     crop_h: int,
+    avoid: Rect | None = None,
 ) -> CropSegment:
     """Hold several faces at once — locked, never panning.
 
@@ -373,6 +564,21 @@ def _wide_segment(
     spread = right - left
 
     if spread > crop_w * FIT_IF_SPREAD_EXCEEDS:
+        window = _safe_window(source_w, source_h, crop_w, crop_h, avoid)
+        if window is not None:
+            # The whole frame would show the webcam twice — once in the
+            # strip above the gameplay and once inside it — so the window is
+            # the biggest clear piece of the right shape instead.
+            x, y, width, height = window
+            return CropSegment(
+                start_s=start_s,
+                end_s=end_s,
+                width=width,
+                height=height,
+                keyframes=[CropKeyframe(t=start_s, x=x, y=y)],
+                strategy=Strategy.WIDE,
+                faces=[_face_rect(o) for o in observations],
+            )
         return CropSegment(
             start_s=start_s,
             end_s=end_s,
@@ -395,7 +601,12 @@ def _wide_segment(
         keyframes=[
             CropKeyframe(
                 t=start_s,
-                x=_clamp(centre_x - crop_w / 2, 0, source_w - crop_w),
+                x=_constrain_x(
+                    _clamp(centre_x - crop_w / 2, 0, source_w - crop_w),
+                    crop_w,
+                    source_w,
+                    avoid,
+                ),
                 y=_clamp(eye_y - EYE_LINE_RATIO * crop_h, 0, source_h - crop_h),
             )
         ],
@@ -414,6 +625,7 @@ def _general_segment(
     source_h: int,
     crop_w: int,
     crop_h: int,
+    avoid: Rect | None = None,
 ) -> CropSegment:
     """No usable face — centre crop."""
     return CropSegment(
@@ -421,7 +633,13 @@ def _general_segment(
         end_s=end_s,
         width=crop_w,
         height=crop_h,
-        keyframes=[CropKeyframe(t=start_s, x=(source_w - crop_w) / 2, y=(source_h - crop_h) / 2)],
+        keyframes=[
+            CropKeyframe(
+                t=start_s,
+                x=_constrain_x((source_w - crop_w) / 2, crop_w, source_w, avoid),
+                y=(source_h - crop_h) / 2,
+            )
+        ],
         strategy=Strategy.GENERAL,
         zoom=GENERAL_ZOOM,
     )

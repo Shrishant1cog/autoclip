@@ -42,12 +42,20 @@ def detect_shots(
     end_s: float | None = None,
     threshold: float = DEFAULT_THRESHOLD,
     min_shot_s: float = MIN_SHOT_S,
+    windows: list[tuple[float, float]] | None = None,
 ) -> list[Shot]:
     """Return shots within ``[start_s, end_s)``, in clip-relative seconds.
+
+    With ``windows`` the shots are found inside each window and their times
+    are the source's own clock, so several stretches of one source can be
+    described side by side.
 
     Always returns at least one shot: footage with no detectable cuts is a
     single shot, not an error.
     """
+    if windows:
+        return _detect_shots_in_windows(video, windows, threshold=threshold, min_shot_s=min_shot_s)
+
     duration = (end_s - start_s) if end_s is not None else None
 
     try:
@@ -58,6 +66,41 @@ def detect_shots(
 
     if not shots:
         return [Shot(0.0, duration if duration is not None else 0.0)]
+
+    return _merge_short_shots(shots, min_shot_s)
+
+
+def _detect_shots_in_windows(
+    video: Path,
+    windows: list[tuple[float, float]],
+    *,
+    threshold: float,
+    min_shot_s: float,
+) -> list[Shot]:
+    """The shots inside each window, in the source's own clock.
+
+    A window that cannot be scanned becomes one shot rather than nothing:
+    the caller then treats it as a single continuous stretch.
+    """
+    shots: list[Shot] = []
+    # The windows are walked in the order they sit in the source. The clips
+    # come in rank order, and rank is not position: walking them as given
+    # would put the shot list out of order, and the merge below would join
+    # the end of one window to the start of another.
+    for window_start, window_end in sorted(windows):
+        try:
+            found = _detect_with_scenedetect(video, window_start, window_end, threshold)
+        except Exception as exc:
+            log.warning(
+                "Scene detection failed in %s-%s (%s); treating it as one shot.",
+                window_start,
+                window_end,
+                exc,
+            )
+            found = []
+        if not found:
+            found = [Shot(0.0, max(0.0, window_end - window_start))]
+        shots.extend(Shot(shot.start_s + window_start, shot.end_s + window_start) for shot in found)
 
     return _merge_short_shots(shots, min_shot_s)
 

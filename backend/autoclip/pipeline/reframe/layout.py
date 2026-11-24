@@ -31,7 +31,7 @@ from dataclasses import asdict, dataclass, field, replace
 from enum import StrEnum
 from typing import Any
 
-from .webcam import Rect, WebcamSpan, WebcamTrack
+from .webcam import Rect, WebcamPath, WebcamSpan, WebcamTrack, build_webcam_path
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +75,12 @@ MIN_FACE_WIDTH_PX = 48
 #: How much bigger the webcam gets while someone is speaking. The speech
 #: timeline decides this; it never changes the length of the clip.
 EMPHASIS_GAIN = 0.08
+
+#: A webcam that fills less than this much of the strip's width is too
+#: small to be worth a strip of its own. It goes to a corner instead,
+#: where it sits over the gameplay rather than in a band of its own with
+#: empty space either side of it.
+MIN_STRIP_FILL_FRACTION = 0.5
 
 
 def _even(value: float) -> int:
@@ -188,6 +194,12 @@ class LayoutSegment:
     gameplay_source: Rect | None = None
     #: Which part of the source the webcam comes from.
     webcam_source: Rect | None = None
+    #: The webcam's own region in the source, in source pixels. The gameplay
+    #: crop is kept away from it, so the webcam is never shown twice.
+    webcam_region: Rect | None = None
+    #: Where the webcam's own frame was, over time. This is what makes the
+    #: crop follow the box when the streamer changes the layout.
+    webcam_path: WebcamPath | None = None
     #: The speech intervals inside this stretch, in clip-relative seconds.
     #: These come from the shared speech timeline — the same one the music
     #: ducking uses.
@@ -229,6 +241,8 @@ class LayoutSegment:
             "webcam_strip": self.webcam_strip.to_dict() if self.webcam_strip else None,
             "gameplay_source": self.gameplay_source.to_dict() if self.gameplay_source else None,
             "webcam_source": self.webcam_source.to_dict() if self.webcam_source else None,
+            "webcam_region": self.webcam_region.to_dict() if self.webcam_region else None,
+            "webcam_path": self.webcam_path.to_dict() if self.webcam_path else None,
             "speech_spans": [[round(s, 3), round(e, 3)] for s, e in self.speech_spans],
             "emphasised": self.emphasised,
             "emphasis_gain": self.emphasis_gain,
@@ -490,6 +504,38 @@ def _corner_slot(
 # --------------------------------------------------------------------------
 
 
+def _fit_in_strip(
+    strip: LayoutSlot,
+    region: Rect,
+    *,
+    max_face_scale: float,
+) -> tuple[int, int] | None:
+    """The largest piece of the webcam that fits inside the strip.
+
+    The webcam keeps its own shape — a streamer is not squashed — and it is
+    never scaled up so far that the face turns into a blur. The result is
+    therefore bounded twice: by the strip it has to fit in, and by how much
+    the face may be blown up.
+
+    ``None`` when the region cannot fill even a small part of the strip.
+    """
+    if region.width <= 0 or region.height <= 0:
+        return None
+
+    scale = min(
+        max_face_scale,
+        strip.width / region.width,
+        strip.height / region.height,
+    )
+    width = _even(region.width * scale)
+    height = _even(region.height * scale)
+    if width <= 0 or height <= 0:
+        return None
+    if width > strip.width or height > strip.height:
+        return None
+    return width, height
+
+
 def _stacked_placement(
     region: Rect,
     face_width: float,
@@ -499,6 +545,7 @@ def _stacked_placement(
     *,
     webcam_frac: float | None = None,
     allow_partial: bool = False,
+    min_fill_fraction: float = 0.0,
 ) -> _Placement | None:
     """The webcam strip above the gameplay, if the geometry allows it.
 
@@ -506,6 +553,10 @@ def _stacked_placement(
     in — the strip is then filled around it. That is the manual path: the
     user asked for the strip, so the strip is what they get, and the face is
     never blown up past the limit to fill it.
+
+    ``min_fill_fraction`` is the share of the strip's width the webcam has
+    to reach to be worth a strip of its own. Below it the caller falls back
+    to a corner.
     """
     frac = config.webcam_height_frac if webcam_frac is None else webcam_frac
     strip, gameplay_slot = _stack_slots(config.output_width, config.output_height, frac)
@@ -537,8 +588,13 @@ def _stacked_placement(
     if scale <= config.max_face_scale:
         webcam_slot = strip
     elif allow_partial:
-        width = _even(region.width * config.max_face_scale)
-        height = _even(width * region.height / region.width)
+        fitted = _fit_in_strip(strip, region, max_face_scale=config.max_face_scale)
+        if fitted is None:
+            return None
+        width, height = fitted
+        if width < strip.width * min_fill_fraction:
+            # The webcam would sit in the strip like a postage stamp.
+            return None
         webcam_slot = LayoutSlot(
             x=max(0, (strip.width - width) // 2),
             y=max(0, (strip.height - height) // 2),
@@ -700,7 +756,19 @@ def plan_layout(
     path.webcam_confidence = confidence
     face_width = webcam.face_width
 
-    placement = _stacked_placement(region, face_width, source_width, source_height, config)
+    # The region that is shown is the webcam's own frame when it was seen
+    # in the picture, and the region around the face when it was not.
+    region = webcam.region
+
+    placement = _stacked_placement(
+        region,
+        face_width,
+        source_width,
+        source_height,
+        config,
+        allow_partial=True,
+        min_fill_fraction=MIN_STRIP_FILL_FRACTION,
+    )
     if placement is not None:
         path.reason = (
             "The webcam is above the gameplay, taking "
@@ -728,9 +796,23 @@ def plan_layout(
         speech_spans=spans,
         config=config,
         reason=path.reason,
+        webcam_path=_webcam_path(webcam, source_width, source_height),
     )
     path.segments = apply_dwell(path.segments, min_dwell_s=config.min_dwell_s)
     return path
+
+
+def _webcam_path(
+    webcam: WebcamTrack,
+    source_width: int,
+    source_height: int,
+) -> WebcamPath | None:
+    """The path of the webcam's own frame, when it was measured."""
+    return build_webcam_path(
+        webcam.boxes,
+        source_width=source_width,
+        source_height=source_height,
+    )
 
 
 def _segments_from_spans(
@@ -741,6 +823,7 @@ def _segments_from_spans(
     speech_spans: list[tuple[float, float]],
     config: LayoutConfig,
     reason: str,
+    webcam_path: WebcamPath | None = None,
 ) -> list[LayoutSegment]:
     """One segment per stretch, according to whether the webcam was seen.
 
@@ -770,6 +853,7 @@ def _segments_from_spans(
                     speech_spans=speech_spans,
                     config=config,
                     reason=reason,
+                    webcam_path=webcam_path,
                 )
             )
         else:
@@ -816,6 +900,7 @@ def _segment(
     speech_spans: list[tuple[float, float]],
     config: LayoutConfig,
     reason: str,
+    webcam_path: WebcamPath | None = None,
 ) -> LayoutSegment:
     """A stretch with the webcam in it."""
     return LayoutSegment(
@@ -827,6 +912,8 @@ def _segment(
         webcam_strip=placement.webcam_strip,
         gameplay_source=placement.gameplay_source,
         webcam_source=placement.webcam_source,
+        webcam_region=placement.webcam_region,
+        webcam_path=webcam_path,
         speech_spans=_clip_spans(speech_spans, start_s, end_s),
         emphasis_gain=config.emphasis_gain,
         reason=reason,
@@ -905,6 +992,7 @@ def _manual_segments(
         return _gameplay_only(duration_s, source_width, source_height, out_w, out_h)
 
     face_width = webcam.face_width if webcam is not None else 0.0
+    webcam_path = _webcam_path(webcam, source_width, source_height) if webcam is not None else None
 
     if manual.variant is LayoutVariant.CORNER:
         placement = _corner_placement(
@@ -939,6 +1027,7 @@ def _manual_segments(
             speech_spans=speech_spans,
             config=config,
             reason="You chose this layout.",
+            webcam_path=webcam_path,
         )
     ]
 
