@@ -1,0 +1,1008 @@
+================================================================================
+AUTOCLIP - PROJECT STATUS AND UPDATES
+================================================================================
+
+Written:      2026-11-24 (IST, UTC+5:30)
+Tree:         C:\Users\mdnik\AppData\Local\Temp\opencode\wt-upgrade-u0-u10
+Branch:       feature/upgrade-u0-u10
+Tip commit:   90760e183570aaae890e471ad377d2c358789a8b
+              "docs: M5.5 - the CI's own ffmpeg install, and the outage it hid"
+              committed 2026-11-24 11:34:15 +0530
+Remote:       origin/feature/upgrade-u0-u10 == local HEAD (no unpushed commits)
+Working tree: clean at 90760e1; this file is the only addition to the tree
+Repository:   https://github.com/Shrishant1cog/autoclip
+
+HOW TO READ THIS FILE
+---------------------
+Every number below is one of three things, and the source is named each time:
+
+  [MEASURED]  read from this tree or from a run's own artefacts on this machine,
+               with the command or the artefact named.
+  [ARTEFACT]  read from a file the application wrote during the real run.
+  [RECORD]    quoted from one of the project's own documents, named in brackets.
+
+Status words are the project's own vocabulary and are never upgraded past what
+was measured:
+
+  VERIFIED          passing automated evidence, or checked against the real
+                    application with the evidence recorded.
+  PARTIAL           part of the criterion is met; the gap is named.
+  FAILED            the criterion is not met and it was supposed to be.
+  UNVERIFIED        the code is present and the automated evidence passes, but
+                    the criterion can only be settled against a live external
+                    system that was not available.
+  BLOCKED           cannot be settled because a required source is missing.
+  NOT APPLICABLE    out of scope by the specification.
+
+Where this file and the project documents differ, the project documents are the
+record of record and win.
+
+================================================================================
+1. WHAT THE PROJECT IS
+================================================================================
+
+AutoClip is an open-source, local-first AI video clipper [RECORD: README.md].
+
+Long video in -> ranked, caption-burned, speaker-tracked 9:16 clips out, and
+optionally onto YouTube or Instagram. The loop it ships is:
+
+    ingest -> transcribe -> find the moments worth keeping (a language model)
+           -> reframe to vertical, tracking whoever is speaking
+           -> burn in animated captions -> validate the render -> publish
+
+Three ways to run it [RECORD: README.md]:
+
+  - Fully local: Whisper + Ollama. Nothing leaves the machine, no API costs.
+  - Bring your own key: 16 LLM providers, with multi-key pools and automatic
+    fallback between them.
+  - External speech: an ElevenLabs key switches transcription to Scribe.
+
+Privacy shape, as documented: only transcript TEXT is ever sent to a text
+provider - never video or audio. Audio reaches ElevenLabs only when external
+transcription or voiceover is enabled AND the external-processing consent has
+been granted. Every external transfer is listed in Settings -> External
+processing with its destination class and its outcome [RECORD: README.md].
+
+Licence: MIT. Version: 0.1.0.dev0 [MEASURED: autoclip.__version__].
+Pre-1.0: tagging v0.1.0 is still gated on K1 (the reframe golden set).
+
+================================================================================
+2. THE SHAPE OF THE CODE (measured on this tree, 90760e1)
+================================================================================
+
+Backend            backend/autoclip - 140 Python files [MEASURED]
+HTTP surface       21 API routers mounted; the tree's own audit counts 162 routes
+                   from the decorators [RECORD: FINAL_UPGRADE_REPORT.md section 1,
+                   which records 18 routers / 108 routes at M0 -> 21 / 162 now].
+                   The OpenAPI schema of this tree exposes 135 paths and 163
+                   operations [MEASURED: app.openapi()] - a different count of a
+                   different thing, not a contradiction.
+Frontend           13 pages under frontend/src/pages/ [MEASURED]
+                   (Workflows, Trends, Settings, Routing, Review, Recovery,
+                    Providers, JobProgress, Ingest, Clips, Channels, Batches,
+                    Assistant)
+Database           SQLite, raw sqlite3, no ORM [RECORD: db/schema.py]
+                   user_version 27, 27 migration steps, 32 live tables
+                   [MEASURED: fresh migrate on a temp database]
+Runtime            Python 3.11 or 3.12 (NOT 3.13 - MediaPipe publishes no 3.13
+                   wheels and the reframe stage needs it); Node 20+ to build the
+                   UI; a full ffmpeg with libass and libx264 [RECORD: README.md]
+Version            0.1.0.dev0 [MEASURED]
+Cold import        93 -> 132 modules, ~1.5 s -> ~2.4 s, because FastAPI now
+                   builds 21 routers instead of 18 - a one-off server-start
+                   cost, not a runtime path [RECORD: FINAL_UPGRADE_REPORT.md K12]
+
+================================================================================
+3. MILESTONES - WHAT WAS BUILT
+================================================================================
+
+8 of 8 specification milestones are complete, plus five post-release increments
+[RECORD: FINAL_UPGRADE_REPORT.md sections 1-2].
+
+M0   Audit and baseline
+     A 20-section audit, a 129-row feature coverage matrix, a 14-path egress
+     inventory, a security and SSRF audit, CI baseline evidence, a performance
+     baseline, an external-constraints register, and a full search record for
+     the missing original sources. An independent adversarial review returned
+     11 corrections, all applied before the milestone was recorded complete.
+
+M0.5 Security and consent
+     A single egress gateway (security/egress.py) and a URL policy
+     (security/urlpolicy.py) that every external transfer passes through -
+     including the ones that already existed (ElevenLabs STT/TTS, all four LLM
+     adapters, yt-dlp, FFmpeg, the MediaPipe model download, the YouTube
+     trending chart, the YouTube upload). Destinations are classified as
+     loopback, private or public; redirects are re-classified hop by hop; DNS
+     is resolved twice to defeat rebinding; IPv4, IPv6 and IPv4-mapped forms are
+     all classified; FFmpeg runs with -protocol_whitelist file,pipe; yt-dlp runs
+     with its proxy disabled. The 26 SSRF tests pre-registered as
+     xfail(strict=True) became ordinary passing tests and every marker was
+     deleted. The tree now has ZERO xfail markers.
+
+M1   Music intelligence and speech-aware ducking
+     A music library that indexes the user's files and never copies, moves or
+     deletes them; local deterministic analysis (spectral flux, autocorrelation
+     BPM, RMS energy, ebur128 LUFS, heuristic mood); a licensing model with five
+     states where unknown blocks the export and where "verified" deliberately
+     cannot be set by a user; and a single shared speech timeline that drives
+     both the ducking and the webcam layout - there is no second detector in
+     the tree. The ducking boundary is exact: a 349 ms gap merges, a 350 ms gap
+     does not, computed on millisecond timestamps rather than 30 ms frames.
+
+M2   Webcam detection and intelligent layouts
+     A webcam region detected as a persistent, stable cluster of faces, scored
+     on support, stability, cut-stability and persistence, with adaptive
+     sampling that raises the frame rate where cuts are dense. Below a
+     confidence floor of 0.35 the result is gameplay-only, not a guess. The
+     stacked layout is a true split - gameplay scaled to its slot over a blurred
+     background, the webcam cut from the same source in parallel trims so it
+     stays in sync with the crop-path concat. The user's choice is stored
+     separately from what the detector found, and the detector never overwrites
+     a choice.
+
+M3   Creative intelligence
+     A structured creative plan validated in full before use - a malformed plan
+     is rejected, not patched - with one repair retry and then a deterministic
+     fallback whose reason is recorded. An AI call budget of 1 planning call +
+     1 repair + <=1 music call per clip, capped at max_clips (12 calls at the
+     default of 10), with the counters persisted in job_ai_budget so a retried
+     job does not get a fresh allowance. Ten named objective diagnostics - no
+     score, no rating, no invented quality figure. The model's own 0-100 clip
+     score is labelled a "creative suggestion" everywhere it appears.
+
+M4a  YouTube publishing hardening
+     Per-account OAuth (the Google account owns the credential and the channel;
+     the token is filed under youtube_refresh#<account_id>; an invalid_grant
+     marks only that account for reconnection). An explicit publishing policy -
+     madeForKids is a tri-state whose UNDECIDED state refuses the upload, and
+     the privacy asked for is read back after the fact so the UI can say
+     "uploaded, private" rather than "on YouTube". A resumable upload with a
+     chunked session, a quota ledger and a bounded backoff. Reconciliation that
+     grades its evidence - confirmed, evidence, not-uploaded, unknown - and
+     never turns an ambiguous result into a second upload. A routing decision
+     that explains itself, recorded whole at enqueue time so the record
+     survives a later rule edit.
+
+M4b  Instagram publishing hardening
+     The current official API - the Instagram Platform Content Publishing API,
+     Graph v27.0 - evaluated against Meta's own documentation, read on
+     2026-11-20, with the URL for every figure. Meta supports three setups, not
+     two, and they are not interchangeable: two can take a local file and one
+     cannot, so AutoClip refuses a local file on the Instagram Login setup
+     rather than routing it somewhere else. Meta's error table is transcribed
+     into the code and each code maps to one decision. The publishing limit is
+     read from the API because Meta's own documents contradict each other (100
+     in one place, 50 in two others). Instagram runs on its own worker and its
+     own tables, so an Instagram failure cannot cancel a YouTube upload and the
+     reverse is also true. Two real export bugs were found by measuring the
+     file rather than by reading the documentation: ffmpeg writes an MP4 edit
+     list by default and Meta documents that a Reel must carry none, and the
+     audio measured 146.4 kbps against Meta's 128 kbps limit.
+
+M5   Audit and release - this report and its companions.
+
+M5.1 M5.2 M5.3 M5.4 M5.5
+     Post-release increments on the same branch. M5.1-M5.4 closed defects and
+     widened the evidence; M5.5 added product surface (section 5 below).
+
+================================================================================
+4. ACCEPTANCE STATUS
+================================================================================
+
+Feature coverage matrix - 129 rows, every one accounted for
+[RECORD: feature-coverage-matrix.md; mechanically recounted by
+scripts/verify_matrix_counts.py, which fails if the summary and the rows
+disagree - run 2026-11-24: "matrix summary is consistent (129 rows)"]
+
+    110  Implemented            (VERIFIED)
+      9  Partial                (PARTIAL - named in section 11)
+      1  Blocked                (BLOCKED - GOV-10, missing source)
+      9  Not Applicable         (NOT APPLICABLE)
+      0  Missing
+
+Gate items - 94 across M0-M4b: 91 done, 1 blocked on the owner, 2 unverified
+(external). M5's own 10 gate items are in FINAL_UPGRADE_REPORT.md section 4.
+[RECORD: FINAL_UPGRADE_REPORT.md section 1]
+
+    VERIFIED          91 gate items + 110 matrix rows
+    PARTIAL           9 matrix rows
+    FAILED            0
+    UNVERIFIED        2 gate items + 4 live paths
+    BLOCKED           1 matrix row (GOV-10)
+    NOT APPLICABLE    9 matrix rows
+
+The four UNVERIFIED live paths, and why they stay unverified
+[RECORD: FINAL_UPGRADE_REPORT.md section 3]:
+
+    - ElevenLabs speech-to-text / text-to-speech
+    - A hosted LLM provider
+    - YouTube publishing (Google OAuth)
+    - Instagram publishing (Meta Graph API)
+
+No authorised credential for any of them was supplied at any point in this
+upgrade. Every one of those paths is covered by automated tests against a
+double, and the double stands in for the same code path the real service would
+take - but "the code is right" and "it works against the live API" are
+different claims, and only the first one is supported.
+
+M5.5 changed no matrix row's status and opened none. Five rows - CAM-01,
+CAM-02, CAM-08, CAM-11, CAM-12 - gained STRONGER evidence (the webcam's own
+frame is measured rather than inferred; the face detector is tiled so it finds
+a small face in a 1080p frame; the 40/60 split is what auto mode actually
+produces; the gameplay crop is held clear of the webcam through the public
+entry point; the corner fallback is a measured rule).
+
+================================================================================
+5. THE M5.5 INCREMENT - SUBTITLES, FRAMING, MEOWPOWER
+================================================================================
+
+Run and documented 2026-11-23 and 2026-11-24. The first increment since M5 that
+added product surface.
+
+THE THREE ASKS AND WHAT WAS BUILT
+[RECORD: FINAL_UPGRADE_REPORT.md section 4.7]
+
+1. English subtitles by default, changeable at any time.
+   - Setting: export.subtitle_language, default "en", in Settings -> Export ->
+     Subtitles. 15 language options plus "source".
+   - The decision lives in ONE module: backend/autoclip/pipeline/language.py
+     (plan_subtitles, normalise_target, SubtitlePlan).
+   - The SPOKEN language is detected once, over the first 30 s, by
+     faster-whisper detect_language(), with a minimum confidence of 0.5.
+   - Transcript.source_language (spoken) is recorded SEPARATELY from
+     Transcript.language (the language the words are in). Both are persisted
+     and round-tripped.
+   - Target English + non-English source => transcribe with task="translate",
+     locally. No hosted spend.
+   - A non-English target takes the pinned-language transcription path. That
+     path is implemented, guarded and reachable; its quality on real audio is
+     NOT measured (K33 / R9).
+   - A saved transcript in the WRONG language is not reused.
+   - Local-vs-external is decided by engine name (engine.name == "whisper"). An
+     external engine under auto is re-transcribed locally so the captions are in
+     the language that was asked for; a PINNED external engine raises
+     SpeechError, because it cannot translate.
+   - 29 new tests in tests/test_subtitle_language.py (a new file) and 5 in
+     tests/test_api.py [MEASURED from the AST: 29 and 65 test functions in those
+     files; the deltas are the regression report's].
+
+2. A vertical split-screen that is actually right.
+   - The webcam's OWN FRAME is measured by finding the STEPS at its edges -
+     a contrast change either side of a line - with a confidence per edge, a
+     face-only fallback and a "runs off the frame" rule.
+     File: backend/autoclip/pipeline/reframe/reframe/webcambox.py.
+   - The box is carried per-time through track -> layout -> export, so the crop
+     follows the streamer as the webcam changes size. The reference video's
+     webcam really does change size: 134 distinct widths, 134 px to 540 px.
+   - Auto mode now prefers the 40/60 stacked split (the allow_partial path).
+     MIN_STRIP_FILL_FRACTION = 0.5; _fit_in_strip keeps the webcam inside its
+     own strip.
+   - The gameplay crop is held CLEAR of the webcam region (ReframeConfig.avoid,
+     _safe_x_range, _constrain_x, _safe_window, plus a final _keep_clear pass),
+     so the streamer is never shown twice.
+   - The webcam path is thinned to at most 48 keyframes
+     (MAX_WEBCAM_PATH_KEYFRAMES = 48, WEBCAM_PATH_EPSILON_PX = 1.0) so the
+     filter graph stays inside Windows' own 32,767-character command limit. A
+     600-box path produced a 50,019-character graph before the fix.
+   - The webcam's speech-emphasis zoom is evaluated PER FRAME
+     (scale ... :eval=frame plus a centred crop), because ffmpeg evaluates a
+     scale filter's size once, at init.
+   - 57 new tests across tests/test_faces.py (+10), tests/test_pipeline_cache.py
+     (+13), tests/test_webcam_box.py (+7), tests/test_layout.py (+12),
+     tests/test_reframe.py (+6), tests/test_webcam.py (+6) and
+     tests/test_export_render.py (+3) [RECORD: M5-REGRESSION-REPORT.md section 2].
+     M5.5 as a whole added five new test files and 97 test functions - the
+     collected count went from 1,441 to 1,538 [RECORD: same table].
+
+3. A simple "MeowPower" UX that hides processing complexity.
+   - The job page shows the name, ONE plain-language sentence, ONE percentage,
+     nothing else.
+   - The pipeline's six technical stages are one <details> away, under
+     "What MeowPower is doing" - collapsed, not deleted, because somebody
+     diagnosing a slow job still needs them.
+   - The stage-to-sentence mapping lives ONLY in
+     frontend/src/components/MeowPower.tsx. The duplicate percentage in the
+     masthead was removed.
+   - The server's first snapshot event now carries the job's source, and the
+     client MERGES the snapshot instead of substituting it - that was defect 29,
+     the title disappearing the moment the event stream opened.
+
+THE SOURCE USED FOR ACCEPTANCE
+    https://youtu.be/BgIISP2mi3o?si=jAM8h8iYFz9cgLRrV
+    "I Stole The RAREST FERRARI in GTA 6" - 38:00 (2,279.108 s), 1920x1080 AV1
+    at 59.94005994005994 fps, AAC audio, spoken in Hindi.
+    Third-party creator's content: TECHNICAL ACCEPTANCE ONLY. Nothing produced
+    from it was published anywhere, no account was connected, and no hosted
+    credential was spent. It is not a release artefact.
+
+THE RUN, MEASURED (every number read back from the run's own artefacts)
+[ARTEFACT: the scratch instance on port 8804 with its own home, so the owner's
+instance and its database were never touched; the model was the local Ollama
+llama3.1:8b at 127.0.0.1:11434, and the job row records provider=ollama]
+
+    prepare stage      audio.wav written at 20:42:20 - 72,931,542 B
+    transcription      whisper small, 1,836 s for 2,279.1 s of audio - 1.24x
+                       real time, faster than the video plays
+    scene detection    shots.json written at 01:13:01 - 466 shots
+    highlight windows  nine windows over 5,648 words; at most 8,402 rendered
+                       characters each (the local model's context budget);
+                       74,262 characters in all
+    webcam detection   webcam_report.json written at 02:35:40 - 1,011 s for
+                       the 194.5 s the six clips use
+    crop plans         six plans written between 02:37:33 and 02:44:49 - 436 s
+    export             six files between 02:57:35 and 03:05:06 - 451 s for
+                       194.5 s of footage, 2.32x real time. The job's own
+                       accounting agrees: ffmpeg_runs=6, ffmpeg_seconds=444.455
+    bytes              221,460,397 across the six files - exactly the
+                       export_bytes the job recorded
+    job                status=done, progress=1.0, provider=ollama
+
+THE SUBTITLE DECISION, MEASURED ON REAL AUDIO
+    transcript.language        en   (the language the words are in)
+    transcript.source_language hi   (the language spoken)
+    model                      whisper small, local, source=whisper
+    size                       5,648 words in 1,140 segments
+    words outside Latin script 0
+    first words                "Oh this car, wait what, this is a classic car,
+                               that famous car of YCT, wow, I want this car,
+                               this is such a rare car, I am seeing this..."
+    coverage                   first word at 0.000 s, last at 2,273.860 s -
+                               the whole 38 minutes
+    database row               language=en, word_count=5648, source=whisper
+
+THE MEOWPOWER SURFACE, READ FROM THE RUNNING APPLICATION
+    eyebrow            MEOWPOWER
+    sentence           one plain sentence for the stage - "Listening to what is
+                       being said" (transcribe) and "Picking out the moments
+                       worth keeping" (highlights). The live check saw the
+                       latter, at 40 %
+    number             40 %
+    line               "You can leave this page. It keeps working."
+    technical stages  collapsed behind "What MeowPower is doing",
+                       details.open === false
+    masthead           title, "37:59 - 1920x1080 - ollama", Cancel button - all
+                       still there
+    console            no errors
+
+THE SERVER WAS RESTARTED FIVE TIMES DURING THE JOB, AND EVERY RESTART WAS
+HANDLED [ARTEFACT: the application's own app_restarts table - five rows carry
+this job's id with jobs_resumed=1, at 22:31, 22:33, 00:15, 02:18 and 02:56 IST]
+
+    transcript     NOT transcribed again - transcript.json written once, at
+                   21:12:56, and still the same file when the last run finished
+    shots          NOT detected again - shots.json written once, at 01:13:01
+    webcam report  NOT detected again on the last run - the report still
+                   carries 02:35:40 while the layouts beside it carry 02:56:29
+    crop plans     NOT rebuilt - the six crop files still carry timestamps
+                   between 02:37:33 and 02:44:49
+    progress       back to 0.40 - exactly where it was, not a restart from zero
+
+This is the reuse rule doing its job in production, not in a test - and it is
+also the production evidence for defect 32 (crop-plan fingerprint) and defect
+35 (saved-report window tolerance).
+
+EVERY CLIP, INSPECTED AGAINST EVERY REQUIREMENT
+[ARTEFACT: inspect_clips.py read the run's own records and compared the RENDERED
+PIXELS against the SOURCE at three moments in each clip - the top 40 % against
+the source at the webcam's crop window for that moment, the bottom 60 %
+against the source at the gameplay's crop window. The script's own verdict at
+the end was "NO PROBLEMS FOUND".]
+
+    #  clip                       window in source            bytes      shape
+    1  we-killed-that-shark       530.31-562.88 (32.57 s)     30,365,300  1080x1920
+    2  400-taxi-or-5-toll         958.74-990.41 (31.67 s)     64,771,117  1080x1920
+    3  police-behind-me          1273.12-1303.96 (30.84 s)   28,793,347  1080x1920
+    4  biggest-building-of-yct    1139.25-1175.23 (35.98 s)  32,534,789  1080x1920
+    5  we-got-50000               562.90-594.65 (31.75 s)     31,900,979  1080x1920
+    6  road-rash                  1031.06-1062.75 (31.69 s)   33,094,865  1080x1920
+
+    #  top 40 % vs source   bottom 60 % vs source   gameplay clears webcam
+    1  6.6 - 31.6              3.4 - 6.8                yes - x = 452
+    2  8.3 - 39.0              4.7 - 24.8               yes - x = 452
+    3  4.1 - 4.2               3.5 - 3.6                yes - x = 452
+    4  36.4                    4.2                      yes - x = 452
+    5  4.4 - 22.2              1.4 - 5.3                yes - x = 452
+    6  4.4 - 37.5              5.3 - 16.8               yes - x = 452
+       (the differences are the mean absolute difference on a 0-255 scale;
+        a smaller number is a closer match)
+
+    webcam path moves (the LAYOUT's own path for each clip: its keyframes
+    summed over the clip's segments, and the distinct centres among them,
+    counted to the whole pixel)
+    1  141 / 33      2  48 / 22      3  30 / 10
+    4   94 / 23      5  96 / 42      6  46 / 17
+       [ARTEFACT: read back from the six layouts/*.json; every one of these
+        twelve numbers reproduces exactly, and the same table is in
+        FINAL_UPGRADE_REPORT.md section 4.7. The keyframe budget of 48 applies
+        to each path; a clip's total is larger because the path is repeated per
+        segment - clips 1, 3, 4 and 5 have more than one stacked segment.]
+
+    captions     490 cues and 43,272 characters across the six clips; 0
+                 characters outside the Latin script in any of them
+
+    THE 40/60 SPLIT  every clip is 1080x1920; the webcam's slot in the layout
+    is (0, 0, 1080, 768) - exactly 40 % of the height - and the gameplay's slot
+    is (0, 768, 1080, 1152), exactly 60 %. The gameplay crop is 1012x1080, the
+    15:16 shape the bottom slot requires, and its left edge sits at x = 452,
+    which is exactly where it must be: the webcam's region starts at x = 1464,
+    and 1464 - 1012 = 452. The streamer is never shown twice.
+
+    WHERE THE SPLIT-SCREEN IS NOT SHOWN  between 1.50 s and 6.62 s per clip the
+    layout is gameplay_only, and the reason recorded in the layout is "no face
+    was seen inside the region". Across the six clips the split-screen covers
+    81.6 % to 100 % of each one.
+
+    THE DETECTOR'S REPORT, ON DISK  version 2, failed=false, confidence 0.8131,
+    3,434 observations, 2,502 measured boxes, 134 distinct widths (134 px to
+    540 px). The report's own shot count inside the six windows is 52; the 466
+    shots are the scene-detection file's, across the whole source.
+
+WHAT M5.5 DID NOT CHANGE
+    No matrix row was closed and none was opened. The count is unchanged at
+    110 Implemented / 9 Partial / 1 Blocked / 9 Not Applicable / 0 Missing.
+    The M5 verdict is unchanged and v0.1.0 is still gated on K1.
+
+================================================================================
+6. CI - THE RUN HISTORY AND THE OUTAGE
+================================================================================
+
+43 workflow runs on this branch - the numbers are the repository's own, so the
+newest is run 46 and runs 1, 2 and 3 are on main. The regression report's table
+records 42 of them (runs 4 to 45); run 46 is the one it leaves out, for the
+reason the table itself gives [RECORD: M5-REGRESSION-REPORT.md, "Why this table
+stops here"]. Five were cancelled by a newer push (runs 6, 14, 18, 21, 32) - a
+cancellation, not a failure. THREE failed, and all three were real defects,
+diagnosed and fixed rather than explained away:
+
+    run 19  a test wrote to the owner's real OS keyring. On Linux there is no
+            keyring backend, so the token was never stored and the assertion
+            could not hold - the test passed on Windows and macOS BECAUSE those
+            machines had a real keyring to write to.
+            Fixed by 94c6d9c, an autouse isolated_keyring fixture, so no test
+            in the suite can reach the owner's credential store.
+
+    run 20  the Ubuntu leg failed at "Verify ffmpeg can burn subtitles". The
+            check piped the ffmpeg filter list into grep -q; grep -q exits at
+            the match, the producer gets SIGPIPE, and GitHub's set -o pipefail
+            turns that into a failed step. The job log shows "printf: Broken
+            pipe" and then the ass filter listed on the very next line.
+            Corrected, not removed: the check now matches with bash's own
+            pattern matching and never pipes, and a build genuinely without the
+            filter still fails it.
+
+    run 44  the Windows leg failed at the same step, saying the build had no
+            ass filter. THERE WAS NO BUILD. Chocolatey's METADATA endpoint
+            (/api/v2/Packages(Id='ffmpeg-full',Version='9.1.0')) was
+            unreachable - 504 on one attempt, 503 on the next - so
+            "choco install ffmpeg-full" installed NOTHING and still EXITED 0,
+            and the install step reported success. The next step then looked
+            for the filter in a program that was never installed, and named the
+            wrong cause. The job failed before any test ran. The job was
+            re-run nine times - ten attempts in all - and every one failed for
+            the same reason.
+            Diagnosis: the same endpoint was measured timing out FROM THIS
+            MACHINE in the same minutes (three requests, three 60-second
+            timeouts), while the PACKAGE URL on the same host
+            (/api/v2/package/ffmpeg-full/9.1.0) answered 200 throughout. So
+            the outage was not the runner's, and it was not the whole of
+            Chocolatey's service - the metadata endpoint is one path, the
+            package is another path on the same host.
+
+THE FIX  (commit 2e0568d)
+    .github/workflows/ci.yml's Windows install step now runs
+    scripts/install_ffmpeg_windows.py. Chocolatey is still tried FIRST,
+    exactly as before - the ordinary case is unchanged. Only if that produced
+    no ffmpeg does the script fall back to Chocolatey's own package URL. The
+    package carries the build inside itself, so the fallback needs no metadata
+    endpoint, no second host and no new dependency: the same package, the same
+    version, the same binaries. If neither path works, the step FAILS and says
+    which one failed and why, instead of leaving the next step to guess.
+    Proved locally through the script's own functions: the package downloaded
+    (75,480,795 bytes), unpacked, and the ffmpeg it produced is
+    9.1-full_build-www.gyan.dev WITH the ass filter.
+    Guarded by 6 tests in tests/test_ci_ffmpeg_install.py, which fail on the
+    pre-fix workflow.
+
+THE RUNS THAT MATTER NOW
+    run 43  e1cd12d  the whole M5.5 code tree - all three M5.5 code commits
+            together - GREEN ON ALL SIX JOBS. One push of three commits
+            produced one run: GitHub ran the tip of the push and the
+            concurrency group never started the two before it.
+    run 45  2e0568d  the CI fix - GREEN ON ALL SIX JOBS. The outage had ended
+            by then, so the Windows leg took the PRIMARY path, and its log
+            reads "ffmpeg from chocolatey: C:\ProgramData\Chocolatey\bin\
+            ffmpeg.EXE" followed by "ass filter present". The fallback itself
+            is proved by the local download-and-unpack, not by that run.
+    run 46  90760e1  the documentation commit - GREEN ON ALL SIX JOBS. Its
+            Windows leg again took the primary path and printed the same line.
+
+THE SIX JOBS ARE: Backend (ubuntu-latest, py3.12), Backend (ubuntu-latest,
+py3.11), Backend (macos-latest, py3.12), Backend (windows-latest, py3.12),
+Frontend, and Docker image (build + health smoke test).
+
+================================================================================
+7. THE GATES, ON THIS TREE (90760e1)
+================================================================================
+
+    ruff check .                          All checks passed!
+    ruff format --check .                241 files already formatted
+    pytest -m "not slow and not golden and not e2e" -q
+                                         1,489 passed, 73 deselected, 243.51 s
+    pytest -m "slow and not golden and not e2e" -q
+                                         49 passed, 1,513 deselected, 253.67 s
+    pytest tests -q --ignore=tests/test_pipeline_e2e.py
+                                         1,538 passed, 0 failed, 0 skipped,
+                                         0 xfailed, 494.14 s
+    pytest tests --collect-only -q       1,562 tests collected (1,538 + the 24
+                                         real-media e2e tests)
+    mypy backend/autoclip                 10 errors in 8 files - the M1
+                                         baseline, unchanged, and checked
+                                         against a clean worktree at HEAD
+                                         (CI tolerates mypy with
+                                         continue-on-error)
+    scripts/verify_matrix_counts.py      matrix summary is consistent (129 rows)
+    npm run build                         60 modules transformed, built in 3.16 s
+    docker build + health smoke           NOT RUNNABLE LOCALLY - Docker is not
+                                         installed on this machine. Verified
+                                         by the CI docker job on every push.
+
+Tree counts [RECORD: M5-REGRESSION-REPORT.md]:
+    64 test files (35 at M0), 1,463 test functions (658 at M0), 1,538 collected
+    excluding e2e (672 at M0), 0 xfail markers (26 at M0).
+
+THE LINUX LEG, ON THE SAME COUNTS
+[ARTEFACT: CI run 45's Ubuntu py3.12 job log]
+    unit selection      1,489 passed, 73 deselected, 45.56 s
+    render selection    49 passed, 1,513 deselected, 216.41 s
+The same counts as the Windows leg, and a Linux wall clock of about a fifth of
+the Windows one. What is NOT established is a fresh local measurement of the
+M5.5 filter graph against an ffmpeg OLDER than 9 - that gap is K27.
+
+THE DOCS' OWN CHECKS (scratch helpers, run 2026-11-24)
+    check_docs.py          "documentation is consistent" - 19 files, 340
+                           tables, 652 paths, 86 identifiers
+    check_run_table.py     "the run table matches GitHub's own record" - 42
+                           table rows, 43 runs on the branch; the only run not
+                           in the table is run 46, which was 90760e1's own run
+                           (the table's "Why this table stops here" note covers
+                           it: recording a run's own run would need another
+                           commit, which would need another)
+
+================================================================================
+8. DEFECTS FOUND BY RUNNING THE APPLICATION
+================================================================================
+
+36 PRODUCT defects, all found by running the application or its gates - not by
+reading the code - and every one is now guarded by a test that was observed
+failing against the pre-fix code. Plus 2 defects in the CI workflow itself.
+
+    M5     3   defects 1-3
+    M5.1   1   defect 4
+    M5.2   4   defects 5-8
+    M5.3   5   defects 9-13
+    M5.4   9   defects 14-22
+    M5.5  14   defects 23-36
+    ----------------------
+    total 36   product defects, running count twenty-two -> thirty-six
+
+Plus 2 in the CI itself: the broken-pipe caption check (run 20) and the
+missing-ffmpeg install (run 44).
+
+THE M5.5 FOURTEEN, one line each [RECORD: M5-APPLICATION-TESTING.md section
+M5.5 and the defect table there]
+
+    23  the face detector could not see the streamer at all - MediaPipe scales
+        its input to about 128 px on the short side, so a 120 px face in a
+        1920 px frame was smaller than one pixel of what it looked at. Over
+        2,100 s of the reference video it found 0 faces. Fixed by tiling the
+        frame (640 px tiles, 15 % overlap): 56 observations after.
+    24  the tiles were read with the wrong strides - a tile cut out of a frame
+        is a non-contiguous view, and MediaPipe read it as if it were
+        contiguous, so every tiled frame came back with zero faces. Fixed by
+        copying each tile with np.ascontiguousarray.
+    25  the edge search looked in the wrong place - the horizontal edges were
+        searched in a narrow band around the face rather than over the columns
+        the box occupies, so a bright game-menu panel won the vote. On the
+        same 30 s the detector now finds all four edges:
+        x=1274, w=638, y=9, h=426.
+    26  the first frame of a clip was read from before the clip began (a
+        negative clip-relative timestamp). Fixed by clamping at zero.
+    27  the webcam spilled out of its own 40 % strip. Fixed by _fit_in_strip,
+        which fits it inside the strip on both axes at once.
+    28  the gameplay crop did not keep clear of the webcam, so the streamer
+        was shown twice. Fixed by ReframeConfig.avoid plus a final _keep_clear
+        pass over the finished plan.
+    29  the progress page lost the video's title the moment the event stream
+        opened - the server's snapshot carried the job but not its source, and
+        the client replaced what it had fetched with what the stream sent.
+        Fixed: the snapshot carries the source and the client MERGES.
+    30  the webcam's path grew an ffmpeg expression past Windows' own
+        32,767-character limit - 600 boxes became a 50,019-character filter
+        graph. Fixed by thinning the path to at most 48 keyframes.
+    31  the detector was asked for the stretches in the WRONG ORDER - the
+        clips come in rank order and rank is not position, so it asked the
+        decoder to seek backwards; the decoder refused with "Input timestamp
+        must be monotonically increasing", the webcam was never found, and
+        every clip was rendered as plain gameplay. Fixed by walking the source
+        in source order; on the same source the detector now finds the webcam
+        at 98 % confidence.
+    32  a saved crop plan was reused after the layout had changed - it was
+        cached under the clip's name alone, with nothing saying what it was
+        made for. Fixed by a fingerprint of the settings it was built for.
+    33  a detection that could not RUN was kept as a final answer - the report
+        recorded why the webcam was not found, and a report with a reason was
+        reused as-is. Fixed: a report says whether the detection failed or
+        simply found nothing, and only a real answer is reused.
+    34  a re-export would have stretched a plan made for another shape - found
+        while fixing 32 by reading the path rather than by running it. Fixed:
+        a saved plan is reused only when its own shape is the shape being
+        exported.
+    35  the saved webcam report was never reused, because the windows never
+        matched exactly - the report rounds them to 3 dp while a clip's end
+        time is 1303.9599999999998, so every retry paid for the detection
+        again (seventeen minutes on this source). Fixed: the comparison is
+        tolerant to 0.01 s.
+    36  the speech-emphasis zoom broke the render - ffmpeg evaluates a scale
+        filter's w and h ONCE, at init, so a per-frame expression in them is
+        refused ("Expressions with frame variables 'n', 't', 'pos' are not
+        valid in init eval_mode"), and every clip with a moving webcam failed
+        to render. Fixed by evaluating the scale per frame (eval=frame) with a
+        centred crop evaluated the same way.
+
+The two that would have shipped without this increment are 31 (the ordering -
+every clip would have come out as plain gameplay) and 36 (the per-frame zoom -
+every moving-webcam clip would have failed to render).
+
+ONE FINDING THAT IS NOT A DEFECT, because nothing the product promises was
+broken: the same source, run twice, gave two different transcripts from
+byte-identical media. faster-whisper's confidence check fails on hard passages
+and every fallback pass above zero samples from an unseeded generator
+(1.2.1 has no seed argument). It is measured in AT-G-17, the fix was verified
+against the real audio (seeding CTranslate2's generator made two decodes
+identical), and it is recorded as K32 / R8 rather than presented as a pass.
+It is NOT applied, because it changes the transcript the acceptance evidence
+was gathered on, and the evidence would then no longer describe the shipped
+code; it needs its own acceptance run.
+
+================================================================================
+9. KNOWN LIMITATIONS
+================================================================================
+
+PRODUCT (K)
+    K1   the reframe golden set is unverified - no fixed three-video set has
+         been checked for jitter, cut-off faces, or the speaker being on screen
+         >=95 % of speaking time. THIS IS THE GATE FOR v0.1.0.
+    K2   the original requirements and 7 visual references are missing; the
+         visual design could not be checked against them.
+    K3   the first face-detection model download still happens at first use,
+         with no pre-flight check at job start. An offline machine fails inside
+         the pipeline; the error names the file and its path.
+    K4   AutoClip does not take its own database backup before migrating. The
+         migrations are additive and transactional, so they do not destroy
+         data - but a copy of autoclip.db before upgrading is still worth
+         taking.
+    K5   the Instagram confirmation is API-only - there is no confirmation
+         screen, the same as YouTube's.
+    K6   the professional-account requirement cannot be checked locally; the
+         Graph API does not report it with the publishing permissions alone, so
+         AutoClip says "unverified" rather than guessing. Meta refuses the
+         publish if it is not met.
+    K7   Meta's own publishing-limit documentation contradicts itself - 100 in
+         one place, 50 in two others. AutoClip reads the number in force and
+         hardcodes neither.
+    K8   there is no emergency-stop route; a job can be cancelled or retried,
+         not paused and resumed.
+    K9   the "verified" music licence state cannot be reached through the API.
+         By design.
+    K10  a re-export from the Review page does not rebuild the webcam
+         composition. The framing is right - resolution, crop and duration all
+         match the requested ratio - but a stacked webcam/gameplay composition
+         from the layout planner is not reconstructed. This is why the M5.5
+         acceptance clips were produced by REQUEUEING the job, not by
+         re-exporting it.
+    K22  the complete FOUR-HOUR pipeline was not run. The ingest of the
+         complete file was exercised twice at two formats, and the pipeline was
+         exercised on real segments cut from that same file. Transcription
+         measured at 432 s per 180 s on this four-core machine, so the full
+         recording would have needed roughly 9.6 hours of transcription and
+         roughly 25 hours for the whole pipeline. A complete ten-minute source
+         HAS been run through every stage end to end (at M5.3).
+    K23  the pipeline was exercised with local models only - a local Ollama
+         model and local whisper. The hosted-LLM paths remain unverified.
+    K24  the caption lifetime is one constant for every style and every
+         language (captions.MAX_CAPTION_S = 2.5).
+    K25  the caption bound hides the symptom rather than correcting the
+         alignment - a word genuinely spoken across a long pause now leaves the
+         screen early, so the words after it appear with a gap in the subtitle.
+    K26  the ffmpeg command line is still built inline. ffmpeg 9.0.2 removed
+         -filter_complex_script, and neither -filter_complex @file nor
+         -filter_complex /file reads a file - so there is no way to move a long
+         graph off the command line. The M5.3 fix keeps the graph at 0.33x of
+         the limit for the shape that failed, and an over-long command is
+         refused before ffmpeg runs rather than failing obscurely.
+    K27  the ffmpeg-version coverage is two builds wide - 7.0.2 and 9.0.2. An
+         ffmpeg older than 7, or a build with a different filter set, is not
+         covered by evidence. What IS established is that the graph no longer
+         depends on a newer ffmpeg's leniency, and that the structural check -
+         not the ffmpeg - is what catches this class of defect now.
+    K28  the provider's context window is a setting, not a measurement. The
+         M5.4 default of 8,192 tokens was chosen because it is the largest that
+         leaves room for the model itself on this 8.4 GB machine (the extra KV
+         cache measured about 680 MB; 16,384 would have added roughly 2.7 GB).
+         On a smaller machine the default is too large and must be lowered.
+    K29  a local model can be slow enough to look broken - one detection call
+         over an eight-minute window measured 1,993 s on this box, about 33
+         minutes for one request, and the highlight stage makes two of them.
+         The 3,600 s default timeout is generous enough for that, but a longer
+         source on a slower CPU is not bounded by anything the product
+         controls, and there is no progress message inside a single window. The
+         four M5.4 detection windows fit a straight line - time ~= 165 s +
+         0.089 s per prompt character - to within 2.1 %, so the difference
+         BETWEEN the two M5.4 runs is explained by their prompts. The gap
+         against M5.3 is not explained, and it is not machine load.
+    K30  the crop-safety tolerance is a fixed 90 % keep-ratio, not a per-shot
+         judgement - one constant for every shot, face size and camera. The
+         worst case measured on the real source is 19 px of a 549 px face
+         (3.5 %).
+    K31  "the same clip" is a fixed 50 %-overlap threshold - one constant, used
+         by both the pipeline and the diagnostic so they cannot disagree. A
+         genuine highlight inside a longer clip's range will be removed with
+         it; the higher score survives.
+    K32  the transcript is not reproducible from run to run (the unseeded
+         recogniser fallback, described at the end of section 8).
+    K33  only the English subtitle path was measured on real audio. The
+         default target (en) was run against a Hindi source and the captions
+         were inspected - 5,648 words, 0 outside the Latin script. A target
+         that is neither English nor the spoken language takes the
+         pinned-transcription path (Whisper SPEAKING in a target language
+         rather than translating into it). That path is implemented, guarded
+         and reachable, and what it is worth for a given pair was NOT
+         measured.
+    K34  the webcam-box detector's thresholds are ONE VIDEO'S constants -
+         MIN_EDGE_CONTRAST = 16, MIN_VERTICAL_COVERAGE = 0.55,
+         MIN_HORIZONTAL_COVERAGE = 0.85, COVERAGE_RATIO = 0.25,
+         SEARCH_FACTOR = 0.9. A different game's art direction may need
+         different numbers.
+    K35  the MeowPower wording is a judgement, and nobody outside this
+         increment has read it. The STRUCTURE - one sentence, one number, the
+         technical detail one disclosure away - is what the tests and the
+         screenshots hold up; the phrasing is not evidence of anything except
+         that it reads plainly to the person who wrote it.
+
+ENGINEERING (K)
+    K11  mypy is at 10 errors in 8 files, down from the 14-error baseline and
+         unchanged since M1. The errors are in modules the upgrade did not
+         touch. CI tolerates mypy with continue-on-error.
+    K12  the cold import is ~40 % slower than at M0 (93 -> 132 modules, ~1.5 s
+         -> ~2.4 s) - a one-off server-start cost.
+    K13  the cold-start model download (Whisper weights from Hugging Face) is a
+         third-party library fetch that AutoClip records but does not gate.
+    K14  no dependency vulnerability scan, no fuzzing, no SAST scanner was run.
+    K15  no load test and no peak-memory sampling during a render.
+    K36  the Windows CI leg still gets its ffmpeg from ONE EXTERNAL HOST. The
+         metadata endpoint that failed on run 44 is no longer the only path -
+         the install now falls back to Chocolatey's own package URL on the
+         same host, and a failure names itself instead of blaming the filter -
+         but if that host is unreachable altogether, the leg cannot run. The
+         build itself is unchanged: the package carries the same 9.1 full build
+         Chocolatey would have installed, with libass.
+
+OWNER-CONTROLLED - not defects, and AutoClip will not do them on the owner's
+behalf
+    K16  live credentials for ElevenLabs, a hosted LLM, Google and Meta.
+    K17  Google OAuth compliance - an un-audited API project can only upload
+         private videos.
+    K18  Meta App Review, Advanced Access and Business Verification.
+    K19  the madeForKids declaration on every channel, and the licensing
+         claims on every music track.
+    K20  public publishing - every upload is an explicit owner action, and the
+         audience and privacy are recorded rather than guessed.
+    K21  paid subscriptions and budgets, including the LLM providers and the
+         ElevenLabs tier.
+
+================================================================================
+10. RESIDUALS (the ledger's per-milestone list; numbers restart each milestone)
+================================================================================
+
+M5     R1 the complete four-hour pipeline was not run. R2 the pipeline was
+           exercised with local models only. R3 yt-dlp's own secondary requests
+           (manifest, CDN, page assets) are made by yt-dlp, not by AutoClip, so
+           AutoClip cannot re-classify each hop - GOV-17, still Partial, needs
+           a Lane B controlled test.
+M5.3   R1 the complete four-hour pipeline is still unrun (K22). R2 the caption
+           lifetime is one constant and bounding it hides the symptom (K24,
+           K25). R3 the ffmpeg command line is still built inline (K26). R4 the
+           ffmpeg-version coverage is two builds wide (K27).
+M5.4   R5 the provider's context window is a setting, not a measurement (K28).
+       R6 a local model can be slow enough to look broken (K29).
+       R7 two of the new measurements are fixed constants and both are
+           judgements (K30, K31).
+       R8 the transcript is not reproducible from run to run (K32).
+M5.5   R9 only the English subtitle path was measured on real audio (K33).
+       R10 the webcam-box thresholds are one video's constants (K34).
+       R11 the MeowPower wording is a judgement, verified by DOM and not by a
+           user study (K35).
+       R12 the Windows CI leg still gets its ffmpeg from one external host
+           (K36).
+
+================================================================================
+11. THE NINE PARTIAL ROWS, AND THE ONE BLOCKED ROW
+================================================================================
+
+PARTIAL
+    MUS-16  Manual music override - the manual choice always beats an AI
+            choice and no model is consulted, but the original single global
+            setting is not the only way to set it.
+    MUS-17  Five licence states - all five exist and unknown is the default,
+            but "verified" is deliberately not settable from the API (400,
+            nothing written).
+    MUS-26  Duck only the added music - the speech chain is untouched and only
+            the bed is shaped; measured at M5 (speech windows differ by 0.00079
+            RMS, the encoder not the ducking) and again at M5.1 (the source's
+            own music comes out within 0.25 of the flat render's while the
+            added bed drops by at least 6 dB). The BIT-IDENTICAL render is not
+            asserted - it is not possible once the bed is mixed in, so the
+            guarantee is structural plus measured, not bitwise.
+    CR-01   Scene detection - shots are detected once per source and cached,
+            but the detector's own per-cut confidence is discarded.
+    CR-02   Visual action / intensity - a documented, reproducible measure (the
+            cut rate normalised by ACTION_CUTS_PER_MINUTE = 8.0), but a proxy
+            for visual action, not a model of what is on screen.
+    CR-04   Multi-signal highlight detection - loudness is not a signal at all;
+            visual action and reaction are inferred by the model from the
+            transcript, not measured.
+    CR-06   Sentence/silence/scene-aware context - the edges snap to the
+            nearest sentence boundary and pull back into the silence before
+            the first word, but the SCENE boundary is not part of the clip-edge
+            rule.
+    GOV-11  The original requirements matrix - the matrix exists and every row
+            records its status, but the rows that depend on the missing
+            original requirements are blocked.
+    GOV-17  yt-dlp network restriction - the URL is classified before the
+            fetch, a private destination is refused, proxies are disabled, and
+            FFmpeg runs with -protocol_whitelist file,pipe; but yt-dlp's own
+            secondary requests cannot be re-classified hop by hop. A Lane B
+            controlled test is still required.
+
+BLOCKED
+    GOV-10  The original requirements and the 7 visual references - they are
+            NOT on this machine. A full search was recorded in
+            docs/original/MANIFEST.md: 0 of 8 found. They were not
+            reconstructed.
+
+================================================================================
+12. HOW TO REPRODUCE EVERYTHING
+================================================================================
+
+GATES (about ten minutes)
+    ruff check . && ruff format --check .
+    pytest -m "not slow and not golden and not e2e"
+    pytest -m "slow and not golden and not e2e"
+    pytest tests -q --ignore=tests/test_pipeline_e2e.py
+
+THE REAL-MEDIA SUITE (24 e2e tests against real media)
+    python scripts/make_e2e_media.py --run
+
+THE MATRIX AND THE DOCS
+    python scripts/verify_matrix_counts.py        # fails if the summary and
+                                                  # the rows disagree
+    (scratch helpers, not repo scripts: check_docs.py <docs_dir> <repo_root>
+     and check_run_table.py <path-to-docs/M5-REGRESSION-REPORT.md>)
+
+RUNNING THE APP
+    uv venv --python 3.11 && uv pip install -e ".[dev]"
+    cd frontend && npm install && npm run build && cd ..
+    autoclip doctor            # checks python, ffmpeg+libass, the UI build
+    autoclip serve             # http://localhost:8000
+    (on Windows: start-autoclip.bat does the whole sequence)
+
+THE EXTERNAL-SERVICE RULE
+    Every external transfer passes through security/egress.py and
+    security/urlpolicy.py. Keys go into the OS keyring, never a config file.
+    autoclip config set-secret <provider> prompts for the value, so it stays
+    out of the shell history and out of the process list.
+
+================================================================================
+13. THE EVIDENCE INDEX
+================================================================================
+
+    The governing specification          docs/UPGRADE-SPEC.md
+    The final report                     docs/FINAL_UPGRADE_REPORT.md
+    The real-application evidence        docs/M5-APPLICATION-TESTING.md
+                                           (Journeys A-D, plus M5.2/M5.3/
+                                           M5.4/M5.5 sections, AT-H-01..13,
+                                           and the 36-row defect table)
+    The regression report                docs/M5-REGRESSION-REPORT.md
+                                           (gates, run table, the five-restart
+                                           table, the new-test table)
+    The performance report               docs/M5-PERFORMANCE-REPORT.md
+    The milestone ledger                 docs/UPGRADE-LEDGER.md
+                                           (gate items, decisions, residuals,
+                                           dated change log)
+    The feature coverage matrix          docs/feature-coverage-matrix.md
+    The audit - 20 sections              docs/upgrade-audit.md
+    The egress inventory - 14 paths      docs/EGRESS-INVENTORY.md
+    The M0 security audit                docs/SECURITY-AUDIT.md
+    The M5 security review               docs/M5-SECURITY-REVIEW.md
+    The Instagram API evaluation         docs/INSTAGRAM-API-EVALUATION.md
+    The installation and upgrade guide   docs/M5-INSTALLATION.md
+    The architecture notes               docs/ARCHITECTURE.md
+    The external constraints register    docs/EXTERNAL-CONSTRAINTS.md
+    The original requirements matrix     docs/ORIGINAL_REQUIREMENTS_MATRIX.md
+                                           - INCOMPLETE, blocked on the
+                                           missing source material
+    The missing-source search record     docs/original/MANIFEST.md
+    The baseline CI evidence             docs/baseline-ci-evidence.md
+    The performance baseline (M0)        docs/performance-baseline.md,
+                                           docs/BENCHMARK-BASELINE.json
+    The M5 performance measurement       docs/BENCHMARK-M5.json
+    The M5.1 ducking matrix              tests/test_ducking_matrix.py
+    The M5.5 guards                      tests/test_subtitle_language.py (29),
+                                           tests/test_faces.py (10),
+                                           tests/test_pipeline_cache.py (13),
+                                           tests/test_webcam_box.py (7),
+                                           tests/test_ci_ffmpeg_install.py (6)
+    The CI install script                scripts/install_ffmpeg_windows.py
+
+    On this machine (scratch, NOT in the repository):
+      the M5.5 evidence screenshots and the clip-inspection output
+        C:\Users\mdnik\AppData\Local\Temp\opencode\m55-evidence\
+      the acceptance run's data home - the reference source.mp4
+      (910,183,134 B) + source.info.json, job ce370cb1b68841df, the six
+      exports (221,460,397 B) and the scratch database
+        C:\Users\mdnik\AppData\Local\Temp\opencode\autoclip-yt-v4\
+
+================================================================================
+14. THE STATE OF THIS MACHINE, RIGHT NOW
+================================================================================
+
+    The owner's own AutoClip instance   http://127.0.0.1:8000, PID 11520 -
+                                        RUNNING AND UNTOUCHED. Its database
+                                        was never touched by any of this work.
+    Ollama                             127.0.0.1:11434, PID 10176, serving
+                                        llama3.1:8b - the same local model the
+                                        M5.3, M5.4 and M5.5 acceptance runs
+                                        used.
+    The scratch instance on port 8804   STOPPED. It ran with its own home
+                                        (AUTOCLIP_HOME=...\autoclip-yt-v4) so
+                                        it could never reach the owner's data.
+    Scratch helpers                    removed after use (52 items: the
+                                        helper scripts, the CI job logs, the
+                                        72 MB nupkg and its extracted builds).
+    The repository                      no media, no databases, no secrets and
+                                        no archives are committed. The only
+                                        change this increment makes to the tree
+                                        is this file.
+
+================================================================================
+15. WHAT TO DO NEXT
+================================================================================
+
+1. Read docs/M5-APPLICATION-TESTING.md. It is the evidence that the application
+   works, and it is the record of the 36 defects the application testing and the
+   gates found.
+2. Read docs/M5-SECURITY-REVIEW.md. It says what was NOT checked as plainly as
+   what was.
+3. Read the ledger's M0-M5.5 sections in docs/UPGRADE-LEDGER.md. Every
+   milestone records its decisions and its residuals, and the residuals are the
+   honest edges of this release.
+4. Run the gates (section 12). About ten minutes.
+5. Run the gates on an OLDER ffmpeg too, if you can. Two of the 36 defects
+   render on ffmpeg 9 and fail on ffmpeg 7. The suite's structural graph check
+   now catches them on any version, but the habit of reproducing the Linux leg
+   locally is what found them.
+6. Run the real-media suite: python scripts/make_e2e_media.py --run.
+7. If you have credentials, close the four UNVERIFIED live paths. They are the
+   only thing standing between this build and a fully verified release.
+8. If you can supply the reframe golden set, close K1. It is the gate for
+   v0.1.0, and nothing else on this list stands in its way.
+9. This file is committed on its own, and it changes no code, no test and no
+   evidence document - it is a summary of the record that is already committed.
+   Its own CI run is the branch's next run, and by the rule the regression
+   report states, a run is not recorded inside the commit that causes it:
+   recording it needs another commit, and that commit needs another run. The
+   branch's history on GitHub is the record of that run.
+
+================================================================================
+END
+================================================================================
