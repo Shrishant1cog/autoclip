@@ -5,9 +5,11 @@ AUTOCLIP - PROJECT STATUS AND UPDATES
 Written:      2026-11-24 (IST, UTC+5:30)
 Tree:         C:\Users\mdnik\AppData\Local\Temp\opencode\wt-upgrade-u0-u10
 Branch:       feature/upgrade-u0-u10
-Tip commit:   90760e183570aaae890e471ad377d2c358789a8b
+Branch tip:  90760e183570aaae890e471ad377d2c358789a8b
               "docs: M5.5 - the CI's own ffmpeg install, and the outage it hid"
               committed 2026-11-24 11:34:15 +0530
+              This file is committed on top of that commit, in its own commit.
+              No code, test or evidence document has changed since.
 Remote:       origin/feature/upgrade-u0-u10 == local HEAD (no unpushed commits)
 Working tree: clean at 90760e1; this file is the only addition to the tree
 Repository:   https://github.com/Shrishant1cog/autoclip
@@ -521,7 +523,8 @@ py3.11), Backend (macos-latest, py3.12), Backend (windows-latest, py3.12),
 Frontend, and Docker image (build + health smoke test).
 
 ================================================================================
-7. THE GATES, ON THIS TREE (90760e1)
+7. THE GATES, ON THIS TREE (90760e1 - the code tree; the only change since is
+   this file)
 ================================================================================
 
     ruff check .                          All checks passed!
@@ -966,9 +969,14 @@ THE EXTERNAL-SERVICE RULE
     The scratch instance on port 8804   STOPPED. It ran with its own home
                                         (AUTOCLIP_HOME=...\autoclip-yt-v4) so
                                         it could never reach the owner's data.
-    Scratch helpers                    removed after use (52 items: the
-                                        helper scripts, the CI job logs, the
-                                        72 MB nupkg and its extracted builds).
+    Scratch cleanup                    52 items were removed from this folder
+                                        after the M5.5 verification: the
+                                        run-table and docs helpers, the CI job
+                                        logs, the 72 MB nupkg and its extracted
+                                        builds. Older scratch helpers from the
+                                        earlier milestones are still on disk in
+                                        the same folder - none of them is in the
+                                        repository.
     The repository                      no media, no databases, no secrets and
                                         no archives are committed. The only
                                         change this increment makes to the tree
