@@ -901,8 +901,10 @@ THE MATRIX AND THE DOCS
 RUNNING THE APP
     uv venv --python 3.11 && uv pip install -e ".[dev]"
     cd frontend && npm install && npm run build && cd ..
-    autoclip doctor            # checks python, ffmpeg+libass, the UI build
-    autoclip serve             # http://localhost:8000
+    autoclip doctor            # checks python, ffmpeg + ffprobe, libass, the
+                               # required filters, the GPU, and what is missing
+    autoclip serve             # http://localhost:8000; warns when the UI has
+                               # not been built
     (on Windows: start-autoclip.bat does the whole sequence)
 
 THE EXTERNAL-SERVICE RULE
@@ -936,6 +938,7 @@ THE EXTERNAL-SERVICE RULE
     The Instagram API evaluation         docs/INSTAGRAM-API-EVALUATION.md
     The installation and upgrade guide   docs/M5-INSTALLATION.md
     The architecture notes               docs/ARCHITECTURE.md
+    The contributing guide               docs/CONTRIBUTING.md
     The external constraints register    docs/EXTERNAL-CONSTRAINTS.md
     The original requirements matrix     docs/ORIGINAL_REQUIREMENTS_MATRIX.md
                                            - INCOMPLETE, blocked on the
