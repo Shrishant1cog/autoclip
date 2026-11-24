@@ -448,13 +448,18 @@ WHAT M5.5 DID NOT CHANGE
 6. CI - THE RUN HISTORY AND THE OUTAGE
 ================================================================================
 
-43 workflow runs on this branch - the numbers are the repository's own, so the
-newest is run 46 and runs 1, 2 and 3 are on main. The regression report's table
-records 42 of them (runs 4 to 45); run 46 is the one it leaves out, for the
-reason the table itself gives [RECORD: M5-REGRESSION-REPORT.md, "Why this table
-stops here"]. Five were cancelled by a newer push (runs 6, 14, 18, 21, 32) - a
-cancellation, not a failure. THREE failed, and all three were real defects,
-diagnosed and fixed rather than explained away:
+The branch's workflow history as the committed record has it: 43 runs at the
+time of writing - the numbers are the repository's own, so runs 1, 2 and 3 are
+on main and the branch's first run is 4. The regression report's table records
+42 of them (runs 4 to 45); run 46 is the one it leaves out, for the reason the
+table itself gives [RECORD: M5-REGRESSION-REPORT.md, "Why this table stops
+here"]. Five of the runs in that record were cancelled by a newer push (runs
+6, 14, 18, 21, 32) - a cancellation, not a failure. The commits that add this
+file run after that record, and the branch's own history on GitHub carries
+them: a commit that records a run is itself run by CI, and recording that run
+would need another commit, so the project does not record it. THREE runs in
+the committed record failed, and all three were real defects, diagnosed and
+fixed rather than explained away:
 
     run 19  a test wrote to the owner's real OS keyring. On Linux there is no
             keyring backend, so the token was never stored and the assertion
@@ -567,7 +572,8 @@ THE DOCS' OWN CHECKS (scratch helpers, run 2026-11-24)
     check_run_table.py     "the run table matches GitHub's own record" - 42
                            table rows, 43 runs on the branch; the only run not
                            in the table is run 46, which was 90760e1's own run
-                           (the table's "Why this table stops here" note covers
+                           (measured at 90760e1, before this file was added;
+                           the table's "Why this table stops here" note covers
                            it: recording a run's own run would need another
                            commit, which would need another)
 
