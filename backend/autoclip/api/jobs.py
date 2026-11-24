@@ -101,9 +101,14 @@ async def job_events(job_id: str, request: Request) -> EventSourceResponse:
         # reconnecting) must not wait for the next progress tick to render.
         current = await asyncio.to_thread(store.get_job, job_id)
         if current is not None:
+            # The snapshot carries the source, because the client replaces
+            # the job it fetched with whatever the stream sends. A snapshot
+            # without the source takes the title, the duration and the
+            # resolution off the page the moment the stream opens.
+            source = await asyncio.to_thread(store.get_source, current.source_id)
             yield {
                 "event": "snapshot",
-                "data": JobOut.of(current).model_dump_json(),
+                "data": JobOut.of(current, source).model_dump_json(),
             }
             if current.status in ("done", "failed", "cancelled"):
                 return

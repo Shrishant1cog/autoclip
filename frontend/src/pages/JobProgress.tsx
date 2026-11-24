@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 
 import { api, formatDuration } from '../api'
 import { ErrorNote } from '../components/ErrorNote'
+import { MeowPower } from '../components/MeowPower'
 import { useJobStream } from '../useJobStream'
 
 /** Stage order and labels, mirroring autoclip.pipeline.Stage. */
@@ -35,7 +36,6 @@ export function JobProgress() {
   }
 
   const activeIndex = STAGES.findIndex((s) => s.key === job.current_stage)
-  const percent = Math.round((progress?.overall ?? job.progress) * 100)
 
   const cancel = async () => {
     setCancelling(true)
@@ -77,10 +77,6 @@ export function JobProgress() {
         </div>
 
         <div className="flex items-baseline gap-8">
-          <span className="numeric font-display text-[clamp(2.5rem,6vw,4rem)] leading-none text-sodium-500">
-            {percent}
-            <span className="text-2xl text-ink-600">%</span>
-          </span>
           {(job.status === 'running' || job.status === 'queued') && (
             <button onClick={cancel} disabled={cancelling} className="btn btn-ghost">
               {cancelling ? 'Cancelling…' : 'Cancel'}
@@ -114,83 +110,100 @@ export function JobProgress() {
         </div>
       )}
 
-      <ol className="mt-12 max-w-3xl">
-        {STAGES.map((stage, index) => {
-          // A failed job stopped *at* current_stage, so that stage must read as
-          // failed rather than as still running — otherwise the checklist claims
-          // work is in progress while the banner says it died.
-          const failedHere =
-            (job.status === 'failed' || job.status === 'cancelled') && index === activeIndex
+      {/* The simple face of the job. The pipeline's own vocabulary is one
+          disclosure below, for whoever needs to diagnose it. */}
+      <div className="mt-12">
+        <MeowPower
+          stage={job.current_stage}
+          progress={progress?.overall ?? job.progress}
+          status={job.status}
+        />
+      </div>
 
-          const state =
-            job.status === 'done' || (activeIndex >= 0 && index < activeIndex)
-              ? 'done'
-              : failedHere
-                ? 'stopped'
-                : index === activeIndex && job.status === 'running'
-                  ? 'active'
-                  : 'pending'
+      <details className="group mt-10 max-w-3xl">
+        <summary className="btn-quiet cursor-pointer list-none text-sm text-ink-500 hover:text-sodium-400">
+          <span className="inline-block transition-transform group-open:rotate-90">›</span>{' '}
+          What MeowPower is doing
+        </summary>
 
-          const fraction =
-            state === 'done' ? 1 : state === 'active' ? (progress?.stageProgress ?? 0) : 0
+        <ol className="mt-6">
+          {STAGES.map((stage, index) => {
+            // A failed job stopped *at* current_stage, so that stage must read as
+            // failed rather than as still running — otherwise the checklist claims
+            // work is in progress while the banner says it died.
+            const failedHere =
+              (job.status === 'failed' || job.status === 'cancelled') && index === activeIndex
 
-          return (
-            <li
-              key={stage.key}
-              className="rise grid grid-cols-[2.5rem_1fr] items-start gap-x-5 border-b border-ink-850 py-5"
-              style={{ animationDelay: `${index * 55}ms` }}
-            >
-              <span
-                className={[
-                  'numeric pt-0.5 text-xs',
-                  state === 'done'
-                    ? 'text-signal-good'
-                    : state === 'stopped'
-                      ? 'text-signal-bad'
-                      : state === 'active'
-                        ? 'text-sodium-500'
-                        : 'text-ink-600',
-                ].join(' ')}
+            const state =
+              job.status === 'done' || (activeIndex >= 0 && index < activeIndex)
+                ? 'done'
+                : failedHere
+                  ? 'stopped'
+                  : index === activeIndex && job.status === 'running'
+                    ? 'active'
+                    : 'pending'
+
+            const fraction =
+              state === 'done' ? 1 : state === 'active' ? (progress?.stageProgress ?? 0) : 0
+
+            return (
+              <li
+                key={stage.key}
+                className="rise grid grid-cols-[2.5rem_1fr] items-start gap-x-5 border-b border-ink-850 py-5"
+                style={{ animationDelay: `${index * 55}ms` }}
               >
-                {state === 'done' ? '✓' : state === 'stopped' ? '✕' : String(index + 1).padStart(2, '0')}
-              </span>
+                <span
+                  className={[
+                    'numeric pt-0.5 text-xs',
+                    state === 'done'
+                      ? 'text-signal-good'
+                      : state === 'stopped'
+                        ? 'text-signal-bad'
+                        : state === 'active'
+                          ? 'text-sodium-500'
+                          : 'text-ink-600',
+                  ].join(' ')}
+                >
+                  {state === 'done' ? '✓' : state === 'stopped' ? '✕' : String(index + 1).padStart(2, '0')}
+                </span>
 
-              <div>
-                <div className="flex flex-wrap items-baseline justify-between gap-x-4">
-                  <span
-                    className={[
-                      'text-[0.9375rem]',
-                      state === 'pending' ? 'text-ink-600' : 'text-ink-100',
-                    ].join(' ')}
-                  >
-                    {stage.label}
-                  </span>
-                  <span
-                    className={`text-xs ${state === 'stopped' ? 'text-signal-bad' : 'text-ink-500'}`}
-                  >
-                    {state === 'stopped'
-                      ? job.status === 'cancelled'
-                        ? 'cancelled here'
-                        : 'failed here'
-                      : state === 'active'
-                        ? (progress?.message ?? stage.note)
-                        : stage.note}
-                  </span>
-                </div>
+                <div>
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-4">
+                    <span
+                      className={[
+                        'text-[0.9375rem]',
+                        state === 'pending' ? 'text-ink-600' : 'text-ink-100',
+                      ].join(' ')}
+                    >
+                      {stage.label}
+                    </span>
+                    <span
+                      className={`text-xs ${state === 'stopped' ? 'text-signal-bad' : 'text-ink-500'}`}
+                    >
+                      {state === 'stopped'
+                        ? job.status === 'cancelled'
+                          ? 'cancelled here'
+                          : 'failed here'
+                        : state === 'active'
+                          ? (progress?.message ?? stage.note)
+                          : stage.note}
+                    </span>
+                  </div>
 
-                {/* A hairline that fills. No track chrome — the rule below the
-                    row already provides the container. */}
-                <div className="mt-3 h-px w-full bg-ink-800">
-                  <div
-                    className="h-px origin-left bg-sodium-500 transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
-                    style={{ transform: `scaleX(${fraction})` }}
-                  />
+                  {/* A hairline that fills. No track chrome — the rule below the
+                      row already provides the container. */}
+                  <div className="mt-3 h-px w-full bg-ink-800">
+                    <div
+                      className="h-px origin-left bg-sodium-500 transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
+                      style={{ transform: `scaleX(${fraction})` }}
+                    />
+                  </div>
                 </div>
-              </div>
-            </li>
-          )
-        })}
-      </ol>
+              </li>
+            )
+          })}
+        </ol>
+      </details>
     </div>
   )
 }

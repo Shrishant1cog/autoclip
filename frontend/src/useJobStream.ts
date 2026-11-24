@@ -49,7 +49,14 @@ export function useJobStream(jobId: string | undefined) {
 
     source.addEventListener('snapshot', (event) => {
       const data = JSON.parse((event as MessageEvent).data) as Job
-      setJob(data)
+      // The snapshot is merged, not substituted: the stream and the fetch
+      // race, and a payload without a source must not be able to take the
+      // title, the duration and the resolution off the page.
+      setJob((current) => ({
+        ...current,
+        ...data,
+        source: data.source ?? current?.source ?? null,
+      }))
       if (['done', 'failed', 'cancelled'].includes(data.status)) close()
     })
 

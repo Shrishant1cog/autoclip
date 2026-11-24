@@ -6,6 +6,7 @@ migration, event broker binding, and job queue startup are all covered too.
 
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Iterator
 
@@ -705,6 +706,26 @@ class TestEventStream:
 
     def test_missing_job_is_404(self, client: TestClient) -> None:
         assert client.get("/api/jobs/nope/events").status_code == 404
+
+    def test_the_snapshot_carries_the_source(self, client: TestClient, source: Source) -> None:
+        """The snapshot is the same shape as ``GET /api/jobs/{id}``.
+
+        The progress page fetches the job once and then replaces it with
+        whatever the stream sends. If the snapshot carries no source, the
+        title, the duration and the resolution all disappear from the page
+        the moment the stream opens — which is the moment the user is
+        watching.
+        """
+        job = store.create_job(Job(id=new_id(), source_id=source.id, status="done", progress=1.0))
+
+        with client.stream("GET", f"/api/jobs/{job.id}/events") as response:
+            body = "".join(response.iter_text())
+
+        payload = json.loads(body.split("data: ", 1)[1].split("\n", 1)[0])
+
+        assert payload["source"] is not None
+        assert payload["source"]["id"] == source.id
+        assert payload["source"]["title"] == source.title
 
 
 class TestSecretsNeverLeak:
