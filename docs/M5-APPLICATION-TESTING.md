@@ -2005,6 +2005,19 @@ job log shows `printf: Broken pipe` and then the `ass` filter listed on the very
 step now matches the filter list with bash's own pattern matching and never pipes. The check
 itself is unchanged: a build without the `ass` filter still fails it.
 
+**A second defect in the CI itself — also about ffmpeg, and also a wrong answer — was found at
+M5.5.** The Windows leg of the M5.5 documentation commit (run **44**) failed with *"This ffmpeg
+has no 'ass' filter"*. There was no ffmpeg at all: Chocolatey's **metadata** endpoint was
+unreachable — `504` on one attempt, `503` on the next, and the same endpoint **timing out from
+this machine** in the same minutes — so `choco install ffmpeg-full` installed **nothing** and
+still **exited 0**, and the install step reported success. The next step then looked for the
+filter in a program that was never installed, and named the wrong cause. The job was re-run
+**nine times** — **ten attempts**, all the same. The install now runs
+`scripts/install_ffmpeg_windows.py`: **Chocolatey first**, exactly as before, and only if that
+produced no ffmpeg, Chocolatey's own **package** URL on the same host — the same package, the
+same version, the same binaries. Proved locally before it was written (the package downloaded,
+unpacked, and the ffmpeg it produced checked for its `ass` filter) and guarded by **6** tests.
+
 ---
 
 ## The evidence index

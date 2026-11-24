@@ -17,14 +17,14 @@ and one of the defects found at M5 renders on Windows and fails on Linux. See §
 | # | Gate | Command | Result | Verdict |
 |---|---|---|---|---|
 | G1 | Lint | `ruff check .` | *All checks passed!* | **PASS** |
-| G2 | Format | `ruff format --check .` | *239 files already formatted* | **PASS** |
+| G2 | Format | `ruff format --check .` | *241 files already formatted* | **PASS** |
 | G3 | Types | `mypy backend/autoclip` | *Found 10 errors in 8 files (checked 140 source files)* | **BASELINE — unchanged** |
-| G4 | Unit suite | `pytest -m "not slow and not golden and not e2e" -q` | **1,483 passed**, 73 deselected — and the **same 1,483 on the Linux leg** | **PASS** |
-| G5 | Render suite | `pytest -m "slow and not golden and not e2e" -q` | **49 passed**, 1,507 deselected | **PASS** |
+| G4 | Unit suite | `pytest -m "not slow and not golden and not e2e" -q` | **1,489 passed**, 73 deselected — and the **same 1,489 on the Linux leg** | **PASS** |
+| G5 | Render suite | `pytest -m "slow and not golden and not e2e" -q` | **49 passed**, 1,513 deselected | **PASS** |
 | G6 | Frontend | `npm run build` (`tsc -b && vite build`) | 60 modules transformed, built in 1.63 s | **PASS** |
 | G7 | Container | `docker build -f docker/Dockerfile --target base .` + `GET /api/health` | **Not runnable locally — Docker is not installed on this machine.** Verified by the CI `docker` job on every push. | **PASS (CI)** |
 | G8 | Real media | `AUTOCLIP_E2E_MEDIA=… pytest tests/test_pipeline_e2e.py -q` | See §5 | **PASS** |
-| G9 | Whole suite | `pytest tests -q --ignore=tests/test_pipeline_e2e.py` | **1,532 passed**, 0 failed, 0 xfailed, 0 skipped, **494.89 s** | **PASS** |
+| G9 | Whole suite | `pytest tests -q --ignore=tests/test_pipeline_e2e.py` | **1,538 passed**, 0 failed, 0 xfailed, 0 skipped, **494.14 s** | **PASS** |
 
 ### G3 in detail — mypy is at its baseline, and that is the claim
 
@@ -68,19 +68,19 @@ reproducible from any revision with one command.
 
 | | M0 (`bf76811`) | M5 (`bcdfc47`) | M5.1 (`b59605b`) | M5.2 (`a907805`) | M5.3 (`2b5935d`) | M5.4 (`74ec3eb`) | **M5.5** | Δ M0 → M5.5 |
 |---|---|---|---|---|---|---|---|---|
-| Test files | 35 | **54** | **55** | **55** | **57** | **59** | **63** | +28 |
-| Test functions in the tree | 658 | **1,257** | **1,272** | **1,287** | **1,322** | **1,366** | **1,457** | **+799** |
+| Test files | 35 | **54** | **55** | **55** | **57** | **59** | **64** | +29 |
+| Test functions in the tree | 658 | **1,257** | **1,272** | **1,287** | **1,322** | **1,366** | **1,463** | **+805** |
 | — of which module-level | 384 | 900 | 913 | **926** | **928** | **928** | **928** | +544 |
-| Tests collected | 672 (of which 26 were `xfail`) | 1,300 (of which **0** are `xfail`) | **1,315** (of which **0** are `xfail`) | **1,330** (of which **0** are `xfail`) | **1,397** (of which **0** are `xfail`) | **1,441** (of which **0** are `xfail`) | **1,532** (of which **0** are `xfail`) | **+860** |
+| Tests collected | 672 (of which 26 were `xfail`) | 1,300 (of which **0** are `xfail`) | **1,315** (of which **0** are `xfail`) | **1,330** (of which **0** are `xfail`) | **1,397** (of which **0** are `xfail`) | **1,441** (of which **0** are `xfail`) | **1,538** (of which **0** are `xfail`) | **+866** |
 | Failing | 0 | **0** | **0** | **0** | **0** | **0** | **0** | — |
 | Skipped | 0 | **0** — the only `pytest.skip` calls in the tree are the e2e media gate, which is deliberate and documented | **0** | **0** | **0** | **0** | **0** | — |
 | `xfail` markers | **26** (the SSRF gap, pre-registered) | **0** | **0** | **0** | **0** | **0** | **0** | −26 |
-| Wall clock, unit selection | 193.77 s (672 tests, one invocation) | — | **249.81 s** (1,270 tests) | — | **230.28 s** (1,351 tests) | **225.95 s** (1,395 tests) | **247.85 s** (1,483 tests) | — |
-| Wall clock, whole suite | — | — | **534.88 s** (1,315 tests) | **499.52 s** (1,330 tests) | **454.05 s** (1,397 tests) | **452.38 s** (1,441 tests) | **494.89 s** (1,532 tests) | — |
-| Wall clock **per test** | 0.288 s | — | **0.407 s** (whole suite, incl. renders) | **0.375 s** (whole suite, incl. renders) | **0.325 s** (whole suite, incl. renders) | **0.314 s** (whole suite, incl. renders) | **0.323 s** (whole suite, incl. renders) | — |
+| Wall clock, unit selection | 193.77 s (672 tests, one invocation) | — | **249.81 s** (1,270 tests) | — | **230.28 s** (1,351 tests) | **225.95 s** (1,395 tests) | **243.51 s** (1,489 tests) | — |
+| Wall clock, whole suite | — | — | **534.88 s** (1,315 tests) | **499.52 s** (1,330 tests) | **454.05 s** (1,397 tests) | **452.38 s** (1,441 tests) | **494.14 s** (1,538 tests) | — |
+| Wall clock **per test** | 0.288 s | — | **0.407 s** (whole suite, incl. renders) | **0.375 s** (whole suite, incl. renders) | **0.325 s** (whole suite, incl. renders) | **0.314 s** (whole suite, incl. renders) | **0.321 s** (whole suite, incl. renders) | — |
 
-**The M5.5 column, against the M5.4 column.** M5.5 added **four new test files** and **91 test
-functions** — **91 collected tests**, one per function, because none of the new guards is
+**The M5.5 column, against the M5.4 column.** M5.5 added **five new test files** and **97 test
+functions** — **97 collected tests**, one per function, because none of the new guards is
 parameterised:
 
 | File | Tests | What it asserts |
@@ -95,10 +95,10 @@ parameterised:
 | `tests/test_export_render.py` | **+3** | A webcam that **moves** renders through the real ffmpeg; the marker stays on the face while it moves; and a moving webcam **with a speech emphasis** renders — the test that reproduces the exact production error of defect 36 |
 | `tests/test_api.py` | **+5** | The default, the change, the `"source"` value, the rejection of a code that is not a language, and the SSE snapshot carrying the source, so the progress page does not lose the title |
 
-**No speed-up is claimed.** The whole-suite wall clock moved from **452.38 s** to **494.89 s** while
-the suite grew by **91 tests**, and the per-test figure moved from **0.314 s** to **0.323 s**. Both
+**No speed-up is claimed.** The whole-suite wall clock moved from **452.38 s** to **494.14 s** while
+the suite grew by **97 tests**, and the per-test figure moved from **0.314 s** to **0.321 s**. Both
 of those are **machine load, not a regression**: this is a shared four-core laptop, and the
-**91 new tests** include **three real renders**, which are the slowest tests in the tree.
+**97 new tests** include **three real renders**, which are the slowest tests in the tree.
 
 **The M5.4 column, against the M5.3 column.** M5.4 added **one new test file** and **44 test
 functions**:
@@ -282,6 +282,8 @@ grows; the claim that matters is the one under it, which does not go stale.
 | 41 | `0af44dc` | docs: M5.4 -- the two runs, compared byte by byte | **success** — all six jobs green — [run 45161730246](https://github.com/Shrishant1cog/autoclip/actions/runs/45161730246). The tree that carries the two-run comparison, **K32** and **R8** |
 | 42 | `f8bb953` | docs: M5.4 -- CI run 41 is green, and the detection-time claim, tightened | **success** — all six jobs green — [run 45164085498](https://github.com/Shrishant1cog/autoclip/actions/runs/45164085498). The M5.4 documentation tree with run 41 recorded in it, and the detection-time claim tightened against the two runs it was measured from |
 | 43 | `e1cd12d` | MeowPower: one sentence and one number | **success** — all six jobs green — [run 45322909082](https://github.com/Shrishant1cog/autoclip/actions/runs/45322909082). The whole M5.5 tree — the three M5.5 code commits together. One push of three commits produced **one** run: GitHub ran the tip of the push, and the concurrency group never started the two before it |
+| 44 | `06b9608` | docs: M5.5 — a third real source, six clips, fourteen defects | **failure** — the Windows leg only; the other five jobs were green — [run 45327894996](https://github.com/Shrishant1cog/autoclip/actions/runs/45327894996). Chocolatey's **metadata** endpoint was unreachable, so `ffmpeg` was never installed on the runner, and the caption check reported the missing `ass` filter instead of the missing ffmpeg. The job was re-run **nine times** — **ten attempts** in all; every one failed for the same external reason. The workflow was fixed — the install now has a second path on the same host, and a failure names itself |
+| 45 | `2e0568d` | CI: the Windows leg installs ffmpeg without Chocolatey's metadata endpoint | **success** — all six jobs green — [run 45333883376](https://github.com/Shrishant1cog/autoclip/actions/runs/45333883376). The CI fix. The outage had ended by the time this ran, so the Windows leg took the **primary** path — and its log now says where ffmpeg came from: `ffmpeg from chocolatey: C:\ProgramData\Chocolatey\bin\ffmpeg.EXE`, followed by `ass filter present` |
 
 > **One commit on this branch has no workflow run at all.** `9fdc6ae` — *"docs: M5.3 — a count
 > that did not survive being read back"* — is on the branch, between runs 35 and 36, and GitHub's
@@ -292,7 +294,7 @@ grows; the claim that matters is the one under it, which does not go stale.
 > narrower one below, and it is checked by a script rather than by eye.
 
 
-**Runs 31, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42 and 43 are green on all six jobs, and run 32 was cancelled.** Run 31
+**Runs 31, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43 and 45 are green on all six jobs, and run 32 was cancelled.** Run 31
 was the first to exercise the defect-13 fix on every CI job. Run 32 is the evidence-correction
 commit — it was **cancelled** by the concurrency group when the next commit was pushed, with five
 of its six jobs already green: a cancellation, not a failure, and the sixth (Windows) was cancelled
@@ -311,6 +313,8 @@ guards, the webcam-frame detector, the tiled face detector, the crop-plan finger
 saved-report window check and the per-frame speech emphasis on every CI job. One push of three
 commits produced **one** run — GitHub ran the tip of the push, and the concurrency group never
 started the two before it — so run 43 is the run of the whole M5.5 tree, not of one commit in it.
+**Run 45 is the CI fix** — the install step that now says where ffmpeg came from — and it is green
+on all six jobs too.
 
 > **Why this table stops here.** A commit that records a CI run is itself run by CI, and
 > recording *its* run would need another commit — which would need another. The table therefore
@@ -318,8 +322,8 @@ started the two before it — so run 43 is the run of the whole M5.5 tree, not o
 > it reports. Each one's own run was verified after the push and is green, and the branch's history
 > can be read directly from GitHub, where the run numbers are the same ones used here.
 
-**Every run on this branch since the two failures either passed or was cancelled by a newer push.**
-Five runs were cancelled, two failed, and the rest passed.
+**Every run on this branch since the three failures either passed or was cancelled by a newer
+push.** Five runs were cancelled, three failed and were fixed, and the rest passed.
 
 * **Run 19** was a **product** defect — a test that wrote to the owner's real OS credential store.
   The symptom appeared only on Linux because Linux has no keyring backend; the cause was present
@@ -328,11 +332,27 @@ Five runs were cancelled, two failed, and the rest passed.
 * **Run 20** was a **CI** defect — the ffmpeg check reported that an ffmpeg **with** the `ass`
   filter did not have one, because the producer in the pipe was killed by SIGPIPE. The job log
   shows `printf: Broken pipe` and then the `ass` filter on the very next line.
+* **Run 44** was a **CI** defect — the same class as run 20, and the same step. Chocolatey's
+  community **metadata** endpoint (`/api/v2/Packages(Id='ffmpeg-full',Version='9.1.0')`) was
+  unreachable: `504 (Gateway Timeout)` on the first attempt, `503 (Service Unavailable)` on the
+  second, then `Unable to find package 'ffmpeg-full'` and `Chocolatey installed 0/0 packages`. The
+  install step still reported **success** — it exits 0 when it installs nothing — so the next step
+  looked for the `ass` filter in an ffmpeg that was never installed, and said *"This ffmpeg has no
+  'ass' filter"*, which named the wrong cause. The job failed before any test ran. The same
+  endpoint was measured **timing out from this machine** in the same minutes — three requests,
+  three 60-second timeouts — while the **package** URL
+  (`/api/v2/package/ffmpeg-full/9.1.0`) answered **200**, so the outage was not the runner's and
+  was not the whole of Chocolatey's service. The install now runs
+  `scripts/install_ffmpeg_windows.py`: Chocolatey first, then the package URL on the same host,
+  and a failure names itself. Guarded by **6** tests; the residual that remains is **K36** /
+  **R12**.
 
-Both were **reproduced locally before they were fixed**: run 19 on a Linux environment with no
-keyring backend, run 20 with a 320 KB filter list — the old body fails it, the new body passes
-it, and a build genuinely without the `ass` filter still fails the new body. A failure that is only
-fixed in CI is a failure that comes back.
+The three were **reproduced locally before they were fixed**: run 19 on a Linux environment
+with no keyring backend, run 20 with a 320 KB filter list — the old body fails it, the new body
+passes it, and a build genuinely without the `ass` filter still fails the new body — and run 44
+at the other end of the outage: the same metadata endpoint, timing out from this machine, and the
+package URL's own ffmpeg unpacked and checked for its `ass` filter before the fallback was
+written. A failure that is only fixed in CI is a failure that comes back.
 
 **The release run is green on all six jobs**, including the Ubuntu py3.12 leg that had failed
 twice.
@@ -936,14 +956,17 @@ defect table there.
 | Gate | Result at the M5.5 tree |
 |---|---|
 | `ruff check .` | *All checks passed* |
-| `ruff format --check .` | *239 files already formatted* |
+| `ruff format --check .` | *241 files already formatted* |
 | `mypy backend/autoclip` | **10 errors in 8 files** — the M1 baseline, **unchanged**, and checked against a clean worktree at `HEAD` to be certain that none of the ten is new |
-| Unit selection, Windows (ffmpeg 9.0.2) | **1,483 passed**, 73 deselected, 247.85 s |
-| Render selection, Windows (ffmpeg 9.0.2) | **49 passed**, 1,507 deselected, 254.50 s |
-| Whole suite, Windows (ffmpeg 9.0.2) | **1,532 passed**, 0 failed, 0 skipped, 0 xfailed, 494.89 s |
+| Unit selection, Windows (ffmpeg 9.0.2) | **1,489 passed**, 73 deselected, 243.51 s |
+| Render selection, Windows (ffmpeg 9.0.2) | **49 passed**, 1,513 deselected, 253.67 s |
+| Whole suite, Windows (ffmpeg 9.0.2) | **1,538 passed**, 0 failed, 0 skipped, 0 xfailed, 494.14 s |
 | Frontend `tsc -b && vite build` | 60 modules transformed, built in 1.63 s |
 | Feature matrix | **129 rows, consistent** — 110 Implemented · 9 Partial · 1 Blocked · 9 Not Applicable · 0 Missing |
 | Linux leg (ffmpeg 7.0.2) | Reproduced by the CI's own jobs on the pushed tree — see `docs/FINAL_UPGRADE_REPORT.md` §4.1 |
+| CI run 43 — the whole M5.5 code tree | **green on all six jobs** — [run 45322909082](https://github.com/Shrishant1cog/autoclip/actions/runs/45322909082) |
+| CI run 44 — the M5.5 documentation tree | the **Windows leg only** failed: Chocolatey's metadata endpoint was unreachable, `ffmpeg` was never installed, and the caption check reported the missing `ass` filter instead of the missing ffmpeg. **Ten attempts**, every one the same. **Fixed** — see the next row |
+| CI run 45 — the CI fix | **green on all six jobs** — [run 45333883376](https://github.com/Shrishant1cog/autoclip/actions/runs/45333883376). The outage had ended by then, so the Windows leg took the **primary** path — and its log now names the source: `ffmpeg from chocolatey: C:\ProgramData\Chocolatey\bin\ffmpeg.EXE`, then `ass filter present`. The fallback itself is proved by the **local** download-and-unpack, not by that run |
 
 ### The new tests, and what they guard
 
@@ -960,6 +983,7 @@ defect table there.
 | `tests/test_faces.py` | **10** | The **tiles** — that they cover the frame, that they overlap, that a small frame is not tiled — that a tile is a **copy** and not a view, and the **clock**: that the stretches are walked in the order they sit in the source, that a clip's first frame is never before the clip, and that the times only ever go forwards. The last two reproduce the production failure — *"Input timestamp must be monotonically increasing"* |
 | `tests/test_pipeline_cache.py` | **12** | What the pipeline reuses between runs and what it must not: a crop plan built for another layout, a webcam report that says the detection **failed**, a report from another version, a report made for other stretches — and the order the stretches are asked for |
 | `tests/test_webcam.py::TestTheWebcamPath` | **6** | The webcam's path being thinned to a size ffmpeg can parse |
+| `tests/test_ci_ffmpeg_install.py` | **6** | The CI's own ffmpeg install: the workflow must call the script, Chocolatey must stay the primary source, the fallback must not be the metadata endpoint, the package URL must be used when Chocolatey installs nothing, and a failure must report what actually failed — never the filter check's wrong answer |
 
 ### What this increment deliberately does **not** claim
 

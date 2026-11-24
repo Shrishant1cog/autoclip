@@ -20,7 +20,7 @@
 Every milestone from M0 to M5 is complete, and **M5.1**, **M5.2**, **M5.3**, **M5.4** and **M5.5**
 closed the last closeable partial matrix row and then took the application to real media afterwards —
 the last three of them all the way through the **complete pipeline** on a whole source. The full
-automated suite is green — **1,532 tests, zero failures, zero skips, zero xfails** — and the
+automated suite is green — **1,538 tests, zero failures, zero skips, zero xfails** — and the
 application was exercised through its real UI against real media, not only through unit tests.
 
 The one thing this report will not do is call the live external integrations verified. They were
@@ -34,13 +34,13 @@ double stands in for the same code path the real service would take — but "the
 | **Milestones complete** | **8 of 8** — M0, M0.5, M1, M2, M3, M4a, M4b, M5 — plus **M5.1**, **M5.2**, **M5.3**, **M5.4** and **M5.5**, post-release increments that are not one of the specification's milestones (see the amendments below) |
 | **Gate items** | 94 across M0–M4b: **91 done**, **1 blocked on the owner**, **2 unverified (external)**. M5's 10 are in §4. |
 | **Feature coverage** | **129 rows**: 110 Implemented · 9 Partial · 1 Blocked · 9 Not Applicable · **0 Missing** |
-| **Tests** | **1,532 passing** — 1,483 in the unit selection, 49 in the render selection — 0 failing, 0 skipped, 0 xfailed, plus 24 real-media e2e tests run against a real source |
+| **Tests** | **1,538 passing** — 1,489 in the unit selection, 49 in the render selection — 0 failing, 0 skipped, 0 xfailed, plus 24 real-media e2e tests run against a real source |
 | **Real-media evidence** | A **real 4-hour live recording** ingested twice (360p, and the product's default 1080p); the pipeline exercised on real segments cut from that same file, with a real local model, producing two real clips and two real exports — **and, at M5.3, M5.4 and M5.5, three more real videos run through every stage end to end**: **three** real clips and **three** real exports from the first, **nine** real clips and **nine** real exports from the second — after its nine defects were fixed — and **six** real clips and **six** real exports from the third, every one of them **1080×1920** with the webcam's slot at exactly **40 %** |
 | **New runtime dependencies** | **Zero.** The whole upgrade was built on the dependency set the project already had. |
 | **Schema** | v14 → **v27**, 19 → **32 live tables**, thirteen migrations, no user data destroyed |
 | **API surface** | 18 routers / 108 routes → **21 routers / 162 routes** |
-| **CI** | **Every run on this branch since the two failures either passed or was cancelled by a newer push.** Two of the runs failed — both were real defects, diagnosed and fixed rather than explained away — and five were cancelled by a newer push. The release run is green on all six jobs, on all four platforms. See §4.1. |
-| **Defects found by running the application** | **36 product defects** and **1 defect in the CI workflow itself**, all fixed, all guarded by tests that fail without the fix. See §4.2. |
+| **CI** | **Every run on this branch since the three failures either passed or was cancelled by a newer push.** Three of the runs failed — each one a **real defect**, diagnosed and fixed rather than explained away: one in the product, and two in the CI workflow itself. Five were cancelled by a newer push. The release run is green on all six jobs, on all four platforms. See §4.1. |
+| **Defects found by running the application** | **36 product defects** and **2 defects in the CI workflow itself**, all fixed, all guarded by tests that fail without the fix. See §4.2. |
 | **Open security findings** | **0** high, **0** medium, **0** low. 4 residual risks documented, 5 things not checked — all in §6. |
 
 ### The three conditions attached to the verdict
@@ -339,15 +339,21 @@ missing or wrong.
 
 ### 4.1 The CI runs on this branch
 
-The run history is release evidence, not noise. **Every run on this branch since the two failures
-either passed or was cancelled by a newer push.** The two that failed were **real defects** — one
-in the product, one in the CI itself. Neither was a flake, and neither was explained away. Five
+The run history is release evidence, not noise. **Every run on this branch since the three failures
+either passed or was cancelled by a newer push.** The three that failed were **real defects** —
+one in the product, **two in the CI itself**. None was a flake, and none was explained away. The
+third was found at M5.5: run **44** failed on the Windows leg because Chocolatey's **metadata**
+endpoint was unreachable, so `ffmpeg` was never installed, and the caption check reported the
+missing `ass` filter instead of the missing ffmpeg. The same endpoint was measured timing out
+**from this machine** in the same minutes, so the outage was not the runner's; the **package** URL
+on the same host answered **200** throughout. The workflow now installs ffmpeg through a script
+that tries Chocolatey first and falls back to that package URL, and a failure names itself. Five
 runs were cancelled by a newer push.
 
-**The table below is the run history as it stands at the M5.4 commit.** It is a record, and it
-grows; the claim that matters is the one above it, which does not go stale. The numbers are
-**GitHub's own** — each workflow run's `run_number` — so a reader who opens the Actions page for
-the branch finds the same numbering.
+**The table below is the run history as it stands at the M5.5 documentation commit.** It is a
+record, and it grows; the claim that matters is the one above it, which does not go stale. The
+numbers are **GitHub's own** — each workflow run's `run_number` — so a reader who opens the
+Actions page for the branch finds the same numbering.
 
 > **The numbering is the repository's, not the branch's.** Runs **1, 2 and 3** are on `main` — all
 > three failures, before this branch existed — and **run 4 is this branch's first workflow run**.
@@ -355,10 +361,11 @@ the branch finds the same numbering.
 
 | Runs | Result | What happened |
 |---|---|---|
-| 4, 5, 7–13, 15–17, **22**, **23**, **24**, **25**, **26**, **27**, **28**, **29**, **30**, **31**, **33**, **34**, **35**, **36**, **37**, **38**, **39**, **40**, **41**, **42**, **43** | **success** | green |
+| 4, 5, 7–13, 15–17, **22**, **23**, **24**, **25**, **26**, **27**, **28**, **29**, **30**, **31**, **33**, **34**, **35**, **36**, **37**, **38**, **39**, **40**, **41**, **42**, **43**, **45** | **success** | green |
 | 6, 14, 18, **21**, **32** | **cancelled** | each superseded by a newer push — the concurrency group cancelled the older run |
 | **19** (`4cf309b`) | **failure** | the Ubuntu legs failed in **Unit tests**; Windows and macOS passed the same tests. A test wrote to the owner's real OS keyring. On Linux there is no keyring backend, so the token was never stored and the assertion could not hold — the test passed on Windows and macOS *because those machines had a real keyring to write to*. Fixed by `94c6d9c`, an **autouse** isolation fixture so no test can reach the owner's credential store |
 | **20** (`94c6d9c`) | **failure** | the Ubuntu py3.12 leg failed at *"Verify ffmpeg can burn subtitles"*. The check piped the ffmpeg filter list into `grep -q`; `grep -q` exits at the match, the producer gets **SIGPIPE**, and GitHub's `set -o pipefail` turns that into a failed step. The runner's ffmpeg 8 has a filter list large enough to fill the pipe, so CI reported that an ffmpeg **with** the `ass` filter did not have one — the job log shows `printf: Broken pipe` and then the `ass` filter listed on the very next line. **Corrected, not removed**: the check now matches with bash's own pattern matching and never pipes, and a build genuinely without the filter still fails it |
+| **44** (`06b9608`) | **failure** | the Windows leg failed at *"Verify ffmpeg can burn subtitles"*, saying the build had no `ass` filter. There was no build: Chocolatey's **metadata** endpoint was unreachable — `504` on one attempt, `503` on the next — so `choco install ffmpeg-full` installed **nothing** and still **exited 0**, and the install step reported success. The same endpoint was measured timing out **from this machine** in the same minutes, so the outage was not the runner's; the **package** URL on the same host answered **200** throughout. **Corrected, not removed**: the install now runs a script that tries Chocolatey first and falls back to that package URL, and a failure names itself. Guarded by **6** tests |
 
 **The release run is green on all six jobs** — the four backend legs (Ubuntu 3.11, Ubuntu 3.12,
 macOS 3.12, Windows 3.12), the frontend build and the Docker image with its health smoke test.
@@ -424,6 +431,14 @@ emphasis on every CI job. One push of three commits produced **one** run — Git
 the push, and the concurrency group never started the two before it — so run 43 is the run of the
 whole M5.5 tree rather than of one commit in it.
 
+**Run 45 is the CI fix — the install step that now says where ffmpeg came from — and it is green on
+all six jobs too**
+([run 45333883376](https://github.com/Shrishant1cog/autoclip/actions/runs/45333883376)). The
+outage had ended by the time it ran, so the Windows leg took the **primary** path, and its log
+reads `ffmpeg from chocolatey: C:\ProgramData\Chocolatey\bin\ffmpeg.EXE` and then
+`ass filter present`. The fallback itself is proved by the **local** download-and-unpack, not by
+that run.
+
 **The table stops at the last run recorded in it, and the commits after it change the record, not
 the content it reports.** Each one's own run was verified after the push and is green, and the
 branch's history can be read directly from GitHub, where the run numbers are the same ones used
@@ -485,6 +500,18 @@ caught by reproducing the Linux leg locally rather than assuming the two platfor
 
 **And a fifth defect, in the CI itself** — the broken-pipe check above. It was found while
 confirming the first three.
+
+**And a second defect in the CI itself, found at M5.5** — the same step, failing for a different
+reason. The Windows leg of the M5.5 documentation commit (run **44**) said the build had no
+`ass` filter, and there was no build at all: Chocolatey's **metadata** endpoint was unreachable,
+so `choco install ffmpeg-full` installed **nothing** and still **exited 0**, and the install step
+reported success. The check then looked for the filter in a program that was never installed, and
+named the wrong cause. The job was re-run **nine times** — **ten attempts**, all the same. The
+install now runs `scripts/install_ffmpeg_windows.py`: **Chocolatey first**, exactly as before, and
+only if that produced no ffmpeg, Chocolatey's own **package** URL on the same host — the same
+package, the same version, the same binaries. Proved locally before it was written (the package
+downloaded, unpacked, and the ffmpeg it produced checked for its `ass` filter) and guarded by
+**6** tests.
 
 **The ducking was then measured, not asserted.** The same clip was exported twice through the
 UI, once with the chosen bed and once with *No music at all*. Subtracting the two renders leaves
@@ -1493,6 +1520,7 @@ AutoClip cannot re-classify each hop. That is unchanged and still needs a Lane B
 | K13 | **The cold-start model download** (Whisper weights from Hugging Face) is a third-party library fetch that AutoClip records but does not gate. |
 | K14 | **No dependency vulnerability scan, no fuzzing, no SAST scanner** was run. Listed as gaps in `docs/M5-SECURITY-REVIEW.md` §7 rather than implied to be covered. |
 | K15 | **No load test** and **no peak-memory sampling** during a render. |
+| K36 | **The Windows CI leg still gets its ffmpeg from one external host.** The metadata endpoint that failed on run 44 is no longer the only path — the install now falls back to Chocolatey's own **package** URL on the same host, and a failure names itself instead of blaming the filter — but if that host is unreachable altogether, the leg cannot run. The build itself is unchanged: the package carries the same **9.1 full** build Chocolatey would have installed, with `libass`. Found at M5.5. |
 
 ### 6.3 Owner-controlled
 

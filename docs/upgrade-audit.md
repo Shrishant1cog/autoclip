@@ -383,13 +383,13 @@ the end of M5.5 it is:
 
 | Gate | At M0 (baseline) | At M5 (release) | At M5.1 | At M5.2 | At M5.3 | At M5.4 | **At M5.5** |
 |---|---|---|---|---|---|---|---|
-| Unit selection — `-m "not slow and not golden and not e2e"` | 672 passed | **1,263 passed**, 61 deselected | **1,270 passed**, 69 deselected | **1,285 passed**, 69 deselected | **1,351 passed**, 70 deselected | **1,395 passed**, 70 deselected | **1,483 passed**, 73 deselected |
-| Render selection — `-m "slow and not golden and not e2e"` | (included above) | **37 passed**, 1,287 deselected | **45 passed**, 1,294 deselected | **45 passed**, 1,309 deselected | **46 passed**, 1,375 deselected | **46 passed**, 1,419 deselected | **49 passed**, 1,507 deselected |
-| **Total in the two CI selections** | **672** | **1,300** | **1,315** | **1,330** | **1,397** | **1,441** | **1,532** |
-| Local full suite (Windows, excluding the e2e collection) | — | **1,300 passed** | **1,315 passed**, 534.88 s | **1,330 passed**, 499.52 s | **1,397 passed**, 454.05 s | **1,441 passed**, 452.38 s | **1,532 passed**, 494.89 s |
+| Unit selection — `-m "not slow and not golden and not e2e"` | 672 passed | **1,263 passed**, 61 deselected | **1,270 passed**, 69 deselected | **1,285 passed**, 69 deselected | **1,351 passed**, 70 deselected | **1,395 passed**, 70 deselected | **1,489 passed**, 73 deselected |
+| Render selection — `-m "slow and not golden and not e2e"` | (included above) | **37 passed**, 1,287 deselected | **45 passed**, 1,294 deselected | **45 passed**, 1,309 deselected | **46 passed**, 1,375 deselected | **46 passed**, 1,419 deselected | **49 passed**, 1,513 deselected |
+| **Total in the two CI selections** | **672** | **1,300** | **1,315** | **1,330** | **1,397** | **1,441** | **1,538** |
+| Local full suite (Windows, excluding the e2e collection) | — | **1,300 passed** | **1,315 passed**, 534.88 s | **1,330 passed**, 499.52 s | **1,397 passed**, 454.05 s | **1,441 passed**, 452.38 s | **1,538 passed**, 494.14 s |
 | `xfail` markers | 26 (the SSRF suite) | **0** | **0** | **0** | **0** | **0** | **0** |
 | `ruff check .` | clean | **clean** | **clean** | **clean** | **clean** | **clean** | **clean** |
-| `ruff format --check .` | **FAILED** — 38 of 147 files unformatted | **clean** — 226 files already formatted | **clean** — 227 files already formatted | **clean** — 227 files already formatted | **clean** — 230 files already formatted | **clean** — 233 files already formatted | **clean** — 239 files already formatted |
+| `ruff format --check .` | **FAILED** — 38 of 147 files unformatted | **clean** — 226 files already formatted | **clean** — 227 files already formatted | **clean** — 227 files already formatted | **clean** — 230 files already formatted | **clean** — 233 files already formatted | **clean** — 241 files already formatted |
 | `ruff` version | unpinned (`>=0.7`) | **pinned at `0.17.5`** (`pyproject.toml:89`) — committed as `4cf309b`, which closes **D15** and **T2** | unchanged | unchanged | unchanged | unchanged | unchanged |
 | mypy | 14 errors in 10 files | **10 errors in 8 files** (tolerated by `continue-on-error`) | **10 errors in 8 files** — unchanged | **10 errors in 8 files** — unchanged | **10 errors in 8 files** — unchanged, and checked against a clean worktree at `HEAD` to be certain that none of the ten is new | **10 errors in 8 files** — unchanged, and checked against a clean worktree at `HEAD` again, so that none of the ten can be blamed on the M5.4 changes | **10 errors in 8 files** — unchanged, and checked against a clean worktree at `HEAD` again. The line numbers moved only where M5.5 inserted code above them |
 | Frontend `tsc -b && vite build` | not run locally at audit time | **green**, run locally and in CI | unchanged — no frontend file was touched | unchanged — no frontend file was touched | unchanged — no frontend file was touched | **green** — 59 modules, built in 1.52 s. Two frontend files **were** touched: the provider timeout and context settings | **green** — 60 modules, built in 1.63 s. Five frontend files **were** touched: the settings screen's Subtitles block, the job progress page, the event-stream merge, the settings API type and the new MeowPower component |
@@ -465,14 +465,19 @@ cause and its fix.
 | **33** | `56553ec` | **success** | green on all six jobs ([run 44949264565](https://github.com/Shrishant1cog/autoclip/actions/runs/44949264565)). The two documentation fixes a cross-reference check found in the evidence itself, and the tree that carries run 32's corrections with it | — | — |
 | **34** | `6c2f9e0` | **success** | green on all six jobs ([run 44950193899](https://github.com/Shrishant1cog/autoclip/actions/runs/44950193899)) | — | — |
 | **35** | `3f95ac0` | **success** | green on all six jobs ([run 44951500363](https://github.com/Shrishant1cog/autoclip/actions/runs/44951500363)). The last run in the table — the table stops here deliberately, because a commit that records a run is itself run by CI | — | — |
+| **44** | `06b9608` | **failure** | the Windows leg failed at step 7, *"Verify ffmpeg can burn subtitles"*, saying the build had no `ass` filter. There was no build: Chocolatey's **metadata** endpoint was unreachable — `504` on one attempt, `503` on the next — so `choco install ffmpeg-full` installed **nothing** and still **exited 0**, and the install step reported success. The same endpoint was measured timing out **from this machine** in the same minutes, so the outage was not the runner's; the **package** URL on the same host answered **200** throughout. The job was re-run **nine times** — **ten attempts**, all the same | **The workflow trusted an install that did not happen, and then reported the wrong cause.** The step that checked the filter looked in a program that was never installed, so it blamed the build instead of the missing build, and the step that installed it said "success" while installing nothing | the install now runs `scripts/install_ffmpeg_windows.py` (`2e0568d`): Chocolatey first, then the package URL on the same host, and a failure names itself. Guarded by **6** tests in `tests/test_ci_ffmpeg_install.py`; **CI run 45** is green on all six jobs |
 
-**Both failures were reproduced before they were fixed.** Run 19 was reproduced on a Linux
+**All three failures were reproduced before they were fixed.** Run 19 was reproduced on a Linux
 environment with no keyring backend, and run 20 was reproduced with a 320 KB filter list — the
 old body fails it, the new body passes it, and a build without the `ass` filter still fails the
-new body. A failure that is only fixed in CI is a failure that comes back.
+new body. Run 44 was reproduced at the other end of the outage: the same metadata endpoint, timing
+out from this machine, and the package URL's own ffmpeg unpacked and checked for its `ass` filter
+before the fallback was written. A failure that is only fixed in CI is a failure that comes back.
 
-**Every run on this branch since those two failures either passed or was cancelled by a newer
-push.**
+**Every run on this branch since those failures either passed or was cancelled by a newer push.**
+Run 44 was the **third** failure in the branch's history and the **second** in the CI itself: it
+was diagnosed, reproduced at the other end — the same endpoint, timing out from this machine —
+and **fixed**, not explained away.
 
 ### 13.2 Thirty-six product defects, found by running the application
 

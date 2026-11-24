@@ -60,10 +60,10 @@ v27 is not a slow operation.
 
 | | M0 | M5 | M5.1 | M5.2 | M5.3 | M5.4 | **M5.5** |
 |---|---|---|---|---|---|---|---|
-| Mandatory suite (CI selection 1) | 672 passed in 193.77 s | **1,263 passed, 61 deselected in 270.59 s** | **1,270 passed, 69 deselected in 249.81 s** | **1,285 passed, 69 deselected** | **1,351 passed, 70 deselected in 230.28 s** | **1,395 passed, 70 deselected in 225.95 s** | **1,483 passed, 73 deselected in 247.85 s** |
-| Render suite (CI selection 2) | (not separated) | **37 passed, 1,287 deselected in 232.47 s** | **45 passed, 1,294 deselected in 299.24 s** | **45 passed, 1,309 deselected** | **46 passed, 1,375 deselected in 231.92 s** | **46 passed, 1,419 deselected in 233.26 s** | **49 passed, 1,507 deselected in 254.50 s** |
-| Whole suite, one invocation | 672 passed in 193.77 s | **1,300 passed in 709.11 s** | **1,315 passed in 534.88 s** | **1,330 passed in 499.52 s** | **1,397 passed in 454.05 s** | **1,441 passed in 452.38 s** | **1,532 passed in 494.89 s** |
-| Wall clock **per test** | 0.288 s | **0.214 s** | **0.197 s** | **0.375 s** | **0.325 s** | **0.314 s** | **0.323 s** |
+| Mandatory suite (CI selection 1) | 672 passed in 193.77 s | **1,263 passed, 61 deselected in 270.59 s** | **1,270 passed, 69 deselected in 249.81 s** | **1,285 passed, 69 deselected** | **1,351 passed, 70 deselected in 230.28 s** | **1,395 passed, 70 deselected in 225.95 s** | **1,489 passed, 73 deselected in 243.51 s** |
+| Render suite (CI selection 2) | (not separated) | **37 passed, 1,287 deselected in 232.47 s** | **45 passed, 1,294 deselected in 299.24 s** | **45 passed, 1,309 deselected** | **46 passed, 1,375 deselected in 231.92 s** | **46 passed, 1,419 deselected in 233.26 s** | **49 passed, 1,513 deselected in 253.67 s** |
+| Whole suite, one invocation | 672 passed in 193.77 s | **1,300 passed in 709.11 s** | **1,315 passed in 534.88 s** | **1,330 passed in 499.52 s** | **1,397 passed in 454.05 s** | **1,441 passed in 452.38 s** | **1,538 passed in 494.14 s** |
+| Wall clock **per test** | 0.288 s | **0.214 s** | **0.197 s** | **0.375 s** | **0.325 s** | **0.314 s** | **0.321 s** |
 
 The suite grew by 643 tests (96%) and the per-test cost went *down* by 32%. The M5 whole-suite
 number is roughly double the sum of the two CI selections because a single invocation pays the
@@ -624,20 +624,20 @@ behaviour had already been abandoned. What is measured is the cost of the bounde
 
 | | M0 | M5 | M5.1 | M5.2 | M5.3 | M5.4 | **M5.5** |
 |---|---|---|---|---|---|---|---|
-| Mandatory suite (CI selection 1) | 672 passed in 193.77 s | **1,263 passed**, 61 deselected in 270.59 s | **1,270 passed**, 69 deselected in 249.81 s | **1,285 passed**, 69 deselected | **1,351 passed**, 70 deselected in 230.28 s | **1,395 passed**, 70 deselected in 225.95 s | **1,483 passed**, 73 deselected in 247.85 s |
-| Render suite (CI selection 2) | (not separated) | **37 passed**, 1,287 deselected in 232.47 s | **45 passed**, 1,294 deselected in 299.24 s | **45 passed**, 1,309 deselected | **46 passed**, 1,375 deselected in 231.92 s | **46 passed**, 1,419 deselected in 233.26 s | **49 passed**, 1,507 deselected in 254.50 s |
-| Whole suite, one invocation | 672 passed in 193.77 s | **1,300 passed in 709.11 s** | **1,315 passed in 534.88 s** | **1,330 passed in 499.52 s** | **1,397 passed in 454.05 s** | **1,441 passed in 452.38 s** | **1,532 passed in 494.89 s** |
+| Mandatory suite (CI selection 1) | 672 passed in 193.77 s | **1,263 passed**, 61 deselected in 270.59 s | **1,270 passed**, 69 deselected in 249.81 s | **1,285 passed**, 69 deselected | **1,351 passed**, 70 deselected in 230.28 s | **1,395 passed**, 70 deselected in 225.95 s | **1,489 passed**, 73 deselected in 243.51 s |
+| Render suite (CI selection 2) | (not separated) | **37 passed**, 1,287 deselected in 232.47 s | **45 passed**, 1,294 deselected in 299.24 s | **45 passed**, 1,309 deselected | **46 passed**, 1,375 deselected in 231.92 s | **46 passed**, 1,419 deselected in 233.26 s | **49 passed**, 1,513 deselected in 253.67 s |
+| Whole suite, one invocation | 672 passed in 193.77 s | **1,300 passed in 709.11 s** | **1,315 passed in 534.88 s** | **1,330 passed in 499.52 s** | **1,397 passed in 454.05 s** | **1,441 passed in 452.38 s** | **1,538 passed in 494.14 s** |
 
 **No claim of a speed-up is made.** The whole-suite wall clock moved from **452.38 s** to
-**494.89 s** while the suite grew by **91 tests**, and the per-test figure moved from **0.314 s** to
-**0.323 s**. Both of those are **machine load, not a regression**: this is a shared four-core
-laptop, and the **91 new tests** include **three real renders**, which are the slowest tests in the
+**494.14 s** while the suite grew by **97 tests**, and the per-test figure moved from **0.314 s** to
+**0.321 s**. Both of those are **machine load, not a regression**: this is a shared four-core
+laptop, and the **97 new tests** include **three real renders**, which are the slowest tests in the
 tree.
 
-The **91** new tests are almost all **unit** tests — the M5.5 guards are statements about the
+The **97** new tests are almost all **unit** tests — the M5.5 guards are statements about the
 application's behaviour, not about how a frame is composed, and only three of them need a render.
 That is why the render selection's count moved by **three** (46 → 49) and the unit selection grew
-by **88**, from **1,395** to **1,483**.
+by **94**, from **1,395** to **1,489**.
 
 ### The Linux leg at M5.5
 
@@ -645,6 +645,11 @@ The Linux leg was **not** reproduced locally for M5.5. The tree's own CI runs th
 on every push, and the M5.5 tree is green on all six jobs — which is the same footing the M5.4 tree
 was on. What the local machine cannot reproduce is the one thing the leg exists for: an **older
 ffmpeg**.
+
+The Linux numbers themselves **are** on the record, from **CI run 45**'s Ubuntu py3.12 leg: the
+unit selection **1,489 passed**, 73 deselected, in **45.56 s**, and the render selection **49
+passed**, 1,513 deselected, in **216.41 s** — the **same counts** as the Windows leg, and a
+Linux wall clock of about a fifth of the Windows one.
 
 M5.5 **does** touch the **filter graph**, once: the webcam's speech-emphasis zoom is a `scale`
 filter, and ffmpeg evaluates a `scale` filter's `w` and `h` **once**, at init — so a per-frame
