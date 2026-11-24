@@ -1597,10 +1597,296 @@ the byte, the transcript was not, and the difference was measured, attributed to
 
 ---
 
+## M5.5 — Subtitles, framing, and MeowPower (2026-11-23 and 2026-11-24)
+
+**What this section is.** A post-release increment to this file, dated **2026-11-23** and
+**2026-11-24**, on the same branch. It records a run of the real application against a **third
+real, third-party YouTube video**, supplied by the owner:
+
+```
+https://youtu.be/BgIISP2mi3o?si=jAM8h8iYFz9cgLRrV
+```
+
+> **Rights.** This is another creator's video. It is used here for **technical acceptance only**.
+> Nothing produced from it was published anywhere, no account was connected, and no hosted
+> credential was spent. It is not a release artefact.
+
+**The source, as the internet described it.**
+
+| | |
+|---|---|
+| Video id | `BgIISP2mi3o` |
+| Title | I Stole The RAREST FERRARI in GTA 6 |
+| Duration | 2,279.108 s — **38:00** |
+| Resolution / rate | 1920×1080 **AV1** at **59.94005994005994 fps** |
+| Audio track | **Hindi** (`hi`) |
+| Source id / job id | `47789b6998aa46e9` / `ce370cb1b68841df` |
+
+**Why this source, and what it is for.** M5.3 and M5.4 were both **short** sources — ten and nine
+minutes. This one is **38 minutes**, at **60 fps**, in **AV1**. That makes it the source that
+exercises the three things M5.5 added:
+
+* A **long** file is a **long transcript** — **5,648 words** — which is where the subtitle-language
+  decision has to be right rather than nearly right.
+* A **60 fps AV1** file is **slow to decode**, so the detection cost is the product's problem and
+  has to be *bounded*, not discovered.
+* The video's webcam **changes size during it**, which is exactly what a fixed crop gets wrong.
+
+**The environment.** A separate application instance on **port 8804** with its own home at
+`%TEMP%\opencode\autoclip-yt-v4`, so the owner's own instance and its database were untouched. The
+model is the same real local **Ollama** (`llama3.1:8b` at `127.0.0.1:11434`), and
+`active_provider=ollama` means **no hosted call and no hosted spend**.
+
+### Journey H — the three things M5.5 added
+
+#### AT-H-01 — The subtitles are in English, without asking
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-H-01 |
+| **User input** | Nothing. The application was pointed at a **Hindi** video with the settings at their defaults. |
+| **Expected** | The captions are in **English**, because English is the default subtitle language — and the language **spoken** is recorded separately, so the two are never confused. |
+| **Actual** | The transcript came out of the recogniser with `language = "en"` and `source_language = "hi"`. **5,648 words** in **1,140 segments**, and **0** of them contain a character outside Latin script — every caption is English. The first words read *"Oh this car, wait what, this is a classic car, that famous car of YCT, wow, I want this car…"* |
+| **Result** | **VERIFIED** |
+| **Screenshot** | `AT-H-01-settings-subtitles.png` — Settings → Export → Subtitles, with *English (default)* selected |
+| **Logs** | The application's own log; the `transcripts` row read back from the scratch database |
+| **Backend evidence** | `transcript.json` in the job's work directory — `{"language": "en", "source_language": "hi", "model": "small", "source": "whisper"}`. The `transcripts` row: `language=en`, `word_count=5648`, `source=whisper`. The timings run the whole file: the first word at **0.000 s**, the last at **2,273.860 s** |
+| **Export inspection** | n/a — the transcript is the artefact here; the captions in the rendered file are inspected in AT-H-13 |
+
+#### AT-H-02 — The subtitle language can be changed at any time
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-H-02 |
+| **User input** | *Settings → Export → Subtitles → Subtitle language*, and the API's `PUT /api/settings` with `{"export": {"subtitle_language": "hi"}}` |
+| **Expected** | The setting is **persisted**, **validated**, and takes effect on the **next** clip — no restart, and nothing already made is rewritten. |
+| **Actual** | `GET /api/settings` returned `"subtitle_language": "en"` by default. `PUT` with `"hi"` returned **200** and the value came back as `"hi"`; `PUT` with `"source"` returned **200** and came back as `"source"`; `PUT` with `"klingon"` returned **400** and wrote nothing. The settings screen offers *English (default)*, *Same as the video*, and thirteen other languages |
+| **Result** | **VERIFIED** |
+| **Screenshot** | `AT-H-01-settings-subtitles.png` |
+| **Logs** | `PUT /api/settings` → 200; `PUT /api/settings` → 400 for the invalid code |
+| **Backend evidence** | 4 tests in `tests/test_api.py::TestSettings`; 3 of them **fail without the feature** |
+| **Export inspection** | n/a |
+
+#### AT-H-03 — A transcript in the wrong language is not reused
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-H-03 |
+| **User input** | Change the subtitle language, then let the job transcribe again |
+| **Expected** | A saved transcript in the **wrong** language is **not** reused. Serving it would deliver captions in a language the user no longer asked for, and say nothing about it. |
+| **Actual** | The runner compares the saved transcript's `language` with the requested target; when they differ it logs *"The saved transcript for job … is in '…', not '…'; transcribing again"* and transcribes. The external-engine case is decided by the **engine's name**, not by the transcript's shape: an external engine under `auto` is re-transcribed locally, and a **pinned** external engine raises `SpeechError` saying it cannot translate rather than silently producing the wrong language |
+| **Result** | **VERIFIED** |
+| **Screenshot** | n/a — a code path with a test |
+| **Logs** | The runner's own log line |
+| **Backend evidence** | `tests/test_subtitle_language.py` — **29 tests**; the reuse tests **fail without the fix** |
+| **Export inspection** | n/a |
+
+#### The run this section is about
+
+| | |
+|---|---|
+| The application | the scratch instance on **port 8804**, with its own home, so the owner's own instance and its database were never touched |
+| The source | **38:00** — 2,279.108 s — **1920×1080 AV1** at **59.94005994005994 fps**, spoken in **Hindi** |
+| The provider | the **local Ollama** (`llama3.1:8b` at `127.0.0.1:11434`); the job row records `provider=ollama`, so **no hosted credential was spent** |
+| The transcript | whisper `small`, **`language=en`**, **`source_language=hi`** — **5,648 words** in **1,140 segments**, **0** characters outside the Latin script |
+| The transcription cost | **1,836 s** for **2,279.1 s** of audio — **1.24× real time**, faster than the video plays |
+| The highlight windows | **nine**, over **5,648 words**, each at most **8,402** rendered characters — **74,262** characters in all |
+| The clips | **six**, between **30.84 s** and **35.98 s**, **194.50 s** in all |
+| The webcam report | **2,502** measured boxes over the **194.5 s**, **134** distinct widths between **134 px** and **540 px**, confidence **0.8131** |
+| The export | six files, **221,460,397 B** in all, **451 s** for **194.5 s** of footage |
+| The job | `status=done`, `progress=1.0` |
+
+#### AT-H-04 — The detector can see the streamer at all
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-H-04 |
+| **User input** | Nothing. The reference video was put in front of the face detector and the detector's own output was counted |
+| **Expected** | The streamer is a person in a **1920 px**-wide frame, and the detector finds them |
+| **Actual** | **Before the fix: 0 observations over 2,100 s**, and **11 over 900 s**. MediaPipe scales its input to about **128 px** on the short side, so a face **120 px** wide is smaller than one pixel of what it looks at. **After the fix: 56 observations over 2,100 s** and **45 over 900 s** — the tiles are **640 px** with **15 %** overlap |
+| **Result** | **VERIFIED** |
+| **Screenshot** | n/a — a detector's output rate |
+| **Logs** | the detector's own observation counts, measured over the same source before and after |
+| **Backend evidence** | 3 tests in `tests/test_faces.py`; the tiled-detection test **fails without the fix** |
+| **Export inspection** | n/a — the detector is the artefact here; what it found is exported in AT-H-13 |
+
+#### AT-H-05 — The webcam's own frame is measured, not guessed
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-H-05 |
+| **User input** | Nothing. 30 s of the reference video was put through the edge detector and the box it returned was compared with the webcam that is visibly there |
+| **Expected** | The detector returns the webcam's **own rectangle**, with all four of its edges |
+| **Actual** | **Before the fix** the horizontal edges were wrong: the bright panel of a game menu inside the search band won the vote. **After the fix** all four edges are found — `x=1274, w=638, y=9, h=426` — against a true box of about `x 1272…1912, y 0…436` |
+| **Result** | **VERIFIED** |
+| **Screenshot** | n/a — a measured rectangle |
+| **Logs** | the detector's own edge report: `edges=(True, True, True, True)` |
+| **Backend evidence** | 7 tests in `tests/test_webcam_box.py`; the horizontal-axis test **fails without the fix** |
+| **Export inspection** | n/a — the detector is the artefact here; the box it found is exported in AT-H-13 |
+
+#### AT-H-06 — The first frame of a clip is never read from before the clip
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-H-06 |
+| **User input** | Nothing. A clip that starts part-way into the source was put through the sampler and the first frame's position was read back |
+| **Expected** | The first frame of a clip is **inside** the clip. A negative clip-relative timestamp asks the decoder for a frame before the clip |
+| **Actual** | The sampler computed the first frame's position by subtracting the clip's start from a frame time that was already relative to the clip, and the result could be **negative**. The timestamp is now clamped at zero |
+| **Result** | **VERIFIED** |
+| **Screenshot** | n/a — a timestamp |
+| **Logs** | the sampler's own clock |
+| **Backend evidence** | 1 test in `tests/test_faces.py`; **fails without the fix** |
+| **Export inspection** | n/a |
+
+#### AT-H-07 — The split-screen keeps the webcam in its strip, and the gameplay clear of it
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-H-07 |
+| **User input** | *Layout → auto*, on a source with a webcam whose shape does not match the strip |
+| **Expected** | The webcam sits **inside** the 40 % band, and the gameplay's crop does **not** overlap it — so the streamer is never shown twice |
+| **Actual** | The partial path scaled the webcam by the face limit alone and placed it by its own size, so the result could be **wider than the band**. `_fit_in_strip` now fits it inside the strip on both axes at once and returns nothing when it cannot. Separately, the crop path was built without knowing where the webcam was, so the streamer appeared **twice**. `ReframeConfig.avoid` now carries the webcam's region and a **final pass over the finished plan** holds every fallback clear too |
+| **Result** | **VERIFIED** |
+| **Screenshot** | n/a — the layout's own geometry |
+| **Logs** | the layout's own records |
+| **Backend evidence** | 2 tests in `tests/test_layout.py::TestTheSplitScreen` and 6 in `tests/test_reframe.py::TestTheWebcamIsKeptOutOfTheGameplay`; the spill and fallback tests **fail without the fix** |
+| **Export inspection** | The finished renders are inspected in AT-H-13, where the gameplay's left edge is measured at **x = 452** — exactly clear of the webcam's region at **x = 1464** |
+
+#### AT-H-09 — The filter graph stays inside Windows' own limit
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-H-09 |
+| **User input** | Nothing. A webcam path of **600** measured boxes — the shape the detector's own sample rate produces on a ninety-second clip — was put through the filter-graph builder |
+| **Expected** | The command line fits inside the **32,767-character** limit Windows imposes |
+| **Actual** | Every measured box became a keyframe and the path became a nested `if()` per keyframe, evaluated at **every frame** of the clip: **50,019 characters** against a limit of **32,767**. The path is now **thinned** to at most **48** keyframes — the same budget the gameplay crop path uses — dropping the ones that say nothing their neighbours do not already say, and keeping the endpoints so the path still covers the clip |
+| **Result** | **VERIFIED** |
+| **Screenshot** | n/a — a command line's length |
+| **Logs** | the length of the built filter graph |
+| **Backend evidence** | 6 tests in `tests/test_webcam.py::TestTheWebcamPath`; the length and the budget tests **fail without the fix** |
+| **Export inspection** | The rendered clips' paths hold **30** to **96** keyframes across their segments, each segment's path within the **48** budget |
+
+#### AT-H-10 — The detector walks the source forwards
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-H-10 |
+| **User input** | Nothing. The six clips were given to the detector in the order the pipeline gives them — **rank** order — and the detector's own error was read back |
+| **Expected** | The decoder is asked for the stretches in the order they sit in the **source**. A decoder cannot seek backwards |
+| **Actual** | The clips come in rank order — the model's best clip first — and rank is not position. After the third stretch the detector asked the decoder to seek **backwards**, and the decoder refused: *"Input timestamp must be monotonically increasing."* The webcam was never found, and **every clip was rendered as plain gameplay**. The stretches are now walked in source order, in the runner, in the face sampler and in the shot detector. On the same source, asked in the same wrong order, the detector now finds the webcam at **98 %** confidence |
+| **Result** | **VERIFIED** |
+| **Screenshot** | n/a — the detector's own error, and then its absence |
+| **Logs** | the saved report's `unavailable_reason`: *"Input timestamp must be monotonically increasing."* — and, after the fix, a report with `failed=false`, `confidence=0.8131` and **2,502** measured boxes |
+| **Backend evidence** | 2 tests in `tests/test_faces.py::TestTheClock` and 1 in `tests/test_pipeline_cache.py::TestTheOrderTheWindowsAreAskedFor`; **fail without the fix**, with the production error |
+| **Export inspection** | The six clips carry the split-screen — see AT-H-13 |
+
+#### AT-H-11 — A saved crop plan is only reused for the shape it was built for
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-H-11 |
+| **User input** | Nothing. The plan on disk was read against the layout that was going to use it, and the review page's *"Export this clip"* path was read |
+| **Expected** | A plan is reused only when the settings it was built for still hold |
+| **Actual** | The plan was cached under the clip's name alone, with nothing saying what it was made *for*. When the webcam was found the gameplay's shape changed with it — from the whole **9:16** to the **15:16** bottom strip — and the old plan was reused anyway: on disk it was still **608×1080** (9:16) while the layout asked for **1012×1080** (15:16). A plan now records a **fingerprint** of its settings, and on the re-export path a saved plan is reused only when its **own shape** is the shape being exported |
+| **Result** | **VERIFIED** |
+| **Screenshot** | n/a — two numbers on disk |
+| **Logs** | the plan's own `config_fingerprint` — `aspect=15x16;fps=5.0;centre=False;avoid=1464.0,6.0,450.0,306.0;smoothing=none` |
+| **Backend evidence** | 4 tests in `tests/test_pipeline_cache.py::TestTheSavedCropPlan` and 2 in `tests/test_pipeline_cache.py::TestTheReExportPath`; **fail without the fix** |
+| **Export inspection** | All six rendered clips' gameplay crops are **1012×1080** — the 15:16 shape the bottom slot needs |
+
+#### AT-H-12 — The saved webcam report is reused only for the same windows
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-H-12 |
+| **User input** | Nothing. The report saved on disk was compared with the windows the run was about to ask for |
+| **Expected** | A report is reused when it was made for the same stretches — and **not** when it was not, because a report for other stretches says nothing about these ones |
+| **Actual** | The comparison was exact, and the two never matched: the report rounds its windows to **3 decimal places** while a clip's end time is `1303.9599999999998`. Every retry therefore paid for the detection again. The comparison is now tolerant to **0.01 s** |
+| **Result** | **VERIFIED** |
+| **Screenshot** | n/a — two lists of numbers |
+| **Logs** | the report's `windows` and the wanted windows |
+| **Backend evidence** | 1 test in `tests/test_pipeline_cache.py::TestTheSavedWebcamReport::test_a_report_for_the_same_windows_is_reused`; **fails without the fix** |
+| **Export inspection** | On the last run the report kept its **02:35:40** timestamp while the layouts beside it were rewritten at **02:56:29** — the saved report was read and reused, and the **seventeen minutes** of detection were not paid a second time |
+
+#### AT-H-13 — The rendered clips: the split-screen, the moving crop, and the English captions
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-H-13 |
+| **User input** | Nothing. The six exported files were measured against the source they were cut from |
+| **Expected** | Every clip is **1080×1920**; the top **40 %** is the webcam; the bottom **60 %** is the gameplay; the two halves are different things; the gameplay's crop is clear of the webcam; the webcam's crop **follows its own frame**; and the captions are **English** |
+| **Actual** | **All six pass.** Every file is **1080×1920** with an AAC track. The webcam's slot is `(0, 0, 1080, 768)` — exactly **40 %** — and the gameplay's slot is `(0, 768, 1080, 1152)` — exactly **60 %**. At three moments in each clip the top strip was compared with the source at the webcam's crop window for that moment: the mean absolute difference was between **4.1** and **39.0** on a 0–255 scale. The bottom was compared with the source at the gameplay's crop window: **1.4** to **24.8**. The gameplay's left edge sits at **x = 452**, exactly clear of the webcam's region at **x = 1464** (`1464 − 1012 = 452`). Every clip's webcam path **moves** — between **10** and **42** distinct centres per clip. The captions are **490** cues and **43,272** characters across the six clips, with **0** characters outside the Latin script |
+| **Result** | **VERIFIED** |
+| **Screenshot** | `AT-H-13-splitscreen-we-killed-that-shark.png`, `AT-H-13-splitscreen-400-taxi.png`, `AT-H-13-splitscreen-police-behind-me.png` — frames lifted from the rendered files |
+| **Logs** | the inspection script's own output, kept beside the screenshots: `NO PROBLEMS FOUND` |
+| **Backend evidence** | the run's own records — `layouts/*.json`, `crops/*.json`, `webcam_report.json` — and the **194.50 s** of footage the six clips use |
+| **Export inspection** | The six files themselves: `we-killed-that-shark_9x16.mp4` (30,365,300 B), `400-taxi-or-5-toll_9x16.mp4` (64,771,117 B), `police-behind-me_9x16.mp4` (28,793,347 B), `biggest-building-of-yct_9x16.mp4` (32,534,789 B), `we-got-50000_9x16.mp4` (31,900,979 B), `road-rash_9x16.mp4` (33,094,865 B) — **221,460,397 B** in all, which is exactly the `export_bytes` the job recorded. Between **1.50 s** and **6.62 s** per clip the layout is `gameplay_only`, with the reason recorded in the layout: *"no face was seen inside the region"* |
+
+#### AT-H-08 — MeowPower: the pipeline is one sentence away
+
+| Field | Record |
+|---|---|
+| **Test ID** | AT-H-08 |
+| **User input** | Open the running job's page |
+| **Expected** | The user sees **one sentence** saying what is happening, and **one number**. The pipeline's six technical stages are **not** the first thing on the page. |
+| **Actual** | The page read **MEOWPOWER** / *"Picking out the moments worth keeping"* / **40 %** / *"You can leave this page. It keeps working."* — with the six technical stages collapsed behind the disclosure *"What MeowPower is doing"*. The masthead kept the title, the duration, the resolution and the provider, and the **Cancel** button stayed where it was. The transcription stage's own sentence — *"Listening to what is being said"* — was read from the same screen earlier in the run |
+| **Result** | **VERIFIED** |
+| **Screenshot** | `AT-H-08-meowpower.png` |
+| **Logs** | n/a — a screen state |
+| **Backend evidence** | The DOM of the running application on port 8804, read through the in-app browser; the browser console carried **no errors** |
+| **Export inspection** | n/a |
+
+#### Journey H — the verdict
+
+Every acceptance item in this journey, with its verdict. Nothing is upgraded past what was measured,
+and the three items that are **UNVERIFIED** are **UNVERIFIED** here for the same reason they are
+everywhere else in this file: no authorised credential was supplied.
+
+| Test ID | What it establishes | Verdict |
+|---|---|---|
+| AT-H-01 | The captions are in **English** by default, and the language **spoken** is recorded separately | **VERIFIED** |
+| AT-H-02 | The subtitle language can be **changed at any time**, and an invalid code is refused | **VERIFIED** |
+| AT-H-03 | A transcript in the **wrong** language is not reused | **VERIFIED** |
+| AT-H-04 | The face detector can see the streamer at all | **VERIFIED** |
+| AT-H-05 | The webcam's **own frame** is measured, not guessed | **VERIFIED** |
+| AT-H-06 | The first frame of a clip is never read from before the clip | **VERIFIED** |
+| AT-H-07 | The split-screen keeps the webcam in its strip, and the gameplay clear of it | **VERIFIED** |
+| AT-H-08 | **MeowPower** shows one sentence and one number, with the stages one disclosure away | **VERIFIED** |
+| AT-H-09 | The filter graph stays inside Windows' own **32,767-character** limit | **VERIFIED** |
+| AT-H-10 | The detector walks the source **forwards** | **VERIFIED** |
+| AT-H-11 | A saved crop plan is only reused for the shape it was built for | **VERIFIED** |
+| AT-H-12 | A saved webcam report is only reused for the same windows | **VERIFIED** |
+| AT-H-13 | The six rendered clips: the **40/60** split, the moving crop, the clear gameplay, the **English** captions | **VERIFIED** |
+| — | A **non-English** subtitle target on real audio | **UNVERIFIED** — the path is implemented, guarded and reachable, and only the **English** path was measured on real audio. That is **K33** / **R9**, not a pass |
+| — | The **hosted** LLM and **ElevenLabs** paths | **UNVERIFIED (external)** — no authorised credential; the run used a local Ollama and local whisper |
+| — | **Publishing** the result anywhere | **NOT APPLICABLE** — this is a third-party creator's video, used for technical acceptance only. Nothing was published, no account was connected, and no hosted credential was spent |
+| — | The **re-export** path rebuilding the webcam composition | **PARTIAL** — the crop, the shape and the duration all match the ratio asked for, but a stacked webcam/gameplay composition is not reconstructed from the review page. That is **K10**, and it is why the acceptance clips were produced by requeueing the job rather than by re-exporting it |
+
+---
+
 ## The defects this testing found
 
 All of them were found by **running the application or its gates**, not by reading the code, and all
 of them are covered by tests that fail without the fix.
+
+> **Amendment — 2026-11-24 (M5.5).** The **third real source** — a **38-minute**, **1080p60 AV1**,
+> **Hindi** video — found **fourteen** more, and they are the defects that only a long, high-frame-rate,
+> non-English video can reach. Six of them are in the **webcam framing** — the detector could not see
+> the streamer at all (**defect 23**), the tile fix read the tiles wrongly (**defect 24**), the edge
+> search looked in the wrong place (**defect 25**), the first frame was read from before the clip
+> (**defect 26**), the webcam spilled out of its own strip (**defect 27**), and the gameplay crop did
+> not keep clear of it (**defect 28**). Two are elsewhere: the progress page lost the video's title
+> the moment the event stream opened (**defect 29**), and the webcam's path grew an ffmpeg expression
+> past **Windows' own 32,767-character limit** (**defect 30**). The last three were found by the
+> **first complete run** of the new framing, and they are the reason the split-screen works at all:
+> the detector was asked for the stretches in the wrong order and refused (**31**), a saved crop plan
+> was reused after the layout had changed (**32**), and a detection that could not run was kept as a
+> final answer (**33**). A fourth was found while fixing **32** — a re-export would have stretched a
+> plan made for another shape (**34**). The last two were found by the **re-export** that finally
+> produced the acceptance clips: the saved webcam report was never reused because the windows never
+> matched exactly (**35**), and the speech-emphasis zoom broke the render because ffmpeg evaluates a
+> `scale` filter's size **once**, at init (**36**). They are in the table below, with the evidence in
+> the M5.5 section of this file. The twenty-two defects above remain exactly as measured here.
 
 > **Amendment — 2026-11-21 (M5.1).** This application run found **three** product defects, and
 > this section records them as they stood at M5. A **fourth product defect** was found afterwards,
@@ -1684,6 +1970,20 @@ of them are covered by tests that fail without the fix.
 | 20 | **Two clips of the same footage survived the pipeline.** The de-duplication compared the candidates' **word ranges**, and a clip *inside* another one has almost no words in common with it: the shorter clip of the first real pair covered **14** words, the longer **104**, of which those 14 were a part — a common share of a fifth, well under the threshold. In **time**, though, the shorter clip was wholly inside the longer one. | The same run's diagnostics: **4 of the 9 clips** were reported as *"overlaps another one by 100%"*, and the diagnostic's own rule (overlap ≥ half of the shorter) disagreed with the pipeline's (AT-G-13). | One shared definition of *"the same clip"* — `pipeline/duplicates.py` — used by **both** the pipeline and the diagnostic: two clips are duplicates when the overlap covers at least **half of the shorter one**. The higher score survives. | 5 tests in `tests/test_highlights.py::TestDuplicateClips` (new file); **3 fail without the fix** |
 | 21 | **A clip could open in the middle of a word.** The boundary alignment pulls the cut back into the silence before the first word, but it could also push it *past* the word's own start when the silence detector and the recogniser disagreed by a few tens of milliseconds — which breaks the code's own documented invariant, *"alignment only ever widens a clip"*. | The same run's diagnostics: **2 of the 9 clips** were reported as *"1 word(s) fall outside the clip"*. Rank 1's first word started at **533.800 s** and the clip opened at **533.852 s** — **52 ms inside the word** (AT-G-14). | The alignment may only ever **widen** the clip: the result is clamped to the first word's own start, so the cut is at or before the word, never inside it. | 2 tests in `tests/test_boundaries.py::TestSilenceAlignment`; **2 fail without the fix** |
 | 22 | **A face track could jump to a smaller face beside it.** The tracker's proximity fallback scaled its tolerance by the **larger** of the two faces, so a track could hop onto a smaller face-shaped object near the speaker — and the crop would then pan away from the speaker to follow it. | Found while **verifying defect 19** against the real source: the track of one segment held two different people, and the crop followed the wrong one. A real frame shows what the detector saw: the speaker, leaning forward, and a Pikachu plush on the shelf behind them (AT-G-12). | The tolerance is scaled by the **smaller** of the two faces — the person's own face width — which is what the rule always said. A track stays with its person. | 1 test in `tests/test_reframe.py::TestTracking`; **fails without the fix** |
+| 23 | **The face detector could not see the streamer at all.** MediaPipe scales its input to about **128 px** on the short side, so a face **120 px** wide in a **1920 px** frame is smaller than one pixel of the image the detector actually looks at. Over **2,100 s** of the reference video the detector found **0** faces. | Running the detector over the reference source, before any of the framing work: **0** observations over 2,100 s, and **11** over 900 s — a rate far too low to track anything (AT-H-04). | The detector **tiles** the frame instead of shrinking it: **640 px** tiles with **15 %** overlap, each tile copied so it is contiguous. The same source then gave **56** observations over 2,100 s and **45** over 900 s. | 3 tests in `tests/test_faces.py`; the tiled-detection test **fails without the fix** |
+| 24 | **The tiles were read with the wrong strides.** A tile cut out of a frame is a **non-contiguous view** of the original array, and MediaPipe read it as if it were contiguous — so every tiled frame came back with **zero** faces, which looked exactly like "there is no face here". | Running the tiled detector over the same source and getting **0** observations where the untiled detector had found some (AT-H-04). | Each tile is copied with `np.ascontiguousarray` before it is handed to the detector. | 2 tests in `tests/test_faces.py`; the contiguous-tile test **fails without the fix** |
+| 25 | **The edge search looked in the wrong place.** The webcam's **horizontal** edges were searched for in a narrow band around the face — but the edge of a webcam box is a long horizontal line **across the whole box**, and in the reference video the bright panel of a game menu inside that band won the vote. | Running the new edge detector over 30 s of the reference video: the **horizontal** edges were wrong, and the box it produced did not match the webcam (AT-H-05). | The horizontal edges are searched over the **columns the box occupies** — the width the vertical edges already established — not over a narrow band. On the same 30 s the detector now finds **all four** edges: `x=1274, w=638, y=9, h=426`, against a true box of about `x 1272…1912, y 0…436`. | 7 tests in `tests/test_webcam_box.py`; the horizontal-axis test **fails without the fix** |
+| 26 | **The first frame of a clip was read from before the clip began.** The sampler computed the first frame's position by subtracting the clip's start from a frame time that was already relative to the clip, and the result could be **negative** — which asks the decoder for a frame before the clip. | The clip-relative timestamp arithmetic in `_iter_frames`, checked against a clip that starts part-way into the source (AT-H-06). | The timestamp is clamped at zero. | 1 test in `tests/test_faces.py`; **fails without the fix** |
+| 27 | **The webcam spilled out of its own strip.** When the webcam could not fill the **40 %** band without turning the face into a blur, the partial path scaled it by the face limit alone and placed it by its own size — so the result could be **wider than the band** it was supposed to sit in. | The layout's own geometry, checked against a webcam whose aspect does not match the strip (AT-H-07). | `_fit_in_strip` fits the webcam **inside** the strip on both axes at once, and returns nothing when it cannot. | 2 tests in `tests/test_layout.py::TestTheSplitScreen`; the spill test **fails without the fix** |
+| 28 | **The gameplay crop did not keep clear of the webcam.** The layout already kept the two areas apart, but the **crop path** — the window the gameplay is actually cut from — was built without knowing where the webcam was, so the streamer appeared **twice**: once in the strip, once inside the gameplay. | Comparing the gameplay window against the webcam's region in the plan (AT-H-07). | `ReframeConfig.avoid` carries the webcam's region; the crop window is pushed clear of it, and a **final pass over the finished plan** holds every fallback clear too — the centre crop, the fit, and the whole-frame path. | 6 tests in `tests/test_reframe.py::TestTheWebcamIsKeptOutOfTheGameplay`; the fallback tests **fail without the fix** |
+| 29 | **The progress page lost the video's title the moment the event stream opened.** The server's first `snapshot` event carried the job but **not** its source, so the page rendered the title for a moment and then replaced it with nothing — the duration, the resolution and the title all went at once. | Opening the running job's page in the browser and reading the DOM (AT-H-08). | The snapshot carries the source, and the client **merges** the snapshot rather than substituting it, so a payload without a source can never take the title off the page. | 1 test in `tests/test_api.py::TestEventStream::test_the_snapshot_carries_the_source`; **fails without the fix** |
+| 30 | **The webcam's path grew an ffmpeg expression past Windows' own command-line limit.** Every measured box became a keyframe, and the path became a nested `if()` per keyframe — evaluated at **every frame** of the clip. A path of **600** boxes produced a filter graph of **50,019 characters**, against a limit of **32,767**. | Building the filter graph from a path of 600 measured boxes — the shape the detector's own sample rate produces on a ninety-second clip (AT-H-09). | The path is **thinned** to at most **48** keyframes — the same budget the gameplay crop path uses — dropping the ones that say nothing their neighbours do not already say, and keeping the endpoints so the path still covers the clip. | 6 tests in `tests/test_webcam.py::TestTheWebcamPath`; the length and the budget tests **fail without the fix** |
+| 31 | **The detector was asked for the stretches in the wrong order, and refused.** The clips come in **rank** order — the model's best clip first — and rank is not position. The detector walked the source in that order, so after the third stretch it asked the decoder to seek **backwards**, and the decoder refused: *"Input timestamp must be monotonically increasing."* The webcam was never found, and **every clip was rendered without the split-screen**. | The real run: the saved report said `"unavailable_reason": "Input timestamp must be monotonically increasing."`, no track, and the six exports came out as plain gameplay with no webcam strip at all (AT-H-10). | The stretches are walked in the order they sit in the **source**, whatever order they are given in — in the runner, in the face sampler and in the shot detector. On the same source, asked in the same wrong order, the detector now finds the webcam at **98 %** confidence. | 2 tests in `tests/test_faces.py::TestTheClock` and 1 in `tests/test_pipeline_cache.py::TestTheOrderTheWindowsAreAskedFor`; **fail without the fix**, with the production error |
+| 32 | **A saved crop plan was reused after the layout had changed.** The plan was cached under the clip's name alone, with nothing saying what it was made *for*. When the webcam was found the gameplay's shape changed with it — from the whole **9:16** to the **15:16** bottom strip — and the old plan was reused anyway, so the gameplay was cropped to the wrong shape and stretched into the slot. | The run after defect 31 was fixed: the plan on disk was still **608×1080** (9:16) while the layout asked for **1012×1080** (15:16) (AT-H-11). | The plan records a **fingerprint** of the settings it was built for — the aspect ratio and the webcam region it was kept clear of — and a saved plan is only reused when the settings still match. | 4 tests in `tests/test_pipeline_cache.py::TestTheSavedCropPlan`; the stage test **fails without the fix** |
+| 33 | **A detection that could not run was kept as a final answer.** The report recorded *why* the webcam was not found, and a report with a reason was reused as-is. The detector's failure — a decoder that refused, a model that was missing — was therefore as final as *"there is no webcam in this footage"*, and the job could never find the webcam again. | The same report that defect 31 produced: `"unavailable_reason": "Input timestamp must be monotonically increasing."` — an error message, cached as if it were an answer (AT-H-10). | A report says whether the detection **failed** or simply found nothing, and only a real answer is reused. A failed detection is tried again, and a report written by an **older version** of the detector — which cannot say whether it failed — is not reused either. | 4 tests in `tests/test_pipeline_cache.py::TestTheSavedWebcamReport`; **fail without the fix** |
+| 34 | **A re-export would have stretched a plan made for another shape.** Found while fixing defect 32, by reading the re-export path rather than by running it. The review page's *"Export this clip"* reused the job's saved plan whenever the ratio was **9:16** — but after defect 32's fix that plan is the **15:16** one the stacked layout needs, and stretching it into a 9:16 frame distorts the gameplay. | Reading `api/clips.py::_crop_path_for` while fixing defect 32, and checking what it would do with the plan the fix produces (AT-H-11). | A saved plan is only reused when its **own shape** is the shape being exported; otherwise the crop is made for the ratio asked for. | 2 tests in `tests/test_pipeline_cache.py::TestTheReExportPath`; **fail without the fix** |
+| 35 | **The saved webcam report was never reused, because the windows never matched exactly.** The report rounds the windows it stores to **3 decimal places**, while a clip's end time is `1303.9599999999998`. The comparison was exact, so it never matched — and every retry paid for the detection again, which on this source is **seventeen minutes**. | The last run of the job: the report on disk carried the timestamp **02:35:40** while the layouts beside it were rewritten at **02:56:29** — the detection had been done again even though the windows had not moved (AT-H-12). | The comparison is tolerant to **0.01 s**, which is smaller than the rounding the report applies and far smaller than the difference between two different stretches. | 1 test in `tests/test_pipeline_cache.py::TestTheSavedWebcamReport::test_a_report_for_the_same_windows_is_reused`; **fails without the fix** |
+| 36 | **The speech-emphasis zoom broke the render.** The zoom was computed in a `scale` filter, and ffmpeg evaluates a `scale` filter's `w` and `h` **once**, at init — so a per-frame expression in them is refused: *"Expressions with frame variables 'n', 't', 'pos' are not valid in init eval_mode."* Every clip with a moving webcam failed to render. | Rendering a moving webcam with a speech emphasis through the real ffmpeg: the export failed with `[Parsed_scale_90 ...] Expressions with frame variables 'n', 't', 'pos' are not valid in init eval_mode.` (AT-H-13). | The scale is evaluated **per frame** (`eval=frame`) and the centred crop that follows it is evaluated the same way, so the zoom can change within the clip. | 1 test in `tests/test_export_render.py::TestLayoutRender::test_a_moving_webcam_with_speech_renders` — a **behavioural** render test that reproduces the exact production error; **fails without the fix** |
 
 **And one finding that is **not** a defect, because nothing the product promises was broken.** The
 same source, run twice, gave **two different transcripts** from **byte-identical** media — the

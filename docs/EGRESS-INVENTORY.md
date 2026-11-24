@@ -37,6 +37,7 @@ request. The target rule in the table above is the rule that runs.
 | Logging | Logs HTTP status and the error body on failure. Does not log the key. Does not log audio content. The transfer itself is recorded in `egress_log` with a description, never the audio. |
 | Failure | Raises `SpeechError` with the status and body. Under `auto`, `runner.py` falls back to local Whisper and records a notice. Under `elevenlabs` (pinned), the job fails. |
 | Fallback invented? | No. Verified in `speech/base.py:resolve_engine` and `pipeline/runner.py:366-404`. |
+| Can it translate? | **No.** ElevenLabs' speech-to-text returns the language spoken. **M5.5** added the subtitle-language setting, and an external engine therefore cannot satisfy a target that differs from the spoken language. The runner decides this by the **engine's name** (`engine.name == "whisper"`), not by a flag on the transcript: an external engine under `auto` is **re-transcribed locally** so the captions are in the language the user asked for, and an external engine **pinned** by the user raises `SpeechError` saying it cannot translate rather than silently producing the wrong language. **The destination is unchanged** — the same audio goes to the same endpoint under the same consent rule; what changed is what happens to the answer. |
 
 **Important nuance.** Under `auto`, the *fallback* is local, but the *preference* is external: if a
 key exists, audio is uploaded first. So the presence of a key silently changes whether media leaves

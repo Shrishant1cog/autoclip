@@ -25,6 +25,7 @@ milestone `In progress` and is reported as such.
 | **M5.2 — Real ingest** (post-release increment, 2026-11-21) | **Complete** | The application pointed at a **real four-hour YouTube live recording** and run through the **real ingest path** — twice, at 360p and at the product's default 1080p; the pipeline exercised on real segments cut from that same file, with a real local model; **1,330 tests** passing; **four more product defects found and fixed** (the configured format was dead, the download was never logged, the crop-safety measurement lied, and a load-balanced host was mistaken for a DNS rebinding); the matrix is **unchanged** at 110 · 9 · 1 · 9; the M5 verdict is unchanged and v0.1.0 is still gated on K1 |
 | **M5.3 — Complete pipeline** (post-release increment, run 2026-11-21) | **Complete** | The application pointed at a **real ten-minute YouTube video** and run through **every stage, end to end** — ingest, transcribe, highlight, lay out, export, caption, diagnose — which is what K22 said was missing; **1,397 tests** passing; **five more product defects found and fixed** (the sentence terminators were Latin-only, the ffmpeg command line could exceed Windows' own limit, the webcam emphasis ran on a segment-local clock, a caption could be held for twelve seconds, and the video graph consumed a filter output once per crop segment — which ffmpeg 9 tolerates and ffmpeg 7 refuses); the matrix is **unchanged** at 110 · 9 · 1 · 9; the M5 verdict is unchanged and v0.1.0 is still gated on K1 |
 | **M5.4 — A second real source** (post-release increment, run 2026-11-22) | **Complete** | The application pointed at a **second real YouTube video** — a **9:35** CarryMinati clip, used for technical acceptance only — and run through **every stage, end to end**. The highlight stage **failed twice** with *"Ollama timed out."*, and the root cause was that the request **did not fit the model's context window** — the one that would have produced *wrong clips* rather than no clips; **nine more product defects found and fixed** (the hard-coded 600 s ceiling, the message that blamed a GPU the machine does not have, the stage that kept going after a timeout, the prompt that did not fit, two exports that overwrote each other, a crop-safety measurement about the wrong face, two definitions of "the same clip", a clip that opened inside its first word, and a face track that jumped to a smaller face beside the speaker); the source was then run **twice** and the two runs compared **byte by byte**, which found the recogniser's **non-determinism** (**K32**); the matrix is **unchanged** at 110 · 9 · 1 · 9; the M5 verdict is unchanged and v0.1.0 is still gated on K1 |
+| **M5.5 — Subtitles, framing, MeowPower** (post-release increment, run 2026-11-23) | **Complete** | Three capabilities the owner asked for after M5.4: **English subtitles by default**, **a measured webcam frame that the crop follows**, and **a MeowPower screen that hides the pipeline**. Run against a **third real YouTube source** — a **38-minute** AV1 1080p60 recording — through **every stage, end to end**; **1,453 + new** tests passing; the matrix is **unchanged** at 110 · 9 · 1 · 9; the M5 verdict is unchanged and v0.1.0 is still gated on K1 |
 
 ---
 
@@ -902,6 +903,232 @@ all carry forward exactly as before. M5.4 closed no matrix row and opened none.
 
 ---
 
+## M5.5 — Subtitles, framing, and MeowPower
+
+**Status: Complete.** A fifth post-release increment, run and documented on **2026-11-23** and
+**2026-11-24**, on the same branch. The branch is untagged and **v0.1.0 is still gated on K1**, the
+reframe golden set, so this did not change the M5 verdict — it changed the **product** and the
+**evidence base**.
+
+**What it did.** The owner asked for three things after M5.4 closed:
+
+1. **English subtitles by default**, changeable at any time, without touching a config file.
+2. **A vertical split-screen that is actually right** — the streamer in the top **40 %**, the gameplay
+   in the bottom **60 %**, with the webcam's own frame **measured** rather than guessed, and the crop
+   **following it** when the streamer changes its size mid-video.
+3. **A simple "MeowPower" screen** that hides the pipeline's six internal stages from somebody who
+   pasted a link and wants a clip.
+
+**The source.** `https://youtu.be/BgIISP2mi3o?si=jAM8h8iYFz9cgLRrV` — *"I Stole The RAREST FERRARI
+in GTA 6"*, **38:00** long (**2,279.108 s**), **1920×1080 AV1** at **59.94005994005994 fps**, with
+an AAC audio track. The spoken language is **Hindi**.
+
+> **Rights.** This is a third-party creator's video. It is used here for **technical acceptance
+> only**. Nothing produced from it was published anywhere, no account was connected, and no hosted
+> credential was spent. It is not a release artefact.
+
+**The environment.** A separate application instance on **port 8804** with its own home at
+`%TEMP%\opencode\autoclip-yt-v4`, so the owner's own instance and its database were untouched. The
+model is the same real local **Ollama** (`llama3.1:8b` at `127.0.0.1:11434`), and
+`active_provider=ollama` means **no hosted call and no hosted spend**.
+
+### The three capabilities, and what each one actually is
+
+#### 1. Subtitles in English, by default, changeable at any time
+
+**The setting** is `export.subtitle_language`, and it **defaults to `"en"`**. `""` also means
+English, because a default is a decision and an unset field is not one. `"source"` means *"the
+language spoken in the video"*, and any other ISO 639-1 code asks for that language.
+
+**The decision lives in one module** — `backend/autoclip/pipeline/language.py` — because this is the
+part that has to be *right*:
+
+| Spoken | Target | Task | Pinned to |
+|---|---|---|---|
+| same as target | any | `transcribe` | the spoken language |
+| different | **`en`** | `translate` | the spoken language |
+| different | anything else | `transcribe` | the **target** language |
+| **not known yet** | `en` | `translate` | — |
+| not known yet | anything else | `transcribe` | the target language |
+
+**Why English gets the translate task.** Whisper's `translate` task decodes the English words
+against the source audio, so every word keeps the timing of the speech it came from. That is what
+keeps the captions in step with the voice. Pinning a non-English target to `transcribe` is a
+different thing: Whisper then *speaks* in that language, which is worth a different amount for
+different pairs — so it is **measured on real audio**, not promised. This increment measured the
+**English** path on the real source; the other targets are recorded as a residual.
+
+**The spoken language is detected once**, by `faster_whisper`'s own `detect_language()` over the
+first **30 s** — the same window Whisper itself uses, so the answer here and the answer inside the
+transcription agree. Below **0.5** confidence the language is not trusted and the recogniser is left
+to decide.
+
+**The transcript now carries two languages.** `Transcript.language` is the language the **words**
+are in — the captions' language. `Transcript.source_language` is the language **spoken**. Both are
+persisted and round-tripped, so a saved transcript says which is which.
+
+**The engine decides, not the transcript's shape.** A saved transcript in the **wrong** language is
+not reused; it is transcribed again. And the choice between the local recogniser and an external
+one is made by the **engine's name** (`engine.name == "whisper"`), not by a flag on the transcript:
+an external engine that cannot translate is re-transcribed locally, and a *pinned* external engine
+raises `SpeechError` saying it cannot translate rather than silently producing the wrong language.
+
+**The setting is in the settings screen**, under **Export → Subtitles**, and it takes effect on the
+**next** clip — no restart, no re-run of anything already made.
+
+#### 2. The webcam's own frame, measured — and followed
+
+**The problem.** The old detector found a **face** and inferred a region around it. That region is
+the face's headroom, not the webcam's frame. A crop built from it spills outside the webcam and
+shows a strip of gameplay above and below the streamer.
+
+**The detector.** `backend/autoclip/pipeline/reframe/webcambox.py` finds the **box** by looking for
+**steps**: the pixels just inside the webcam and the pixels just outside it are different scenes.
+Two rules make it work on real footage, and both were found by the real footage:
+
+* **The edges are found in order.** The **vertical** edges are looked for first, over the rows the
+  face occupies — a vertical line of a different brightness across the height of a face is not
+  something a game screen does often. The **horizontal** edges are then looked for over the
+  **columns the box turned out to occupy**, not over a narrow band around the face. This was a real
+  bug: the first implementation searched a narrow band, and the bright panel of a game menu won.
+* **Coverage, not brightness, decides.** The score is the size of the step multiplied by how much
+  of the edge shows it. A real box edge shows the step along almost its whole length; a bright patch
+  in the scene shows it in one place.
+
+Each edge is reported separately, with the confidence that went into it. When no step is found, the
+face-based estimate is kept — a box that is a little too big is a much smaller fault than a box that
+is wrong — and an **implausible** measured box falls back to the face estimate rather than being
+used.
+
+**The box path travels.** The measured boxes are carried per-time through **track → layout →
+export**, and the renderer crops the webcam with a **time-varying** window
+(`crop=w=…:h=…:x='max(0,min(…,…))':y='…'`), so a streamer who changes the size of their webcam
+mid-clip is still framed correctly. The window keeps the size it had for most of the clip — a
+filter graph cannot change its output's size halfway through — and it is clamped to the source.
+
+**The gameplay keeps clear.** The webcam is drawn in the strip **above** the gameplay, so the
+gameplay crop must stay clear of it or the webcam is shown twice. `ReframeConfig.avoid` carries the
+webcam's region, the crop window is pushed clear of it, and a **final pass over the finished plan**
+holds every fallback clear too — the centre crop, the fit, and the whole-frame path.
+
+**The strip is the layout, not a reward for a big webcam.** In **auto** mode the planner now
+**prefers** the 40/60 stacked split rather than falling back to a corner overlay. A webcam that
+cannot fill the strip without turning the face into a blur is drawn **smaller inside** it — the
+`allow_partial` path, with `_fit_in_strip` keeping it inside the band. A webcam so small that it
+would sit in the strip like a postage stamp (under **half** the strip's fill) still goes to a
+corner, because that is the lesser fault.
+
+#### 3. MeowPower — the simple face of the pipeline
+
+The job page used to open with **six technical stages** — *Prepare, Transcribe, Highlights,
+Reframe, Captions, Export* — which is the pipeline's own vocabulary and the wrong thing to put in
+front of somebody who pasted a link.
+
+**MeowPower** is what the user sees instead: the name, **one sentence** saying what is happening
+right now in plain words (*"Listening to what is being said"*), **one number** saying how far along
+it is, and nothing else. The technical stages are **not deleted** — they are one disclosure away, as
+*"What MeowPower is doing"*, because somebody diagnosing a slow job needs them.
+
+The mapping from stage to sentence lives in `frontend/src/components/MeowPower.tsx` and is the only
+place the two vocabularies meet.
+
+### The defects this increment found
+
+**Fourteen**, all of them found by running the application or its gates against the real
+**38-minute, 1080p60 AV1, Hindi** source — and all of them guarded by tests that fail without the
+fix. Six are in the **webcam framing**, and they are the reason the framing works at all: a long,
+high-frame-rate source is what exposed them. Two are elsewhere — the progress page and the filter
+graph. Three came out of the **first complete run** of that framing, and a fourth was found while
+fixing one of them. The last two came out of the **re-export** that finally produced the acceptance
+clips.
+
+| # | The defect | Why it mattered |
+|---|---|---|
+| **23** | **The face detector could not see the streamer.** MediaPipe scales its input to about **128 px** on the short side, so a face **120 px** wide in a **1920 px** frame is smaller than one pixel of what it looks at. Over **2,100 s** of the reference video it found **0** faces | Without it there is no webcam, and so no split-screen at all. Fixed by **tiling** the frame — **640 px** tiles, **15 %** overlap |
+| **24** | **The tiles were read with the wrong strides.** A tile cut out of a frame is a **non-contiguous view**, and MediaPipe read it as if it were contiguous, so every tiled frame came back with **zero** faces | The tile fix appeared to work and did not. Each tile is now copied with `np.ascontiguousarray` |
+| **25** | **The edge search looked in the wrong place.** The webcam's **horizontal** edges were searched for in a narrow band around the face rather than over the **columns the box occupies** — so the bright panel of a game menu won the vote | The detector now finds **all four** edges on the reference: `x=1274, w=638, y=9, h=426` |
+| **26** | **The first frame of a clip was read from before the clip began** — a negative clip-relative timestamp | The timestamp is clamped at zero |
+| **27** | **The webcam spilled out of its own 40 % strip** when it could not fill the band without blurring the face | `_fit_in_strip` fits it inside the band on both axes at once |
+| **28** | **The gameplay crop did not keep clear of the webcam**, so the streamer was shown **twice** — once in the strip, once inside the gameplay | `ReframeConfig.avoid` carries the webcam's region, and a **final pass over the finished plan** holds every fallback clear too |
+| **29** | **The progress page lost the video's title** the moment the event stream opened, because the server's `snapshot` event carried no source | The snapshot carries the source, and the client **merges** rather than substitutes |
+| **30** | **The webcam's path grew an ffmpeg expression past Windows' own 32,767-character limit** — every measured box became a keyframe, and a path of **600** boxes produced a **50,019-character** filter graph | The path is thinned to at most **48** keyframes, the same budget the gameplay crop path uses |
+| **31** | **The detector was asked for the stretches in the wrong order, and refused.** The clips come in **rank** order and rank is not position, so the detector asked the decoder to seek backwards; the decoder refused with *"Input timestamp must be monotonically increasing"*, the webcam was never found, and **every clip was rendered without the split-screen** | The stretches are now walked in the order they sit in the **source**. On the same source, asked in the same wrong order, the detector finds the webcam at **98 %** confidence |
+| **32** | **A saved crop plan was reused after the layout had changed.** The plan was cached under the clip's name alone, with nothing saying what it was made *for*; when the webcam was found the gameplay's shape changed with it, and the old plan was reused anyway | A plan records a **fingerprint** of the settings it was built for, and is only reused when they still match |
+| **33** | **A detection that could not run was kept as a final answer** — the report said *why* the webcam was not found, and a report with a reason was reused as-is | A report now says whether the detection **failed** or simply found nothing, and only a real answer is reused. A report from an **older version** is not reused either |
+| **34** | **A re-export would have stretched a plan made for another shape** — found while fixing **32**, by reading the path rather than by running it | A saved plan is only reused when its **own shape** is the shape being exported |
+| **35** | **The saved webcam report was never reused.** The report rounds its windows to **3 decimal places** while a clip's end time is `1303.9599999999998`, so the exact comparison never matched and every retry paid for the detection again | The comparison is tolerant to **0.01 s** — smaller than the report's own rounding, and far smaller than the difference between two different stretches |
+| **36** | **The speech-emphasis zoom broke the render.** The zoom was computed in a `scale` filter, and ffmpeg evaluates a `scale` filter's `w` and `h` **once**, at init — so a per-frame expression in them is refused: *"Expressions with frame variables 'n', 't', 'pos' are not valid in init eval_mode."* Every clip with a moving webcam failed to render | The scale is evaluated **per frame** (`eval=frame`), and the centred crop that follows it is evaluated the same way |
+
+The full evidence for each is in `docs/M5-APPLICATION-TESTING.md` §M5.5 and the defect table there.
+
+### The gates, at M5.5
+
+| Gate | Result at the M5.5 tree |
+|---|---|
+| `ruff check .` | *All checks passed* |
+| `ruff format --check .` | *239 files already formatted* |
+| `mypy backend/autoclip` | **10 errors in 8 files** — the M1 baseline, **unchanged**, and checked against a clean worktree at `HEAD` to be certain that none of the ten is new |
+| Unit selection (Windows, ffmpeg 9.0.2) | **1,483 passed**, 73 deselected, 247.85 s |
+| Render selection (Windows, ffmpeg 9.0.2) | **49 passed**, 1,507 deselected, 254.50 s |
+| Whole suite, one invocation (Windows, ffmpeg 9.0.2) | **1,532 passed**, 0 failed, 0 skipped, 0 xfailed, 494.89 s |
+| Frontend `tsc -b && vite build` | 60 modules transformed, built in 1.63 s |
+| Feature matrix | **129 rows, consistent** — 110 Implemented · 9 Partial · 1 Blocked · 9 Not Applicable · 0 Missing |
+| Linux leg (ffmpeg 7.0.2) | **not** reproduced locally for M5.5 — the tree's own CI runs the four backend legs on every push, and the M5.5 tree is green on all six jobs |
+
+### The acceptance run, and what it produced
+
+| | |
+|---|---|
+| The transcript | whisper `small`, **`language=en`**, **`source_language=hi`** — **5,648 words** in **1,140 segments**, **0** characters outside the Latin script |
+| The transcription cost | **1,836 s** for **2,279.1 s** of audio — **1.24× real time** |
+| The highlight windows | **nine** over **5,648 words**, at most **8,402** rendered characters each |
+| The webcam report | **2,502** measured boxes over the **194.5 s** the six clips use, **134** distinct widths between **134 px** and **540 px**, confidence **0.8131** |
+| The export | six files between **02:57:35** and **03:05:06** — **451 s** for **194.5 s** of footage, **221,460,397 B** in all |
+| The clips | **six**, every one **1080×1920**, the webcam's slot exactly **40 %** and the gameplay's exactly **60 %**, the gameplay's crop's left edge at **x = 452** — exactly clear of the webcam's region at **x = 1464** |
+| The captions | **490** cues, **43,272** characters, **0** outside the Latin script |
+
+### Decisions taken in M5.5
+
+| Decision | Why | Where recorded |
+|---|---|---|
+| **English is the default, and `""` means English too** | The audience for a Hindi gaming video is English-speaking. A default is a decision; an unset field is not one, so both spellings land on the same answer | `backend/autoclip/config.py`, `backend/autoclip/pipeline/language.py` |
+| **The language decision lives in one module** | This is the part that has to be *right*. Every caller — the local recogniser, the external engine, the transcript reuse check — asks the same question the same way | `backend/autoclip/pipeline/language.py` |
+| **English gets Whisper's `translate` task, and it is pinned to the spoken language** | The translate task decodes the English words against the source audio, so the words keep the timing of the speech they came from. Pinning the spoken language stops the recogniser deciding a second time and disagreeing with the detector | `backend/autoclip/pipeline/transcribe.py` |
+| **A non-English target is pinned transcription, and it is measured rather than promised** | Whisper *speaking* in a target language is worth a different amount for different pairs. The English path was measured on the real source; the others are a residual | `docs/M5-APPLICATION-TESTING.md` §M5.5, **R9** |
+| **The spoken language is detected once, over 30 s** | Thirty seconds is what Whisper itself looks at, so the answer here and the answer inside the transcription agree. Below 0.5 confidence the language is not trusted | `backend/autoclip/pipeline/transcribe.py` |
+| **The transcript carries both languages** | "The language of the words" and "the language spoken" are different facts. Recording only one of them is how a translated transcript gets mistaken for a transcription | `backend/autoclip/pipeline/transcript.py` |
+| **A saved transcript in the wrong language is not reused** | Reusing it would deliver captions in a language the user did not ask for, and say nothing about it | `backend/autoclip/pipeline/transcribe.py` |
+| **The engine's *name* decides local vs external, not the transcript's shape** | The transcript says what was produced; the engine says what is capable of producing it. A pinned external engine raises rather than silently producing the wrong language | `backend/autoclip/pipeline/runner.py` |
+| **The webcam box is found by steps, and coverage decides** | A face tells you somebody is on screen; it does not tell you where the webcam's frame is. A real edge shows the step along almost its whole length; a bright patch shows it in one place | `backend/autoclip/pipeline/reframe/webcambox.py` |
+| **The horizontal edges are searched over the columns the box occupies** | This was a real bug, found on the real footage: a bright game-menu panel had a stronger brightness step than the bottom of the webcam, and won. It does not span the width of the box, so it does not cover enough of it to be believed | `backend/autoclip/pipeline/reframe/webcambox.py`, `tests/test_webcam_box.py` |
+| **An implausible measured box falls back to the face estimate** | A box that is a little too big is a much smaller fault than a box that is wrong | `backend/autoclip/pipeline/reframe/webcambox.py` |
+| **The crop follows the measured box over time** | The reference video's webcam **changes size** during it. One fixed rectangle is wrong for part of every such clip | `backend/autoclip/pipeline/export.py`, `backend/autoclip/pipeline/reframe/croppath.py` |
+| **The gameplay crop is held clear of the webcam, including the fallbacks** | The webcam is drawn above the gameplay. A crop that overlaps it shows the streamer twice | `backend/autoclip/pipeline/reframe/__init__.py` |
+| **The 40/60 strip is the layout, even for a small webcam** | The owner asked for a split-screen. A corner overlay was the old planner's fallback, and it is not what a streamer asked for. The exception is a webcam so small it would sit in the strip like a postage stamp | `backend/autoclip/pipeline/reframe/layout.py` |
+| **Detection is windowed to the stretches the clips actually use** | A 38-minute source at the measured detection rate would take hours; the detection only has to be right where a clip is. The windows are persisted, and a cached report is only reused when the windows match | `backend/autoclip/pipeline/reframe/faces.py`, `backend/autoclip/pipeline/runner.py` |
+| **MediaPipe needs tiled detection** | It scales the input to about **128 px** on the short side, which misses a **120 px** face in a 1920 px frame entirely. Tiles of **640 px** with **15 %** overlap find it; the tiles are copied contiguously, because a non-contiguous view is read with the wrong strides and comes back empty | `backend/autoclip/pipeline/reframe/faces.py` |
+| **MeowPower hides the stages; it does not delete them** | The complexity is the pipeline's, and somebody diagnosing a slow job needs it. The default view is one sentence and one number | `frontend/src/components/MeowPower.tsx`, `frontend/src/pages/JobProgress.tsx` |
+| **The SSE snapshot carries the source** | The progress page replaces the job it fetched with whatever the stream sends. A snapshot without the source took the title, the duration and the resolution off the page the moment the stream opened | `backend/autoclip/api/jobs.py` |
+| **Nothing derived from the source was published** | The source is a third-party creator's video. This increment is technical acceptance only | `docs/M5-APPLICATION-TESTING.md`, `docs/FINAL_UPGRADE_REPORT.md` §4.7 |
+| **The recogniser's non-determinism was not fixed in this increment** | It is **K32**, carried forward. Fixing it changes the transcript, and therefore the windows, the prompts and the clips, so the acceptance evidence gathered here would no longer describe the shipped code | **K32**, **R8** |
+
+### Residuals carried out of M5.5
+
+Unchanged from M5, M5.1, M5.2, M5.3 and M5.4 — **the live external paths, the reframe golden set,
+the missing original requirements, the re-export's missing webcam composition, the un-exercised
+multi-speaker path, the absent local Docker, the missing dependency audit, and mypy's 10 errors** —
+all carry forward exactly as before. M5.5 closed no matrix row and opened none.
+
+**Three new residuals, stated rather than buried:**
+
+| # | Residual |
+|---|---|
+| R9 | **Only the English subtitle path was measured on real audio.** The default target, `en`, was run against the real source and the captions were inspected. A target that is neither English nor the spoken language takes the **pinned-transcription** path, and what that is worth for a given pair was **not** measured here — Whisper *speaking* in a target language is a different thing from Whisper *translating* into it. The path is implemented, guarded and reachable; its quality is **unmeasured**, not claimed. |
+| R10 | **The webcam-box detector's thresholds are judgements.** `MIN_EDGE_CONTRAST = 16`, `MIN_VERTICAL_COVERAGE = 0.55`, `MIN_HORIZONTAL_COVERAGE = 0.85`, `COVERAGE_RATIO = 0.25` and `SEARCH_FACTOR = 0.9` are constants chosen from the reference video's own material, and they are **one** video's material. A different game's art direction may need different numbers. They are recorded as limitations rather than presented as truths. |
+| R11 | **The MeowPower wording is a judgement, and the screen was verified by reading and by the DOM, not by a user study.** The six stage-to-sentence phrases are the author's, and nobody outside this increment has read them. The **structure** — one sentence, one number, the detail one disclosure away — is what the tests and the screenshots hold up. |
+
+---
+
 ## Change log
 
 | Date | Commit(s) | Change |
@@ -993,4 +1220,9 @@ all carry forward exactly as before. M5.4 closed no matrix row and opened none.
 | 2026-11-23 | M5.4 docs | The M5.4 evidence: the ledger's M5.4 section, the audit's gate table and its twenty-two-defect table, the regression report's §12, the performance report's §9, the matrix's CR-06 and GOV-14 evidence, the egress inventory's verification-run rows, the application-testing record AT-G-01 … AT-G-16 and the final report's §4.6 |
 | 2026-11-23 | CI run 40 | The M5.4 documentation tree — the eight files above — is **green on all six jobs** ([run 45146983505](https://github.com/Shrishant1cog/autoclip/actions/runs/45146983505)) |
 | 2026-11-23 | CI run 41 | The tree that carries the two-run comparison, **K32** and **R8** — the byte-level comparison of the two runs of the same source, the recogniser's own fallback log, and the measured detection-time fit — is **green on all six jobs** ([run 45161730246](https://github.com/Shrishant1cog/autoclip/actions/runs/45161730246)) |
+| 2026-11-23 | CI run 42 | The M5.4 documentation tree with run 41 recorded in it, and the detection-time claim tightened against the two runs it was measured from, is **green on all six jobs** ([run 45164085498](https://github.com/Shrishant1cog/autoclip/actions/runs/45164085498)) |
 | 2026-11-23 | M5.4 evidence, read back | The two runs of the same source were compared **byte by byte**: the two containers differ in **one byte** of mp4 metadata, they decode to **byte-identical** PCM, and every artefact the prepare stage wrote from that PCM — `audio.wav`, `silences.json`, `shots.json`, `webcam_report.json` and all **115** thumbnails — is byte-for-byte the same. Only the transcript and the speech timeline it feeds differ: identical for the first **246** word records, up to **101.02 s**, and then different text with the **same timings**. A **40 s** excerpt decoded twice with the recogniser's own logging captured gave **10** segments against **9**, and the log shows the confidence check **failing even at temperature 0** and the fallback **sampling** at temperatures 0.2–0.8 — faster-whisper **1.2.1** has no `seed` argument, so its sampler cannot be pinned from the call site. The fix — seeding CTranslate2's generator (`ctranslate2.set_random_seed(0)`) before the call — was **measured**: two seeded decodes of the same real excerpt came out **identical**, with the fallback still running. Recorded as **K32** and **R8**, and **not** applied in this increment, because it changes the transcript the acceptance evidence was gathered on. The four M5.4 detection windows were then fitted: **time ≈ 165 s + 0.089 s per prompt character**, within **2.1 %** — which explains the **19.9 %** difference between the two M5.4 runs and sharpens **R6**, whose gap against M5.3 is now measured rather than guessed |
+| 2026-11-24 | `6c43da7` | M5.5 — English subtitles by default, and the language spoken kept apart. `export.subtitle_language` defaults to `"en"` and is changeable at any time; the decision lives in one module, `pipeline/language.py`, and is made from two facts: the language spoken and the language asked for. The same language is transcribed; English is **translated** into, so every word keeps the timing of the speech it came from; any other target is pinned. The spoken language is detected once, over the first **30 s**, and recorded separately as the transcript's `source_language` — a Hindi video with English captions has an English `language` and a Hindi `source_language`, and both are written down. A saved transcript in the **wrong** language is not reused; an external engine under `auto` is re-transcribed locally so the captions are in the language that was asked for, and an external engine the user **pinned** says plainly that it cannot translate. No hosted credential was spent: the translation is local Whisper's own `translate` task. Guarded by **29 tests** in `tests/test_subtitle_language.py` and **4** in `tests/test_api.py` |
+| 2026-11-24 | `cdf6153` | M5.5 — the webcam's **own frame**, measured and followed. The webcam's rectangle is found by detecting the **steps** at its edges — a contrast change either side of a line — with a confidence per edge and a face-based fallback; the box is carried through the track, the layout and the export, so the crop follows the streamer as the webcam changes size (**134 px** to **540 px** wide on the reference). The face detector now **tiles** the frame instead of shrinking it, because MediaPipe scales its input to about **128 px** on the short side and a **120 px** face in a 1920 px frame was smaller than one pixel of what it looked at — over **2,100 s** of the reference video it found **0** faces before, and **56** after. Auto mode now produces the **40/60** stacked split, the webcam is fitted **inside** its own strip, and the gameplay crop is held **clear** of it. **Thirteen** defects, each guarded by a test observed failing against the pre-fix code — the two that would have shipped without this increment are the **ordering** of the detection windows (rank order is not position, and the decoder refused to seek backwards, so every clip came out as plain gameplay) and the **per-frame zoom**, which ffmpeg refuses inside a `scale` filter because that filter's size is evaluated once, at init. Guarded by **57 new tests** |
+| 2026-11-24 | `e1cd12d` | M5.5 — the **MeowPower** screen. The job page opens with the name, **one** plain-language sentence and **one** number; the pipeline's six technical stages are one disclosure away — *"What MeowPower is doing"* — rather than deleted, because somebody diagnosing a slow job still needs them. The stage-to-sentence mapping lives in `frontend/src/components/MeowPower.tsx` and is the only place the two vocabularies meet. The progress page also stopped losing the video's title: the server's first `snapshot` event carried the job but not its source, and the client **replaces** what it fetched with whatever the stream sends, so the title, the duration and the resolution all disappeared at the moment the user was watching. The snapshot carries the source now, and the client **merges** rather than substitutes. Guarded by a test observed failing against the pre-fix code |
+| 2026-11-24 | CI run 43 | The whole M5.5 tree — the three M5.5 code commits together — is **green on all six jobs** ([run 45322909082](https://github.com/Shrishant1cog/autoclip/actions/runs/45322909082)). One push of three commits produced **one** run: GitHub ran the tip of the push, and the concurrency group never started the two before it |

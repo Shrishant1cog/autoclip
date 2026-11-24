@@ -58,12 +58,12 @@ v27 is not a slow operation.
 
 ### Suite-level measurement
 
-| | M0 | M5 | M5.1 | M5.2 | M5.3 | **M5.4** |
-|---|---|---|---|---|---|---|
-| Mandatory suite (CI selection 1) | 672 passed in 193.77 s | **1,263 passed, 61 deselected in 270.59 s** | **1,270 passed, 69 deselected in 249.81 s** | **1,285 passed, 69 deselected** | **1,351 passed, 70 deselected in 230.28 s** | **1,395 passed, 70 deselected in 225.95 s** |
-| Render suite (CI selection 2) | (not separated) | **37 passed, 1,287 deselected in 232.47 s** | **45 passed, 1,294 deselected in 299.24 s** | **45 passed, 1,309 deselected** | **46 passed, 1,375 deselected in 231.92 s** | **46 passed, 1,419 deselected in 233.26 s** |
-| Whole suite, one invocation | 672 passed in 193.77 s | **1,300 passed in 709.11 s** | **1,315 passed in 534.88 s** | **1,330 passed in 499.52 s** | **1,397 passed in 454.05 s** | **1,441 passed in 452.38 s** |
-| Wall clock **per test** | 0.288 s | **0.214 s** | **0.197 s** | **0.375 s** | **0.325 s** | **0.314 s** |
+| | M0 | M5 | M5.1 | M5.2 | M5.3 | M5.4 | **M5.5** |
+|---|---|---|---|---|---|---|---|
+| Mandatory suite (CI selection 1) | 672 passed in 193.77 s | **1,263 passed, 61 deselected in 270.59 s** | **1,270 passed, 69 deselected in 249.81 s** | **1,285 passed, 69 deselected** | **1,351 passed, 70 deselected in 230.28 s** | **1,395 passed, 70 deselected in 225.95 s** | **1,483 passed, 73 deselected in 247.85 s** |
+| Render suite (CI selection 2) | (not separated) | **37 passed, 1,287 deselected in 232.47 s** | **45 passed, 1,294 deselected in 299.24 s** | **45 passed, 1,309 deselected** | **46 passed, 1,375 deselected in 231.92 s** | **46 passed, 1,419 deselected in 233.26 s** | **49 passed, 1,507 deselected in 254.50 s** |
+| Whole suite, one invocation | 672 passed in 193.77 s | **1,300 passed in 709.11 s** | **1,315 passed in 534.88 s** | **1,330 passed in 499.52 s** | **1,397 passed in 454.05 s** | **1,441 passed in 452.38 s** | **1,532 passed in 494.89 s** |
+| Wall clock **per test** | 0.288 s | **0.214 s** | **0.197 s** | **0.375 s** | **0.325 s** | **0.314 s** | **0.323 s** |
 
 The suite grew by 643 tests (96%) and the per-test cost went *down* by 32%. The M5 whole-suite
 number is roughly double the sum of the two CI selections because a single invocation pays the
@@ -555,4 +555,106 @@ legs on every push, and the M5.4 tree is green on all six jobs. What the local m
 reproduce is the one thing the leg exists for: an **older ffmpeg**. The M5.4 changes touch the
 **filter graph** not at all, so the shape measured against ffmpeg 7.0.2 and ffmpeg 9.0.2 at M5.3 is
 unchanged, and the **structural** graph check still covers both graphs.
+
+---
+
+## 10. The M5.5 amendment — a 38-minute source, measured
+
+### What was measured
+
+The application was pointed at a **third real YouTube source** — *"I Stole The RAREST FERRARI in GTA
+6"*, **38:00** (**2,279.108 s**), **1920×1080 AV1** at **59.94005994005994 fps**, spoken in
+**Hindi** — and run through every stage on the scratch instance on port **8804**.
+
+This source was chosen for what it makes **expensive**, and every one of those costs was measured
+rather than estimated:
+
+| What | Why this source makes it expensive |
+|---|---|
+| **The transcript** | **5,648 words** — more than **four times** M5.4's. The detection stage's windows are sized by the provider's context budget, so a longer transcript means more windows |
+| **The decode** | **AV1 at 60 fps**. The source's own decode rate was measured separately before the run |
+| **The detection** | The webcam detector used to walk the **whole source**. At the measured rate on this file, that is hours; the run only walks the stretches the clips actually use |
+| **The crop** | The webcam's frame **changes size** during the video, so the crop is a **function of time** rather than a rectangle |
+
+### The costs, measured
+
+Every figure below is read back from the run's own artefacts — the files the application wrote and
+the rows it wrote to the scratch database — and not estimated.
+
+| Stage | What it cost | Rate | Against |
+|---|---|---|---|
+| The decode, on its own | **11.6 s** for a **120 s** window | **10.33× real time** | The source's own decode rate, measured separately before the run |
+| The transcription | **1,836 s** for **2,279.1 s** of audio | **1.24× real time** — **0.81 s** per second of speech | Faster than the video plays |
+| The scene detection | `shots.json` written at **01:13:01** — **466 shots** across **2,279.1 s** | — | — |
+| The highlight windows | **nine** windows, at most **8,402** rendered characters each, **74,262** in all | — | M5.4's **two** windows over **1,277** words |
+| The webcam detection | **1,011 s** for the **194.5 s** the six clips use | **5.20× real time** | **3,434** observations and **2,502** measured boxes |
+| The crop plans | **436 s** for six plans over **194.5 s** | **2.24× real time** | — |
+| The export | **451 s** for **194.5 s** of footage | **2.32× real time** | The job's own accounting: `ffmpeg_runs=6`, `ffmpeg_seconds=444.455` |
+| The whole last run | **530 s**, from the job's own `started_at` to its `finished_at` | — | The transcript, the shots, the report and the crop plans were all **reused** |
+
+**The important number is the one that is *not* in that table.** The webcam detection is the stage
+that scales with the **source**, and this source is **38 minutes** of **AV1 at 60 fps**. Walking the
+whole of it at the measured rate would have taken **about thirteen hours**. The detector walks only
+the **stretches the clips actually use** — **194.5 s** out of **2,279.1 s**, about **8.5 %** of the
+source — so the cost is **1,011 s** rather than thirteen hours. The windows are persisted, and a
+saved report is only reused when the windows still match (**defect 35**), so a retry does not pay
+for the detection again.
+
+**The export is the stage that scales with the *output*, and it is the slowest thing per second of
+footage.** **2.32× real time** on an **AV1 1080p60** source that must be decoded, cropped **twice**
+— once for the gameplay and once for the webcam — scaled, composited and captioned. The **webcam's
+speech-emphasis zoom** is evaluated **per frame** (`eval=frame`), which is a per-frame operation on
+the whole strip; that is the price of the zoom moving with the speech, and it is paid only on the
+strips that have a speech span.
+
+**The tiled detector is the price of the accuracy.** MediaPipe's own input is scaled to about
+**128 px** on the short side, which is why the detector **tiles** the frame at **640 px** with
+**15 %** overlap: a 1920×1080 frame is **nine** tiles, and each tile is a separate detection. The
+detector therefore samples **15 frames** a second of source and runs MediaPipe on each tile of each
+one. That is what makes the measured box good enough to follow the webcam's own edge — and it is
+why the detection is **5.20× real time** rather than something faster.
+
+**No claim of a speed-up is made, and none is available.** The M5.5 changes make the detection
+**windowed** where it used to walk the whole source — a large **architectural** saving that was not
+measured on this source, because the source is too long to walk end to end and the earlier
+behaviour had already been abandoned. What is measured is the cost of the bounded path, and it is
+**1,011 s** for the footage the clips use.
+
+### The suite, at M5.5
+
+| | M0 | M5 | M5.1 | M5.2 | M5.3 | M5.4 | **M5.5** |
+|---|---|---|---|---|---|---|---|
+| Mandatory suite (CI selection 1) | 672 passed in 193.77 s | **1,263 passed**, 61 deselected in 270.59 s | **1,270 passed**, 69 deselected in 249.81 s | **1,285 passed**, 69 deselected | **1,351 passed**, 70 deselected in 230.28 s | **1,395 passed**, 70 deselected in 225.95 s | **1,483 passed**, 73 deselected in 247.85 s |
+| Render suite (CI selection 2) | (not separated) | **37 passed**, 1,287 deselected in 232.47 s | **45 passed**, 1,294 deselected in 299.24 s | **45 passed**, 1,309 deselected | **46 passed**, 1,375 deselected in 231.92 s | **46 passed**, 1,419 deselected in 233.26 s | **49 passed**, 1,507 deselected in 254.50 s |
+| Whole suite, one invocation | 672 passed in 193.77 s | **1,300 passed in 709.11 s** | **1,315 passed in 534.88 s** | **1,330 passed in 499.52 s** | **1,397 passed in 454.05 s** | **1,441 passed in 452.38 s** | **1,532 passed in 494.89 s** |
+
+**No claim of a speed-up is made.** The whole-suite wall clock moved from **452.38 s** to
+**494.89 s** while the suite grew by **91 tests**, and the per-test figure moved from **0.314 s** to
+**0.323 s**. Both of those are **machine load, not a regression**: this is a shared four-core
+laptop, and the **91 new tests** include **three real renders**, which are the slowest tests in the
+tree.
+
+The **91** new tests are almost all **unit** tests — the M5.5 guards are statements about the
+application's behaviour, not about how a frame is composed, and only three of them need a render.
+That is why the render selection's count moved by **three** (46 → 49) and the unit selection grew
+by **88**, from **1,395** to **1,483**.
+
+### The Linux leg at M5.5
+
+The Linux leg was **not** reproduced locally for M5.5. The tree's own CI runs the four backend legs
+on every push, and the M5.5 tree is green on all six jobs — which is the same footing the M5.4 tree
+was on. What the local machine cannot reproduce is the one thing the leg exists for: an **older
+ffmpeg**.
+
+M5.5 **does** touch the **filter graph**, once: the webcam's speech-emphasis zoom is a `scale`
+filter, and ffmpeg evaluates a `scale` filter's `w` and `h` **once**, at init — so a per-frame
+expression in them is refused. The fix is `eval=frame` on that `scale`. The option was not
+introduced by ffmpeg 7; the `volume` filter in the **same** graph already carried `eval=frame`
+before M5.5, and the Linux leg has been green with it since M5. The **structural** graph check
+still covers both graphs, and the three new render tests exercise the shape through the real
+ffmpeg on every CI job. What is **not** established is a fresh local measurement of the M5.5 graph
+against an ffmpeg **older than 9** — that is the honest gap, and it is the same gap **K27** records
+for the milestone as a whole.
+
+---
 

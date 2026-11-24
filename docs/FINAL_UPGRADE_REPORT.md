@@ -5,6 +5,7 @@
 **Amendment:** M5.2 — the real four-hour ingest, and four more defects (2026-11-21)
 **Amendment:** M5.3 — the complete ten-minute pipeline, and five more defects (2026-11-21)
 **Amendment:** M5.4 — a second real source, and a local model that could not answer (2026-11-23)
+**Amendment:** M5.5 — subtitles, framing, and MeowPower (2026-11-24)
 **Branch:** `feature/upgrade-u0-u10`
 **Base commit:** `bf76811` (`feature/autonomous-platform-v2`)
 **Report date:** 2026-11-21
@@ -16,10 +17,10 @@
 
 **Ship it, with the external integrations marked unverified.**
 
-Every milestone from M0 to M5 is complete, and **M5.1**, **M5.2**, **M5.3** and **M5.4** closed the
-last closeable partial matrix row and then took the application to real media afterwards — the
-last two of them all the way through the **complete pipeline** on a whole source. The full
-automated suite is green — **1,441 tests, zero failures, zero skips, zero xfails** — and the
+Every milestone from M0 to M5 is complete, and **M5.1**, **M5.2**, **M5.3**, **M5.4** and **M5.5**
+closed the last closeable partial matrix row and then took the application to real media afterwards —
+the last three of them all the way through the **complete pipeline** on a whole source. The full
+automated suite is green — **1,532 tests, zero failures, zero skips, zero xfails** — and the
 application was exercised through its real UI against real media, not only through unit tests.
 
 The one thing this report will not do is call the live external integrations verified. They were
@@ -30,16 +31,16 @@ double stands in for the same code path the real service would take — but "the
 
 | | |
 |---|---|
-| **Milestones complete** | **8 of 8** — M0, M0.5, M1, M2, M3, M4a, M4b, M5 — plus **M5.1**, **M5.2**, **M5.3** and **M5.4**, post-release increments that are not one of the specification's milestones (see the amendments below) |
+| **Milestones complete** | **8 of 8** — M0, M0.5, M1, M2, M3, M4a, M4b, M5 — plus **M5.1**, **M5.2**, **M5.3**, **M5.4** and **M5.5**, post-release increments that are not one of the specification's milestones (see the amendments below) |
 | **Gate items** | 94 across M0–M4b: **91 done**, **1 blocked on the owner**, **2 unverified (external)**. M5's 10 are in §4. |
 | **Feature coverage** | **129 rows**: 110 Implemented · 9 Partial · 1 Blocked · 9 Not Applicable · **0 Missing** |
-| **Tests** | **1,441 passing** — 1,395 in the unit selection, 46 in the render selection — 0 failing, 0 skipped, 0 xfailed, plus 24 real-media e2e tests run against a real source |
-| **Real-media evidence** | A **real 4-hour live recording** ingested twice (360p, and the product's default 1080p); the pipeline exercised on real segments cut from that same file, with a real local model, producing two real clips and two real exports — **and, at M5.3 and M5.4, two more real videos of about ten minutes each run through every stage end to end**: **three** real clips and **three** real exports from the first, and from the second — after its nine defects were fixed — **nine** real clips and **nine** real exports, every one of them distinct, from **two** separate end-to-end runs |
+| **Tests** | **1,532 passing** — 1,483 in the unit selection, 49 in the render selection — 0 failing, 0 skipped, 0 xfailed, plus 24 real-media e2e tests run against a real source |
+| **Real-media evidence** | A **real 4-hour live recording** ingested twice (360p, and the product's default 1080p); the pipeline exercised on real segments cut from that same file, with a real local model, producing two real clips and two real exports — **and, at M5.3, M5.4 and M5.5, three more real videos run through every stage end to end**: **three** real clips and **three** real exports from the first, **nine** real clips and **nine** real exports from the second — after its nine defects were fixed — and **six** real clips and **six** real exports from the third, every one of them **1080×1920** with the webcam's slot at exactly **40 %** |
 | **New runtime dependencies** | **Zero.** The whole upgrade was built on the dependency set the project already had. |
 | **Schema** | v14 → **v27**, 19 → **32 live tables**, thirteen migrations, no user data destroyed |
 | **API surface** | 18 routers / 108 routes → **21 routers / 162 routes** |
 | **CI** | **Every run on this branch since the two failures either passed or was cancelled by a newer push.** Two of the runs failed — both were real defects, diagnosed and fixed rather than explained away — and five were cancelled by a newer push. The release run is green on all six jobs, on all four platforms. See §4.1. |
-| **Defects found by running the application** | **22 product defects** and **1 defect in the CI workflow itself**, all fixed, all guarded by tests that fail without the fix. See §4.2. |
+| **Defects found by running the application** | **36 product defects** and **1 defect in the CI workflow itself**, all fixed, all guarded by tests that fail without the fix. See §4.2. |
 | **Open security findings** | **0** high, **0** medium, **0** low. 4 residual risks documented, 5 things not checked — all in §6. |
 
 ### The three conditions attached to the verdict
@@ -159,6 +160,45 @@ Blocked · 9 Not Applicable · 0 Missing**. What changed is the **defect count**
 complete real source has now been ingested, transcribed, highlighted, laid out, captioned, exported
 and diagnosed **end to end** — twice, the second time with every fix in the tree. See **§4.6**, and
 `docs/M5-APPLICATION-TESTING.md` AT-G-01 … AT-G-17 for the per-journey record.
+
+### Amendment — M5.5, 2026-11-24
+
+M5.4 closed defects and widened the evidence. **M5.5 changed the surface** — it is the first
+increment since M5 that **added product surface**, and it did so against three things the owner
+asked for:
+
+* **English subtitles by default, changeable at any time.** The setting is `export.subtitle_language`,
+  defaulting to `"en"`. The decision lives in one module, the **spoken** language is detected once
+  and recorded **separately** from the language the words are in, and a transcript in the wrong
+  language is not reused.
+* **A vertical split-screen that is actually right.** The webcam's **own frame** is **measured** by
+  the **steps** at its edges, and the crop **follows it** as the streamer changes its size. The
+  gameplay crop is held **clear** of it, so the streamer is never shown twice. **Auto** mode now
+  produces the **40/60** split rather than falling back to a corner.
+* **A simple "MeowPower" UX that hides processing complexity.** The job page opens with **one
+  sentence** and **one number**. The pipeline's six technical stages are one disclosure away, not
+  deleted.
+
+It was accepted against a **third real, third-party YouTube video** — **38:00**, **1920×1080 AV1**
+at **59.94 fps**, spoken in **Hindi**, used for **technical acceptance only, nothing published
+anywhere** — and run from the paste through the whole pipeline on the **local Ollama**, so **no
+hosted credential was spent** and the hosted paths stay **Unverified (external)**.
+
+The run found **fourteen** more defects, all guarded by tests that fail without the fix, and the
+running count is **twenty-two → thirty-six**. The two that would have shipped without this
+increment are the **ordering** of the detection windows — rank order is not position, and the
+decoder refused to seek backwards, so every clip came out as plain gameplay — and the **per-frame
+zoom**, which ffmpeg refuses inside a `scale` filter because that filter's size is evaluated once,
+at init.
+
+**The verdict does not change here either.** The matrix is unchanged at **110 Implemented · 9
+Partial · 1 Blocked · 9 Not Applicable · 0 Missing**; five rows — **CAM-01**, **CAM-02**, **CAM-08**,
+**CAM-11** and **CAM-12** — gained **stronger evidence**, and no row's status moved. The **six
+exported clips** were measured against the source they were cut from: every one is **1080×1920**,
+the webcam's slot is exactly **40 %** of the height and the gameplay's exactly **60 %**, the
+gameplay's crop clears the webcam's region exactly, every webcam path **moves**, and the captions
+are **English**. See **§4.7**, and `docs/M5-APPLICATION-TESTING.md` AT-H-01 … AT-H-13 for the
+per-journey record.
 
 ---
 
@@ -315,7 +355,7 @@ the branch finds the same numbering.
 
 | Runs | Result | What happened |
 |---|---|---|
-| 4, 5, 7–13, 15–17, **22**, **23**, **24**, **25**, **26**, **27**, **28**, **29**, **30**, **31**, **33**, **34**, **35**, **36**, **37**, **38**, **39**, **40**, **41** | **success** | green |
+| 4, 5, 7–13, 15–17, **22**, **23**, **24**, **25**, **26**, **27**, **28**, **29**, **30**, **31**, **33**, **34**, **35**, **36**, **37**, **38**, **39**, **40**, **41**, **42**, **43** | **success** | green |
 | 6, 14, 18, **21**, **32** | **cancelled** | each superseded by a newer push — the concurrency group cancelled the older run |
 | **19** (`4cf309b`) | **failure** | the Ubuntu legs failed in **Unit tests**; Windows and macOS passed the same tests. A test wrote to the owner's real OS keyring. On Linux there is no keyring backend, so the token was never stored and the assertion could not hold — the test passed on Windows and macOS *because those machines had a real keyring to write to*. Fixed by `94c6d9c`, an **autouse** isolation fixture so no test can reach the owner's credential store |
 | **20** (`94c6d9c`) | **failure** | the Ubuntu py3.12 leg failed at *"Verify ffmpeg can burn subtitles"*. The check piped the ffmpeg filter list into `grep -q`; `grep -q` exits at the match, the producer gets **SIGPIPE**, and GitHub's `set -o pipefail` turns that into a failed step. The runner's ffmpeg 8 has a filter list large enough to fill the pipe, so CI reported that an ffmpeg **with** the `ass` filter did not have one — the job log shows `printf: Broken pipe` and then the `ass` filter listed on the very next line. **Corrected, not removed**: the check now matches with bash's own pattern matching and never pipes, and a build genuinely without the filter still fails it |
@@ -371,6 +411,19 @@ and it is green on all six jobs too**
 all six jobs too**
 ([run 45161730246](https://github.com/Shrishant1cog/autoclip/actions/runs/45161730246)).
 
+**Run 42 is the M5.4 documentation tree with run 41 recorded in it, and the detection-time claim
+tightened against the two runs it was measured from — green on all six jobs too**
+([run 45164085498](https://github.com/Shrishant1cog/autoclip/actions/runs/45164085498)).
+
+**Run 43 is the whole M5.5 tree — the three M5.5 code commits together — and it is green on all six
+jobs too**
+([run 45322909082](https://github.com/Shrishant1cog/autoclip/actions/runs/45322909082)). That is
+the run that first exercised the subtitle-language guards, the webcam-frame detector, the tiled face
+detector, the crop-plan fingerprint, the saved-report window check and the per-frame speech
+emphasis on every CI job. One push of three commits produced **one** run — GitHub ran the tip of
+the push, and the concurrency group never started the two before it — so run 43 is the run of the
+whole M5.5 tree rather than of one commit in it.
+
 **The table stops at the last run recorded in it, and the commits after it change the record, not
 the content it reports.** Each one's own run was verified after the push and is green, and the
 branch's history can be read directly from GitHub, where the run numbers are the same ones used
@@ -381,7 +434,7 @@ environment with no keyring backend. Run 20 was reproduced with a 320 KB filter 
 fails it, the new body passes it, and a no-`ass` build still fails the new body. A failure that is
 only fixed in CI is a failure that comes back.
 
-### 4.2 Twenty-two product defects, found by running the application
+### 4.2 Thirty-six product defects, found by running the application
 
 The full-suite gates were green while the application was broken. These defects were found
 by **running the application and its gates**, not by reading the code, and each is now guarded by a
@@ -411,6 +464,20 @@ test that fails without the fix.
 | 20 | **Two clips of the same footage survived the pipeline.** The de-duplication compared the candidates' **word ranges**, and a clip *inside* another one has almost no words in common with it: the shorter clip of the first real pair covered **14** words, the longer **104**, of which those 14 were a part — a common share of a fifth, well under the threshold. In **time**, though, the shorter clip was wholly inside the longer one | the same run's diagnostics: **4 of the 9 clips** were reported as *"overlaps another one by 100%"*, and the diagnostic's own rule (overlap ≥ half of the shorter) disagreed with the pipeline's | one shared definition of *"the same clip"* — `pipeline/duplicates.py` — used by **both** the pipeline and the diagnostic: two clips are duplicates when the overlap covers at least **half of the shorter one**. The higher score survives | 5 tests in `tests/test_highlights.py::TestDuplicateClips` (new file); **3 fail without the fix** |
 | 21 | **A clip could open in the middle of a word.** The boundary alignment pulls the cut back into the silence before the first word, but it could also push it *past* the word's own start when the silence detector and the recogniser disagreed by a few tens of milliseconds — which breaks the code's own documented invariant, *"alignment only ever widens a clip"* | the same run's diagnostics: **2 of the 9 clips** were reported as *"1 word(s) fall outside the clip"*. Rank 1's first word started at **533.800 s** and the clip opened at **533.852 s** — **52 ms inside the word** | the alignment may only ever widen the clip: the result is clamped to the first word's own start, so the cut is at or before the word, never inside it | 2 tests in `tests/test_boundaries.py::TestSilenceAlignment`; **2 fail without the fix** |
 | 22 | **A face track could jump to a smaller face beside it.** The tracker's proximity fallback scaled its tolerance by the **larger** of the two faces, so a track could hop onto a smaller face-shaped object near the speaker — and the crop would then pan away from the speaker to follow it | found while **verifying defect 19** against the real source: the track of one segment held two different people, and the crop followed the wrong one. A real frame shows what the detector saw: the speaker, leaning forward, and a Pikachu plush on the shelf behind them | the tolerance is scaled by the **smaller** of the two faces — the person's own face width — which is what the rule always said. A track stays with its person | 1 test in `tests/test_reframe.py::TestTracking`; **fails without the fix** |
+| 23 | **The face detector could not see the streamer at all.** MediaPipe scales its input to about **128 px** on the short side, so a face **120 px** wide in a **1920 px** frame is smaller than one pixel of what it looks at | over **2,100 s** of the **third real source** the detector found **0** faces | the detector **tiles** the frame instead of shrinking it — **640 px** tiles with **15 %** overlap. The same source then gave **56** observations over 2,100 s | 3 tests in `tests/test_faces.py`; the tiled-detection test **fails without the fix** |
+| 24 | **The tiles were read with the wrong strides.** A tile cut out of a frame is a **non-contiguous view**, and MediaPipe read it as if it were contiguous, so every tiled frame came back with **zero** faces | the tiled detector over the same source, returning **0** observations where the untiled detector had found some | each tile is copied with `np.ascontiguousarray` before it is handed to the detector | 2 tests in `tests/test_faces.py`; the contiguous-tile test **fails without the fix** |
+| 25 | **The edge search looked in the wrong place.** The webcam's **horizontal** edges were searched for in a narrow band around the face rather than over the **columns the box occupies** — so the bright panel of a game menu won the vote | the new edge detector over 30 s of the reference video: the **horizontal** edges were wrong, and the box it produced did not match the webcam | the horizontal edges are searched over the **columns the box occupies**. On the same 30 s the detector now finds **all four** edges: `x=1274, w=638, y=9, h=426` | 7 tests in `tests/test_webcam_box.py`; the horizontal-axis test **fails without the fix** |
+| 26 | **The first frame of a clip was read from before the clip began** — a negative clip-relative timestamp | the clip-relative timestamp arithmetic in `_iter_frames`, checked against a clip that starts part-way into the source | the timestamp is clamped at zero | 1 test in `tests/test_faces.py`; **fails without the fix** |
+| 27 | **The webcam spilled out of its own 40 % strip** when it could not fill the band without blurring the face | the layout's own geometry, checked against a webcam whose aspect does not match the strip | `_fit_in_strip` fits the webcam **inside** the strip on both axes at once, and returns nothing when it cannot | 2 tests in `tests/test_layout.py::TestTheSplitScreen`; the spill test **fails without the fix** |
+| 28 | **The gameplay crop did not keep clear of the webcam**, so the streamer was shown **twice** — once in the strip, once inside the gameplay | comparing the gameplay window against the webcam's region in the plan | `ReframeConfig.avoid` carries the webcam's region, and a **final pass over the finished plan** holds every fallback clear too | 6 tests in `tests/test_reframe.py::TestTheWebcamIsKeptOutOfTheGameplay`; the fallback tests **fail without the fix** |
+| 29 | **The progress page lost the video's title** the moment the event stream opened, because the server's `snapshot` event carried no source | opening the running job's page in the browser and reading the DOM | the snapshot carries the source, and the client **merges** rather than substitutes | 1 test in `tests/test_api.py::TestEventStream::test_the_snapshot_carries_the_source`; **fails without the fix** |
+| 30 | **The webcam's path grew an ffmpeg expression past Windows' own 32,767-character limit** — every measured box became a keyframe, and a path of **600** boxes produced a **50,019-character** filter graph | building the filter graph from a path of 600 measured boxes | the path is thinned to at most **48** keyframes, the same budget the gameplay crop path uses | 6 tests in `tests/test_webcam.py::TestTheWebcamPath`; the length and the budget tests **fail without the fix** |
+| 31 | **The detector was asked for the stretches in the wrong order, and refused.** The clips come in **rank** order and rank is not position, so the detector asked the decoder to seek backwards; the decoder refused with *"Input timestamp must be monotonically increasing"*, the webcam was never found, and **every clip was rendered without the split-screen** | the real run: the saved report said `"unavailable_reason": "Input timestamp must be monotonically increasing."`, no track, and the six exports came out as plain gameplay | the stretches are walked in the order they sit in the **source**, whatever order they are given in | 2 tests in `tests/test_faces.py::TestTheClock` and 1 in `tests/test_pipeline_cache.py::TestTheOrderTheWindowsAreAskedFor`; **fail without the fix**, with the production error |
+| 32 | **A saved crop plan was reused after the layout had changed.** The plan was cached under the clip's name alone, with nothing saying what it was made *for* | the run after defect 31 was fixed: the plan on disk was still **608×1080** (9:16) while the layout asked for **1012×1080** (15:16) | the plan records a **fingerprint** of the settings it was built for, and a saved plan is only reused when the settings still match | 4 tests in `tests/test_pipeline_cache.py::TestTheSavedCropPlan`; the stage test **fails without the fix** |
+| 33 | **A detection that could not run was kept as a final answer** — the report said *why* the webcam was not found, and a report with a reason was reused as-is | the same report that defect 31 produced: an error message, cached as if it were an answer | a report says whether the detection **failed** or simply found nothing, and only a real answer is reused. A report written by an **older version** of the detector is not reused either | 4 tests in `tests/test_pipeline_cache.py::TestTheSavedWebcamReport`; **fail without the fix** |
+| 34 | **A re-export would have stretched a plan made for another shape** — found while fixing defect 32, by reading the path rather than by running it | reading `api/clips.py::_crop_path_for` while fixing defect 32, and checking what it would do with the plan the fix produces | a saved plan is only reused when its **own shape** is the shape being exported | 2 tests in `tests/test_pipeline_cache.py::TestTheReExportPath`; **fail without the fix** |
+| 35 | **The saved webcam report was never reused, because the windows never matched exactly.** The report rounds its windows to **3 decimal places** while a clip's end time is `1303.9599999999998`, so the exact comparison never matched and every retry paid for the detection again | the last run of the job: the report on disk carried **02:35:40** while the layouts beside it were rewritten at **02:56:29** — the detection had been done again even though the windows had not moved | the comparison is tolerant to **0.01 s**, which is smaller than the rounding the report applies and far smaller than the difference between two different stretches | 1 test in `tests/test_pipeline_cache.py::TestTheSavedWebcamReport::test_a_report_for_the_same_windows_is_reused`; **fails without the fix** |
+| 36 | **The speech-emphasis zoom broke the render.** The zoom was computed in a `scale` filter, and ffmpeg evaluates a `scale` filter's `w` and `h` **once**, at init — so a per-frame expression in them is refused: *"Expressions with frame variables 'n', 't', 'pos' are not valid in init eval_mode."* Every clip with a moving webcam failed to render | rendering a moving webcam with a speech emphasis through the real ffmpeg: the export failed with `[Parsed_scale_90 ...] Expressions with frame variables 'n', 't', 'pos' are not valid in init eval_mode.` | the scale is evaluated **per frame** (`eval=frame`) and the centred crop that follows it is evaluated the same way | 1 test in `tests/test_export_render.py::TestLayoutRender::test_a_moving_webcam_with_speech_renders` — a **behavioural** render test that reproduces the exact production error; **fails without the fix** |
 
 **Defect 3 is the one that would have shipped.** It rendered on the machine the code was written
 on and would have failed on the CI runners and on every user with an ffmpeg older than 9. It was
@@ -1155,6 +1222,197 @@ end** — **twice**, the second time with every fix in the tree — and the run 
 that the first source could not reach, because the first source's transcript was small enough for
 the model's context and this one was not.
 
+### 4.7 M5.5 — Subtitles, framing, and MeowPower
+
+**What this increment is.** A **fifth** post-release increment on the same branch, run and
+documented on **2026-11-23** and **2026-11-24**. It is the first increment since M5 that **added
+product surface**: M5.1–M5.4 closed defects and widened the evidence, and this one closes three
+things the owner asked for.
+
+| # | The ask | What was built |
+|---|---|---|
+| 1 | **English subtitles by default, changeable at any time** | `export.subtitle_language`, defaulting to `"en"`, in **Settings → Export → Subtitles**. The decision lives in one module — `pipeline/language.py` — and the **spoken** language is detected once and recorded **separately** from the language the words are in |
+| 2 | **A vertical split-screen that is actually right** | The webcam's **own frame** is now **measured** by finding the **steps** at its edges, and the crop **follows it** as the streamer changes its size. The gameplay crop is held **clear** of it, so the streamer is never shown twice. **Auto** mode now produces the **40/60** split rather than falling back to a corner |
+| 3 | **A simple "MeowPower" UX that hides processing complexity** | The job page opens with **one sentence** and **one number**. The pipeline's six technical stages are one disclosure away, not deleted |
+
+**The source.** `https://youtu.be/BgIISP2mi3o?si=jAM8h8iYFz9cgLRrV` — *"I Stole The RAREST FERRARI
+in GTA 6"*, **38:00** long (**2,279.108 s**), **1920×1080 AV1** at **59.94005994005994 fps**, with
+an AAC audio track. The spoken language is **Hindi**.
+
+> **Rights.** This is a third-party creator's video. It is used here for **technical acceptance
+> only**. Nothing produced from it was published anywhere, no account was connected, and no hosted
+> credential was spent. It is not a release artefact.
+
+#### The run, measured
+
+Every number below was read back from the run's own artefacts — the files the application wrote, the
+rows it wrote to the scratch database, and the render on disk. None of it is estimated.
+
+| | |
+|---|---|
+| The application | the scratch instance on **port 8804**, with its own home, so the owner's own instance and its database were never touched |
+| The model | the **local Ollama** (`llama3.1:8b` at `127.0.0.1:11434`); the job row records `provider=ollama`, so **no hosted credential was spent** |
+| The prepare stage | `audio.wav` written at **20:42:20** — **72,931,542 B** |
+| The transcription | whisper `small`, **1,836 s** for **2,279.1 s** of audio — **1.24× real time**, faster than the video plays |
+| The scene detection | `shots.json` written at **01:13:01** — **466 shots** across the source |
+| The highlight windows | **nine** windows over **5,648 words**. Each holds at most **8,402** rendered characters, which is the local model's context budget; **74,262** characters in all |
+| The webcam detection | `webcam_report.json` written at **02:35:40** — **1,011 s** for the **194.5 s** the six clips actually use |
+| The crop plans | six plans written between **02:37:33** and **02:44:49** — **436 s** |
+| The export | six files between **02:57:35** and **03:05:06** — **451 s** for **194.5 s** of footage, **2.32× real time**. The job's own accounting agrees: `ffmpeg_runs=6`, `ffmpeg_seconds=444.455` |
+| The bytes | **221,460,397** across the six files — exactly the `export_bytes` the job recorded |
+| The job | `status=done`, `progress=1.0`, `provider=ollama` |
+
+#### The run — the real application, the real video, end to end
+
+The run used a **separate application instance** on **port 8804** with its own home, so the owner's
+own instance and its database were never touched. The model was the same **local Ollama**
+(`llama3.1:8b` at `127.0.0.1:11434`) that M5.3 and M5.4 used, so **no hosted credential was
+spent** and the hosted paths stay **Unverified (external)**.
+
+**The subtitle decision, measured on real audio.** The source is spoken in **Hindi**. The settings
+were at their defaults, so the subtitle language was **`en`** — and the recogniser was asked to
+**translate**:
+
+| | |
+|---|---|
+| The transcript's `language` | **`en`** — the language the **words** are in |
+| The transcript's `source_language` | **`hi`** — the language **spoken** |
+| The model | whisper `small`, local, `source=whisper` |
+| The size | **5,648 words** in **1,140 segments** |
+| The words that are not Latin script | **0** |
+| The first words | *"Oh this car, wait what, this is a classic car, that famous car of YCT, wow, I want this car, this is such a rare car, I am seeing this…"* |
+| The coverage | the first word at **0.000 s**, the last at **2,273.860 s** — the whole **38 minutes** |
+
+The two languages are **separate facts**, and the run is what shows that the product keeps them
+apart: the words are English and the speech was Hindi, and both are written down. The `transcripts`
+row in the scratch database agrees: `language=en`, `word_count=5648`, `source=whisper`.
+
+**The MeowPower surface, read from the running application.** The job page's DOM, taken while the
+job was running:
+
+| | |
+|---|---|
+| The eyebrow | `MEOWPOWER` |
+| The sentence | *"Listening to what is being said"* — and *"Picking out the moments worth keeping"* in the detection stage |
+| The number | **40 %** |
+| The line | *"You can leave this page. It keeps working."* |
+| The technical stages | collapsed behind **"› What MeowPower is doing"**, `details.open === false` |
+| The masthead | the title, **37:59 · 1920×1080 · ollama**, and the **Cancel** button — all still there |
+| The console | **no errors** |
+
+#### The run was interrupted five times, and the product handled every one
+
+The scratch server was killed four times while the job was running — once by the session
+restarting, three times by shell timeouts. The fifth restart was deliberate: the job was put back
+to `running` so the **export** would be re-rendered with the fixed framing code, because the
+re-export path does not rebuild the webcam composition (that is **K10**, and it is why the job had
+to be requeued rather than re-exported).
+
+All five are facts about the harness, not about the product. The product's answer is the same every
+time, and it is recorded in the application's own `app_restarts` table — five rows carry this job's
+id with `jobs_resumed=1`:
+
+| | |
+|---|---|
+| On startup | the job was **requeued** and picked up again. The application recorded **five** restarts for this job, each with `jobs_resumed=1` |
+| The transcript | **not** transcribed again. `transcript.json` was written **once**, at 21:12:56, and was still the same file when the last run finished — the saved transcript was in the requested language, so it was reused and the **thirty minutes** of transcription were not paid twice |
+| The shots | **not** detected again. `shots.json` was written **once**, at 01:13:01, and the six clips were reused from the database |
+| The webcam report | **not** detected again on the last run. `webcam_report.json` still carries the timestamp of **02:35:40** while the layouts beside it carry **02:56:29** — the saved report was read and reused, and the **seventeen minutes** of detection were not paid a second time |
+| The crop plans | **not** rebuilt either: the six crop files still carry timestamps between **02:37:33** and **02:44:49**, while the layouts that use them were rewritten at **02:56:29** |
+| The progress | back to **0.40**, which is exactly where it was — the two completed stages' weight, and not a restart from zero |
+
+This is the **reuse rule** doing its job in production, not in a test: a saved transcript in the
+right language is reused; a saved transcript in the **wrong** one is not, and is transcribed again.
+It is also the two cache fixes of this increment, observed outside a test: the saved report is only
+reused when the **windows** it was made for still match (**defect 35**), and a saved crop plan is
+only reused when the **fingerprint** of the settings it was built for still matches (**defect 32**).
+
+#### Every clip, inspected against every requirement
+
+The six files were **measured**, not eyeballed. A script read the run's own records — the
+transcript, the webcam report, the layout and the crop plan for each clip — and then compared the
+**rendered pixels** against the **source** at three moments in each clip: the top 40 % against the
+source at the webcam's own crop window for that moment, and the bottom 60 % against the source at
+the gameplay's crop window. The path is a **piecewise-linear series**, so the window at a moment is
+interpolated between the keyframes, exactly as the filtergraph reads it. The script's own verdict,
+at the end, was **`NO PROBLEMS FOUND`**.
+
+**The files**
+
+| # | The clip | Its window in the source | The file | Bytes | The shape | The split-screen |
+|---|---|---|---|---|---|---|
+| 1 | *We killed that shark* | 530.31–562.88 (**32.57 s**) | `we-killed-that-shark_9x16.mp4` | 30,365,300 | **1080×1920** | **27.48 s / 32.57 s — 84.4 %** |
+| 2 | *$400 taxi or $5 toll?* | 958.74–990.41 (**31.67 s**) | `400-taxi-or-5-toll_9x16.mp4` | 64,771,117 | **1080×1920** | **31.66 s / 31.67 s — 100.0 %** |
+| 3 | *Police Behind Me* | 1273.12–1303.96 (**30.84 s**) | `police-behind-me_9x16.mp4` | 28,793,347 | **1080×1920** | **29.33 s / 30.84 s — 95.1 %** |
+| 4 | *Biggest building of YCT* | 1139.25–1175.23 (**35.98 s**) | `biggest-building-of-yct_9x16.mp4` | 32,534,789 | **1080×1920** | **29.34 s / 35.98 s — 81.6 %** |
+| 5 | *We got 50,000* | 562.90–594.65 (**31.75 s**) | `we-got-50000_9x16.mp4` | 31,900,979 | **1080×1920** | **27.64 s / 31.75 s — 87.1 %** |
+| 6 | *Road rash* | 1031.06–1062.75 (**31.69 s**) | `road-rash_9x16.mp4` | 33,094,865 | **1080×1920** | **31.68 s / 31.69 s — 100.0 %** |
+
+**The measurements.** The differences are the mean absolute difference between the exported strip
+and the source at the same window, on a 0–255 scale; a smaller number is a closer match.
+
+| # | The top 40 % is the webcam | The bottom 60 % is the gameplay | The two halves differ | The gameplay clears the webcam | The webcam's crop moves | The captions |
+|---|---|---|---|---|---|---|
+| 1 | **6.6 – 31.6** | **3.4 – 6.8** | yes, at all three moments | yes — x = **452** | **141** keyframes, **33** distinct centres | **64** cues, English |
+| 2 | **8.3 – 39.0** | **4.7 – 24.8** | yes, at all three moments | yes — x = **452** | **48** keyframes, **22** distinct centres | **91** cues, English |
+| 3 | **4.1 – 4.2** | **3.5 – 3.6** | yes, at both stacked moments | yes — x = **452** | **30** keyframes, **10** distinct centres | **121** cues, English |
+| 4 | **36.4** | **4.2** | yes, at the stacked moment | yes — x = **452** | **94** keyframes, **23** distinct centres | **78** cues, English |
+| 5 | **4.4 – 22.2** | **1.4 – 5.3** | yes, at all three moments | yes — x = **452** | **96** keyframes, **42** distinct centres | **86** cues, English |
+| 6 | **4.4 – 37.5** | **5.3 – 16.8** | yes, at all three moments | yes — x = **452** | **46** keyframes, **17** distinct centres | **50** cues, English |
+
+**The 40/60 split.** Every clip is **1080×1920**, and the webcam's slot in the layout is
+`(0, 0, 1080, 768)` — exactly **40 %** of the height — with the gameplay's slot at
+`(0, 768, 1080, 1152)`, exactly **60 %**. The gameplay's crop is **1012×1080**, the **15:16** shape
+the bottom slot requires, and its left edge sits at **x = 452**, which is exactly where it must be:
+the webcam's region starts at **x = 1464**, and `1464 − 1012 = 452`. The streamer is never shown
+twice.
+
+**The crop really follows the webcam.** The webcam's own frame was **measured**, not guessed:
+**2,502** boxes over **194.5 s**, with **134** distinct widths between **134 px** and **540 px** —
+the reference video's webcam really does change size during it. Every clip's path is a series of
+keyframes and every one of them **moves**: between 10 and 42 distinct centres per clip, and every
+path is within the **48**-keyframe budget that keeps the filtergraph under Windows' own
+**32,767-character** limit.
+
+**Where the split-screen is not shown.** Between **1.50 s** and **6.62 s** per clip, the layout is
+`gameplay_only` — the reason recorded in the layout is *"no face was seen inside the region"*. In
+those stretches the gameplay is shown on its own rather than a blank strip, which is the honest
+answer when the streamer cannot be framed. Across the six clips the split-screen covers
+**81.6 %** to **100 %** of each one.
+
+**The captions.** **490** cues and **43,272** characters across the six clips, and **0** characters
+outside the Latin script in any of them. The first cue of each clip is the clip's own opening
+line — *"WHAT?"*, *"IT'S $400 NOW."*, *"OH MY GOD."*, *"WE'LL LOOK FOR THE"*, *"50,000."*,
+*"LOOK AT THIS."*
+
+#### What M5.5 cost
+
+The run found **fourteen** defects, and the running count is **twenty-two → thirty-six**. Six are
+in the **webcam framing** — the detector could not see the streamer at all (**23**), the tile fix
+read the tiles wrongly (**24**), the edge search looked in the wrong place (**25**), the first frame
+was read from before the clip (**26**), the webcam spilled out of its own strip (**27**), and the
+gameplay crop did not keep clear of it (**28**). Two are elsewhere: the progress page lost the
+video's title the moment the event stream opened (**29**), and the webcam's path grew an ffmpeg
+expression past **Windows' own 32,767-character limit** (**30**). The **first complete run** of the
+new framing found **three more**: the detector was asked for the stretches in the wrong order and
+refused (**31**), a saved crop plan was reused after the layout had changed (**32**), and a failed
+detection was kept as a final answer (**33**). A fourth was found while fixing **32** — a re-export
+would have stretched a plan made for another shape (**34**). The last **two** came out of the
+re-export that finally produced the clips above: the saved report was never reused because the
+windows never matched exactly (**35**), and the speech-emphasis zoom broke the render because
+ffmpeg evaluates a `scale` filter's size **once**, at init (**36**).
+
+Every one of them is guarded by a test that was observed failing against the pre-fix code. The full
+table, with the evidence for each, is in `docs/M5-APPLICATION-TESTING.md` §M5.5 and the defect table
+there.
+
+#### What M5.5 did not change
+
+No matrix row was closed and none was opened: the count is unchanged at **110 Implemented · 9
+Partial · 1 Blocked · 9 Not Applicable · 0 Missing**. Five rows — **CAM-01**, **CAM-02**, **CAM-08**,
+**CAM-11** and **CAM-12** — gained **stronger evidence**, which is recorded in
+`docs/feature-coverage-matrix.md`. The M5 verdict is unchanged and **v0.1.0 is still gated on K1**.
+
 ---
 
 ## 5. Every PARTIAL item, named
@@ -1222,6 +1480,9 @@ AutoClip cannot re-classify each hop. That is unchanged and still needs a Lane B
 | K30 | **The crop-safety tolerance is a fixed 90% keep-ratio, not a per-shot judgement.** The crop must keep at least **90%** of the face it follows; a sliver of the detector's bounding box outside is tolerated. That is one constant for every shot, every face size and every camera, and it is a **judgement** — a loose detector box on a small face may make the ratio harsher than the picture deserves. The worst case measured on the real source is **19 px of a 549 px face (3.5%)**. Found at M5.4. |
 | K31 | **"The same clip" is a fixed 50%-overlap threshold.** Two clips are duplicates when the overlap covers at least **half of the shorter one** — one constant, used by both the pipeline and the diagnostic so they cannot disagree. A shorter clip that is a genuine *highlight* inside a longer clip's range will be removed with it. The higher score survives, so the longer clip is the one that is kept. Found at M5.4. |
 | K32 | **The transcript is not reproducible from run to run.** The same file, transcribed twice, gave **two different transcripts**: identical word records for the first **246** — up to **101.02 s** — and then different text with the **same timings** (**1,060** words in **220** segments against **1,277** in **246**). The media were byte-identical and the code was unchanged, so the difference is in the **recogniser**: faster-whisper's confidence check **fails** on hard passages — measured on a **40 s** excerpt of this very source, where `Compression ratio threshold is not met with temperature 0.0 (6.897436 > 2.400000)` — and every fallback pass above zero **samples** from a generator faster-whisper **1.2.1** does not seed; that version has no `seed` argument to pin it with. Two decodes of the same excerpt gave **10** segments against **9**. **What it costs:** the transcript — and therefore the windows, the prompts and the clips — differ between runs, which is why the two M5.4 runs are not a one-to-one comparison. **What it would cost to fix:** pinning the sampler's seed makes the transcript repeatable, and that was **measured, not assumed** — seeding CTranslate2's generator (`ctranslate2.set_random_seed(0)`) before the call made two decodes of the same real excerpt **identical**, with the fallback still running and the quality escape it provides intact. It is **not** applied in this increment, because it changes the transcript the acceptance evidence was gathered on, and the evidence would then no longer describe the shipped code; it needs its own acceptance run. The end-to-end output was never promised to be reproducible — the highlight model runs at temperature **0.3** — so this is recorded as a limitation, not as a broken promise. Found at M5.4. |
+| K33 | **Only the English subtitle path was measured on real audio.** The default target, `en`, was run against a **Hindi** source and the captions were inspected — **5,648 words**, **0** of them outside the Latin script. A target that is **neither** English nor the spoken language takes the **pinned-transcription** path: Whisper *speaking* in a target language rather than translating into it. That path is implemented, guarded and reachable, and what it is worth for a given pair was **not measured**. The honest reading is that the feature's **default** is verified and its **other** targets are not. Found at M5.5. |
+| K34 | **The webcam-box detector's thresholds are one video's constants.** `MIN_EDGE_CONTRAST = 16`, `MIN_VERTICAL_COVERAGE = 0.55`, `MIN_HORIZONTAL_COVERAGE = 0.85`, `COVERAGE_RATIO = 0.25` and `SEARCH_FACTOR = 0.9` were chosen from the reference video's own material. A different game's art direction — a brighter UI, a flatter webcam, a face against a busy wall — may need different numbers. They are recorded as limitations rather than presented as truths. Found at M5.5. |
+| K35 | **The MeowPower wording is a judgement, and nobody outside this increment has read it.** The six stage-to-sentence phrases are the author's. The **structure** — one sentence, one number, the technical detail one disclosure away — is what the tests and the screenshots hold up; the **phrasing** is not evidence of anything except that it reads plainly to the person who wrote it. Found at M5.5. |
 
 ### 6.2 Engineering
 
@@ -1301,15 +1562,15 @@ behalf.
 ## 8. What a reviewer should do next
 
 1. **Read `docs/M5-APPLICATION-TESTING.md`.** It is the evidence that the application works, and
-   it is also the record of the **twenty-two** defects that the application testing and the gates
-   found — three at M5, one at M5.1 (§4.3), four at M5.2 (§4.4), five at M5.3 (§4.5) and **nine** at
-   M5.4 (§4.6).
+   it is also the record of the **thirty-six** defects that the application testing and the gates
+   found — three at M5, one at M5.1 (§4.3), four at M5.2 (§4.4), five at M5.3 (§4.5), **nine** at
+   M5.4 (§4.6) and **fourteen** at M5.5 (§4.7).
 2. **Read `docs/M5-SECURITY-REVIEW.md`.** It says what was *not* checked as plainly as what was.
-3. **Read the ledger's M0–M5.4 sections.** Every milestone records its decisions and its
+3. **Read the ledger's M0–M5.5 sections.** Every milestone records its decisions and its
    residuals, and the residuals are the honest edges of this release.
 4. **Run the gates.** `ruff check . && ruff format --check . && pytest -m "not slow and not golden
    and not e2e" && pytest -m "slow and not golden and not e2e"`. About ten minutes.
-5. **Run the gates on an older ffmpeg too, if you can.** Two of the **twenty-two** defects this
+5. **Run the gates on an older ffmpeg too, if you can.** Two of the **thirty-six** defects this
    milestone found render on ffmpeg 9 and fail on ffmpeg 7. The suite's structural graph check
    now catches them on any version, but the habit of reproducing the Linux leg locally is what
    found them — and it is what keeps finding things the developer's machine agrees with.

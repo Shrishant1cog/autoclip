@@ -17,14 +17,14 @@ and one of the defects found at M5 renders on Windows and fails on Linux. See §
 | # | Gate | Command | Result | Verdict |
 |---|---|---|---|---|
 | G1 | Lint | `ruff check .` | *All checks passed!* | **PASS** |
-| G2 | Format | `ruff format --check .` | *233 files already formatted* | **PASS** |
-| G3 | Types | `mypy backend/autoclip` | *Found 10 errors in 8 files (checked 138 source files)* | **BASELINE — unchanged** |
-| G4 | Unit suite | `pytest -m "not slow and not golden and not e2e" -q` | **1,395 passed**, 70 deselected — and the **same 1,395 on the Linux leg** | **PASS** |
-| G5 | Render suite | `pytest -m "slow and not golden and not e2e" -q` | **46 passed**, 1,419 deselected | **PASS** |
-| G6 | Frontend | `npm run build` (`tsc -b && vite build`) | 59 modules transformed, built in 1.52 s | **PASS** |
+| G2 | Format | `ruff format --check .` | *239 files already formatted* | **PASS** |
+| G3 | Types | `mypy backend/autoclip` | *Found 10 errors in 8 files (checked 140 source files)* | **BASELINE — unchanged** |
+| G4 | Unit suite | `pytest -m "not slow and not golden and not e2e" -q` | **1,483 passed**, 73 deselected — and the **same 1,483 on the Linux leg** | **PASS** |
+| G5 | Render suite | `pytest -m "slow and not golden and not e2e" -q` | **49 passed**, 1,507 deselected | **PASS** |
+| G6 | Frontend | `npm run build` (`tsc -b && vite build`) | 60 modules transformed, built in 1.63 s | **PASS** |
 | G7 | Container | `docker build -f docker/Dockerfile --target base .` + `GET /api/health` | **Not runnable locally — Docker is not installed on this machine.** Verified by the CI `docker` job on every push. | **PASS (CI)** |
 | G8 | Real media | `AUTOCLIP_E2E_MEDIA=… pytest tests/test_pipeline_e2e.py -q` | See §5 | **PASS** |
-| G9 | Whole suite | `pytest tests -q --ignore=tests/test_pipeline_e2e.py` | **1,441 passed**, 0 failed, 0 xfailed, 0 skipped, **452.38 s** | **PASS** |
+| G9 | Whole suite | `pytest tests -q --ignore=tests/test_pipeline_e2e.py` | **1,532 passed**, 0 failed, 0 xfailed, 0 skipped, **494.89 s** | **PASS** |
 
 ### G3 in detail — mypy is at its baseline, and that is the claim
 
@@ -37,12 +37,12 @@ that were fixed were in the modules M1 touched (`music/`, `pipeline/export.py`,
 | `backend/autoclip/chat/context.py:285` | `Job \| None` assigned to a `Job` variable |
 | `backend/autoclip/chat/context.py:286` | `Any \| None` assigned to a `YouTubeUpload` variable |
 | `backend/autoclip/cli.py:231` | a `bool` assigned to a `list[str]` variable |
-| `backend/autoclip/pipeline/ffmpeg.py:287` | `int(object)` — an overload the `type: ignore` did not cover |
+| `backend/autoclip/pipeline/ffmpeg.py:305` | `int(object)` — an overload the `type: ignore` did not cover |
 | `backend/autoclip/pipeline/validate.py:209` | `int \| None` passed where `int` is expected |
 | `backend/autoclip/pipeline/validate.py:210` | `int \| None` passed where `int` is expected |
 | `backend/autoclip/pipeline/boundaries.py:91` | `int \| None` assigned to an `int` variable |
-| `backend/autoclip/providers/resolver.py:78` | `chain` redefined |
-| `backend/autoclip/providers/openai_provider.py:71` | unsupported right operand for `in` |
+| `backend/autoclip/providers/resolver.py:86` | `chain` redefined |
+| `backend/autoclip/providers/openai_provider.py:87` | unsupported right operand for `in` |
 
 CI runs mypy with `continue-on-error: true`, so these have never blocked a build. They are
 **deferred to the modules that touch them** and are recorded as a known limitation rather than
@@ -50,7 +50,10 @@ being quietly "fixed" in a release milestone by someone who does not know why th
 that way.
 
 **Nothing in the upgrade made the type situation worse.** The count went down by four and no new
-error appeared in a module the upgrade added. The M5 export fix did not add one either.
+error appeared in a module the upgrade added. The M5 export fix did not add one either, and
+**M5.5 did not either** — the ten are the same ten, in the same modules, with the same messages;
+the line numbers moved only where M5.5 inserted code above them (`pipeline/ffmpeg.py` gained
+`run_captured_bytes`, eleven lines, which moved `_as_int` from **294** to **305**).
 
 ---
 
@@ -63,18 +66,39 @@ figures printed in the earlier revisions of this document were taken with a narr
 excluded the class methods). The **deltas** are unaffected; the absolute numbers are now
 reproducible from any revision with one command.
 
-| | M0 (`bf76811`) | M5 (`bcdfc47`) | M5.1 (`b59605b`) | M5.2 (`a907805`) | M5.3 (`2b5935d`) | **M5.4** (`74ec3eb`) | Δ M0 → M5.4 |
-|---|---|---|---|---|---|---|---|
-| Test files | 35 | **54** | **55** | **55** | **57** | **59** | +24 |
-| Test functions in the tree | 658 | **1,257** | **1,272** | **1,287** | **1,322** | **1,366** | **+708** |
-| — of which module-level | 384 | 900 | 913 | **926** | **928** | **928** | +544 |
-| Tests collected | 672 (of which 26 were `xfail`) | 1,300 (of which **0** are `xfail`) | **1,315** (of which **0** are `xfail`) | **1,330** (of which **0** are `xfail`) | **1,397** (of which **0** are `xfail`) | **1,441** (of which **0** are `xfail`) | **+769** |
-| Failing | 0 | **0** | **0** | **0** | **0** | **0** | — |
-| Skipped | 0 | **0** — the only `pytest.skip` calls in the tree are the e2e media gate, which is deliberate and documented | **0** | **0** | **0** | **0** | — |
-| `xfail` markers | **26** (the SSRF gap, pre-registered) | **0** | **0** | **0** | **0** | **0** | −26 |
-| Wall clock, unit selection | 193.77 s (672 tests, one invocation) | — | **249.81 s** (1,270 tests) | — | **230.28 s** (1,351 tests) | **225.95 s** (1,395 tests) | — |
-| Wall clock, whole suite | — | — | **534.88 s** (1,315 tests) | **499.52 s** (1,330 tests) | **454.05 s** (1,397 tests) | **452.38 s** (1,441 tests) | — |
-| Wall clock **per test** | 0.288 s | — | **0.407 s** (whole suite, incl. renders) | **0.375 s** (whole suite, incl. renders) | **0.325 s** (whole suite, incl. renders) | **0.314 s** (whole suite, incl. renders) | — |
+| | M0 (`bf76811`) | M5 (`bcdfc47`) | M5.1 (`b59605b`) | M5.2 (`a907805`) | M5.3 (`2b5935d`) | M5.4 (`74ec3eb`) | **M5.5** | Δ M0 → M5.5 |
+|---|---|---|---|---|---|---|---|---|
+| Test files | 35 | **54** | **55** | **55** | **57** | **59** | **63** | +28 |
+| Test functions in the tree | 658 | **1,257** | **1,272** | **1,287** | **1,322** | **1,366** | **1,457** | **+799** |
+| — of which module-level | 384 | 900 | 913 | **926** | **928** | **928** | **928** | +544 |
+| Tests collected | 672 (of which 26 were `xfail`) | 1,300 (of which **0** are `xfail`) | **1,315** (of which **0** are `xfail`) | **1,330** (of which **0** are `xfail`) | **1,397** (of which **0** are `xfail`) | **1,441** (of which **0** are `xfail`) | **1,532** (of which **0** are `xfail`) | **+860** |
+| Failing | 0 | **0** | **0** | **0** | **0** | **0** | **0** | — |
+| Skipped | 0 | **0** — the only `pytest.skip` calls in the tree are the e2e media gate, which is deliberate and documented | **0** | **0** | **0** | **0** | **0** | — |
+| `xfail` markers | **26** (the SSRF gap, pre-registered) | **0** | **0** | **0** | **0** | **0** | **0** | −26 |
+| Wall clock, unit selection | 193.77 s (672 tests, one invocation) | — | **249.81 s** (1,270 tests) | — | **230.28 s** (1,351 tests) | **225.95 s** (1,395 tests) | **247.85 s** (1,483 tests) | — |
+| Wall clock, whole suite | — | — | **534.88 s** (1,315 tests) | **499.52 s** (1,330 tests) | **454.05 s** (1,397 tests) | **452.38 s** (1,441 tests) | **494.89 s** (1,532 tests) | — |
+| Wall clock **per test** | 0.288 s | — | **0.407 s** (whole suite, incl. renders) | **0.375 s** (whole suite, incl. renders) | **0.325 s** (whole suite, incl. renders) | **0.314 s** (whole suite, incl. renders) | **0.323 s** (whole suite, incl. renders) | — |
+
+**The M5.5 column, against the M5.4 column.** M5.5 added **four new test files** and **91 test
+functions** — **91 collected tests**, one per function, because none of the new guards is
+parameterised:
+
+| File | Tests | What it asserts |
+|---|---|---|
+| `tests/test_subtitle_language.py` | **+29** (new file) | The language decision itself (`plan_subtitles`), the normalising of the settings value, the detection of the spoken language, the **reuse** rule, the local-vs-external choice by **engine name**, and the transcript's two languages |
+| `tests/test_faces.py` | **+10** (new file) | The **tiles** — that they cover the frame, that they overlap, that a small frame is not tiled — that a tile is a **copy** and not a view, and the **clock**: that the stretches are walked in the order they sit in the source, that a clip's first frame is never before the clip, and that the times only ever go forwards. The last two reproduce the production failure — *"Input timestamp must be monotonically increasing"* |
+| `tests/test_pipeline_cache.py` | **+13** (new file) | What the pipeline reuses between runs and what it must not: a crop plan built for another layout, a webcam report that says the detection **failed**, a report from another version, a report made for other stretches — and the order the stretches are asked for |
+| `tests/test_webcam_box.py` | **+7** (new file) | The edge detector: a bright panel is not mistaken for the webcam, the edges are found in order, the coverage rule rejects a partial edge, an implausible box falls back to the face estimate |
+| `tests/test_layout.py` | **+12** | The 40/60 strip in **auto** mode, the partial webcam staying inside its band, the face never being blurred to fill the strip, the corner fallback, the **measured** region being the one shown, the box path reaching the layout, and the time-varying crop in the filtergraph |
+| `tests/test_reframe.py` | **+6** | The gameplay crop being pushed clear of the webcam, the fallbacks being held clear too, and the rule reaching the public `build_crop_path` entry point |
+| `tests/test_webcam.py` | **+6** | The webcam's path being thinned to a size ffmpeg can parse |
+| `tests/test_export_render.py` | **+3** | A webcam that **moves** renders through the real ffmpeg; the marker stays on the face while it moves; and a moving webcam **with a speech emphasis** renders — the test that reproduces the exact production error of defect 36 |
+| `tests/test_api.py` | **+5** | The default, the change, the `"source"` value, the rejection of a code that is not a language, and the SSE snapshot carrying the source, so the progress page does not lose the title |
+
+**No speed-up is claimed.** The whole-suite wall clock moved from **452.38 s** to **494.89 s** while
+the suite grew by **91 tests**, and the per-test figure moved from **0.314 s** to **0.323 s**. Both
+of those are **machine load, not a regression**: this is a shared four-core laptop, and the
+**91 new tests** include **three real renders**, which are the slowest tests in the tree.
 
 **The M5.4 column, against the M5.3 column.** M5.4 added **one new test file** and **44 test
 functions**:
@@ -256,6 +280,8 @@ grows; the claim that matters is the one under it, which does not go stale.
 | 39 | `74ec3eb` | Exports: five defects the run's own diagnostics found | **success** — all six jobs green — [run 45144508403](https://github.com/Shrishant1cog/autoclip/actions/runs/45144508403). The whole M5.4 code tree — the three M5.4 code commits together: the provider limits, the export names, the crop-safety measurement, the shared duplicate rule, the boundary clamp and the tracker tolerance, all exercised on every CI job |
 | 40 | `722afb7` | docs: M5.4 — a second real source, run twice, and nine defects | **success** — all six jobs green — [run 45146983505](https://github.com/Shrishant1cog/autoclip/actions/runs/45146983505). The M5.4 documentation tree — the eight files that carry the second source's evidence |
 | 41 | `0af44dc` | docs: M5.4 -- the two runs, compared byte by byte | **success** — all six jobs green — [run 45161730246](https://github.com/Shrishant1cog/autoclip/actions/runs/45161730246). The tree that carries the two-run comparison, **K32** and **R8** |
+| 42 | `f8bb953` | docs: M5.4 -- CI run 41 is green, and the detection-time claim, tightened | **success** — all six jobs green — [run 45164085498](https://github.com/Shrishant1cog/autoclip/actions/runs/45164085498). The M5.4 documentation tree with run 41 recorded in it, and the detection-time claim tightened against the two runs it was measured from |
+| 43 | `e1cd12d` | MeowPower: one sentence and one number | **success** — all six jobs green — [run 45322909082](https://github.com/Shrishant1cog/autoclip/actions/runs/45322909082). The whole M5.5 tree — the three M5.5 code commits together. One push of three commits produced **one** run: GitHub ran the tip of the push, and the concurrency group never started the two before it |
 
 > **One commit on this branch has no workflow run at all.** `9fdc6ae` — *"docs: M5.3 — a count
 > that did not survive being read back"* — is on the branch, between runs 35 and 36, and GitHub's
@@ -266,7 +292,7 @@ grows; the claim that matters is the one under it, which does not go stale.
 > narrower one below, and it is checked by a script rather than by eye.
 
 
-**Runs 31, 33, 34, 35, 36, 37, 38, 39, 40 and 41 are green on all six jobs, and run 32 was cancelled.** Run 31
+**Runs 31, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42 and 43 are green on all six jobs, and run 32 was cancelled.** Run 31
 was the first to exercise the defect-13 fix on every CI job. Run 32 is the evidence-correction
 commit — it was **cancelled** by the concurrency group when the next commit was pushed, with five
 of its six jobs already green: a cancellation, not a failure, and the sixth (Windows) was cancelled
@@ -278,7 +304,13 @@ together — and it is green on all six jobs, so every M5.4 guard was exercised 
 Ubuntu 3.12, macOS 3.12 and Windows 3.12 legs, and the Docker image built and smoke-tested on top
 of it. **Run 40 is the M5.4 documentation tree**, and it is green on all six jobs too.
 **Run 41 is the tree that carries the two-run comparison, K32 and R8**, and it is green on all six
-jobs as well.
+jobs as well. **Run 42 is the M5.4 documentation tree with run 41 recorded in it**, and it is green
+on all six jobs too. **Run 43 is the whole M5.5 tree** — the three M5.5 code commits together — and
+it is green on all six jobs as well: that is the run that first exercised the subtitle-language
+guards, the webcam-frame detector, the tiled face detector, the crop-plan fingerprint, the
+saved-report window check and the per-frame speech emphasis on every CI job. One push of three
+commits produced **one** run — GitHub ran the tip of the push, and the concurrency group never
+started the two before it — so run 43 is the run of the whole M5.5 tree, not of one commit in it.
 
 > **Why this table stops here.** A commit that records a CI run is itself run by CI, and
 > recording *its* run would need another commit — which would need another. The table therefore
@@ -802,3 +834,144 @@ that: it is **not** machine load (the transcription rate was **2.17×** real tim
 **2.38×** at M5.4), and it is **not** the request shape alone (the **same** payload hand-sent to the
 same server with `num_ctx: 8192` took **1,992.9 s** against the application's **881,989 ms** — a
 **2.26×** spread on identical work). **R6** keeps that open.
+
+---
+
+## 13. The M5.5 amendment — subtitles, framing, and MeowPower
+
+**What this increment added.** Unlike M5.1–M5.4, this increment **added product surface** rather
+than only closing defects. Three things:
+
+1. **A subtitle-language setting** — `export.subtitle_language`, default `"en"`, changeable at any
+   time from *Settings → Export → Subtitles*.
+2. **A measured webcam frame** — the webcam's own rectangle is found by detecting the **steps** at
+   its edges, and the crop **follows it** as the streamer changes its size; the gameplay crop is
+   held **clear** of it.
+3. **The MeowPower screen** — the job page opens with one sentence and one number; the pipeline's
+   six stages are one disclosure away.
+
+### What was run
+
+The application was pointed at a **third real YouTube source** — *"I Stole The RAREST FERRARI in GTA
+6"*, **38:00**, **1920×1080 AV1** at **59.94 fps**, spoken in **Hindi** — and run through **every
+stage, end to end**, on the scratch instance on port **8804**.
+
+#### The run, and what it cost
+
+Every number was read back from the run's own artefacts — the files the application wrote, the rows
+it wrote to the scratch database, and the render on disk.
+
+| | |
+|---|---|
+| The source | **38:00** — 2,279.108 s — **1920×1080 AV1** at **59.94005994005994 fps**, spoken in **Hindi** |
+| The provider | the **local Ollama** (`llama3.1:8b`), so **no hosted credential was spent**; the job row records `provider=ollama` |
+| The prepare stage | `audio.wav` written at **20:42:20** — **72,931,542 B** |
+| The transcript | whisper `small`, **`language=en`**, **`source_language=hi`** — **5,648 words** in **1,140 segments**, **0** of them outside the Latin script |
+| The transcription | **1,836 s** for 2,279.1 s of audio — **1.24× real time**, faster than the video plays |
+| The scene detection | `shots.json` written at **01:13:01** — **466 shots** |
+| The highlight windows | **nine** over **5,648 words**; at most **8,402** rendered characters each, **74,262** in all — against M5.4's **two** windows over **1,277** |
+| The webcam detection | `webcam_report.json` written at **02:35:40** — **1,011 s** for the **194.5 s** the six clips use |
+| The crop plans | six plans written between **02:37:33** and **02:44:49** — **436 s** |
+| The export | six files between **02:57:35** and **03:05:06** — **451 s** for **194.5 s** of footage, **2.32× real time**. The job's own accounting agrees: `ffmpeg_runs=6`, `ffmpeg_seconds=444.455` |
+| The bytes | **221,460,397** across the six files — exactly the `export_bytes` the job recorded |
+| The clips | **six**, all between **30.84 s** and **35.98 s**, **194.50 s** in all |
+
+**The run was interrupted five times, and the product handled every one.** The scratch server was
+killed four times while the job was running — once by the session restarting, three times by shell
+timeouts. The fifth restart was deliberate: the job was put back to `running` so the **export**
+would be re-rendered with the fixed framing code, because the re-export path does not rebuild the
+webcam composition (that is **K10**, and it is why the job had to be requeued rather than
+re-exported).
+
+All five are recorded in the application's own `app_restarts` table — five rows carry this job's id
+with `jobs_resumed=1`. The product's answer is the same every time:
+
+| | |
+|---|---|
+| On startup | the job was **requeued** and picked up again |
+| The transcript | **not** transcribed again. `transcript.json` was written **once**, at 21:12:56, and was still the same file when the last run finished — the **thirty minutes** of transcription were not paid twice |
+| The shots | **not** detected again. `shots.json` was written **once**, at 01:13:01, and the six clips were reused from the database |
+| The webcam report | **not** detected again on the last run. The report still carries **02:35:40** while the layouts beside it carry **02:56:29** — the **seventeen minutes** of detection were not paid a second time |
+| The crop plans | **not** rebuilt either: the six crop files still carry timestamps between **02:37:33** and **02:44:49** |
+| The progress | back to **0.40**, which is exactly where it was — the two completed stages' weight, and not a restart from zero |
+
+This is the **reuse rule** doing its job in production, not in a test, and it is also the two cache
+fixes of this increment observed outside a test: the saved report is only reused when the **windows**
+it was made for still match (**defect 35**), and a saved crop plan is only reused when the
+**fingerprint** of the settings it was built for still matches (**defect 32**).
+
+### What it found
+
+**Fourteen defects**, all of them found by running the application or its gates against this source,
+and all of them guarded by tests that fail without the fix. Six are in the **webcam framing** — the
+detector could not see the streamer at all (**23**), the tile fix read the tiles wrongly (**24**),
+the edge search looked in the wrong place (**25**), the first frame was read from before the clip
+(**26**), the webcam spilled out of its own strip (**27**), and the gameplay crop did not keep
+clear of it (**28**). Two are elsewhere: the progress page lost the title the moment the event
+stream opened (**29**), and the webcam's path grew an ffmpeg expression past Windows' own
+**32,767-character** limit (**30**).
+
+The **first complete run** of the new framing found **three more**, and they are the reason the
+split-screen works at all. The detector was asked for the stretches the clips use **in rank order**
+— and rank is not position, so it asked the decoder to seek backwards and the decoder refused with
+*"Input timestamp must be monotonically increasing"* (**31**). The webcam was therefore never found
+and every clip was rendered as plain gameplay. Two faults followed from that: the saved crop plan
+was reused after the layout had changed (**32**), and the failed detection was kept as a final
+answer rather than tried again (**33**). A fourth was found while fixing **32** — a re-export would
+have stretched a plan made for another shape (**34**).
+
+The **re-export** that finally produced the acceptance clips found **two more**. The saved webcam
+report was never reused, because the report rounds its windows to three decimal places while the
+clip's end time is `1303.9599999999998`, so the exact comparison never matched and every retry paid
+for the detection again (**35**). And the speech-emphasis zoom broke the render, because ffmpeg
+evaluates a `scale` filter's `w` and `h` **once**, at init, and refuses a per-frame expression in
+them: *"Expressions with frame variables 'n', 't', 'pos' are not valid in init eval_mode."* Every
+clip with a moving webcam failed to render (**36**).
+
+The full table, with the evidence for each, is in `docs/M5-APPLICATION-TESTING.md` §M5.5 and the
+defect table there.
+
+### The gates, re-run
+
+| Gate | Result at the M5.5 tree |
+|---|---|
+| `ruff check .` | *All checks passed* |
+| `ruff format --check .` | *239 files already formatted* |
+| `mypy backend/autoclip` | **10 errors in 8 files** — the M1 baseline, **unchanged**, and checked against a clean worktree at `HEAD` to be certain that none of the ten is new |
+| Unit selection, Windows (ffmpeg 9.0.2) | **1,483 passed**, 73 deselected, 247.85 s |
+| Render selection, Windows (ffmpeg 9.0.2) | **49 passed**, 1,507 deselected, 254.50 s |
+| Whole suite, Windows (ffmpeg 9.0.2) | **1,532 passed**, 0 failed, 0 skipped, 0 xfailed, 494.89 s |
+| Frontend `tsc -b && vite build` | 60 modules transformed, built in 1.63 s |
+| Feature matrix | **129 rows, consistent** — 110 Implemented · 9 Partial · 1 Blocked · 9 Not Applicable · 0 Missing |
+| Linux leg (ffmpeg 7.0.2) | Reproduced by the CI's own jobs on the pushed tree — see `docs/FINAL_UPGRADE_REPORT.md` §4.1 |
+
+### The new tests, and what they guard
+
+| File | Tests | What they guard |
+|---|---|---|
+| `tests/test_subtitle_language.py` | **29** | The language decision itself (`plan_subtitles`), the normalising of the settings value, the detection of the spoken language, the **reuse** rule, the local-vs-external choice by **engine name**, and the transcript's two languages |
+| `tests/test_webcam_box.py` | **7** | The edge detector: a bright panel is not mistaken for the webcam, the edges are found in order, the coverage rule rejects a partial edge, an implausible box falls back to the face estimate |
+| `tests/test_layout.py::TestTheSplitScreen` | **8** | The 40/60 strip in **auto** mode, the partial webcam staying inside its band, the face never being blurred to fill the strip, the corner fallback, the **measured** region being the one shown, and the box path reaching the layout |
+| `tests/test_layout.py::TestTheWebcamThatMoves` | **4** | The time-varying crop in the filtergraph, and that a fixed webcam still gets a fixed crop |
+| `tests/test_reframe.py::TestTheWebcamIsKeptOutOfTheGameplay` | **6** | The gameplay crop being pushed clear of the webcam, the fallbacks being held clear too, and the rule reaching the public `build_crop_path` entry point |
+| `tests/test_export_render.py::TestLayoutRender` | **2** | A webcam that **moves** rendering through real ffmpeg, and the marker still being in the strip at the end of the clip |
+| `tests/test_api.py::TestSettings` | **4** | The default, the change, the `"source"` value, and the rejection of a code that is not a language |
+| `tests/test_api.py::TestEventStream` | **1** | The SSE snapshot carrying the source, so the progress page does not lose the title |
+| `tests/test_faces.py` | **10** | The **tiles** — that they cover the frame, that they overlap, that a small frame is not tiled — that a tile is a **copy** and not a view, and the **clock**: that the stretches are walked in the order they sit in the source, that a clip's first frame is never before the clip, and that the times only ever go forwards. The last two reproduce the production failure — *"Input timestamp must be monotonically increasing"* |
+| `tests/test_pipeline_cache.py` | **12** | What the pipeline reuses between runs and what it must not: a crop plan built for another layout, a webcam report that says the detection **failed**, a report from another version, a report made for other stretches — and the order the stretches are asked for |
+| `tests/test_webcam.py::TestTheWebcamPath` | **6** | The webcam's path being thinned to a size ffmpeg can parse |
+
+### What this increment deliberately does **not** claim
+
+* **It does not claim a better transcript.** The recogniser's non-determinism is **K32**, carried
+  forward unchanged, and the seed fix that would close it was **not** applied — it changes the
+  transcript, and therefore the windows, the prompts and the clips, so the acceptance evidence
+  gathered here would no longer describe the shipped code.
+* **It does not claim the subtitle path for every target was measured.** Only the **English** path
+  was measured on real audio. A target that is neither English nor the spoken language takes the
+  pinned-transcription path, and what that is worth is **R9**.
+* **It does not claim the webcam-box thresholds are universal.** They are **one video's** numbers,
+  and they are **R10**.
+* **It does not claim a hosted-model result.** The run used the same real local **Ollama**
+  (`llama3.1:8b`) as M5.3 and M5.4, so **no hosted credential was spent** and the hosted paths stay
+  **Unverified (external)**.
