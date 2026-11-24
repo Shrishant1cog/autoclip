@@ -32,6 +32,7 @@ class LocalWhisperSTT:
         duration_s: float | None = None,
         on_progress: Callable[[float], None] | None = None,
         cancelled: Callable[[], bool] | None = None,
+        subtitle_language: str = "",
     ):
         from ..config import load as load_settings
 
@@ -47,6 +48,7 @@ class LocalWhisperSTT:
                 duration_s=duration_s,
                 on_progress=on_progress,
                 cancelled=cancelled,
+                subtitle_language=subtitle_language,
             )
         except local_transcribe.TranscriptionError as exc:
             # A cancellation is not a failure: the engine noticed the job was

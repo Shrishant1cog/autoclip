@@ -51,6 +51,9 @@ from . import (
     transcribe,
     validate,
 )
+from . import (
+    language as subtitle_language,
+)
 from .prepare import Silence
 from .reframe import ReframeConfig, build_crop_path, layout_store
 from .reframe.croppath import CropPath
@@ -66,6 +69,18 @@ from .reframe.webcam import Rect, WebcamReport, WebcamTrack, detect_webcam
 from .transcript import Transcript
 
 log = logging.getLogger(__name__)
+
+
+def _honours_language(transcript: Transcript, target: str) -> bool:
+    """True when the transcript's words are in the language that was asked for.
+
+    "source" is always honoured: the words are in the language they were
+    spoken in, whatever that turned out to be.
+    """
+    if target == subtitle_language.SOURCE_LANGUAGE:
+        return True
+    language = (transcript.language or "").strip().lower()
+    return bool(language) and language == target
 
 
 def _maybe_enqueue_upload(export_id: str, settings: Settings) -> None:
@@ -502,11 +517,23 @@ class PipelineRunner:
         stage = Stage.TRANSCRIBE
         self._check_cancelled()
 
+        target = subtitle_language.normalise_target(self.settings.export.subtitle_language)
+
         if self.workspace.transcript.exists():
-            log.info("Reusing existing transcript for job %s.", self.job.id)
             transcript = Transcript.load(self.workspace.transcript)
-            self._finish_stage(stage)
-            return transcript
+            if _honours_language(transcript, target):
+                log.info("Reusing existing transcript for job %s.", self.job.id)
+                self._finish_stage(stage)
+                return transcript
+            # The saved transcript is in another language — the user changed
+            # the subtitle language after it was made. Keeping it would serve
+            # captions in the language they no longer asked for.
+            log.info(
+                "The saved transcript for job %s is in %r, not %r; transcribing again.",
+                self.job.id,
+                transcript.language,
+                target,
+            )
 
         engine, notice = speech.resolve_engine(self.settings)
         if notice:
@@ -516,6 +543,10 @@ class PipelineRunner:
         # service slows a job down, it never kills it. Pinned engines
         # (transcription.engine != "auto") surface their own errors instead.
         pinned = self.settings.transcription.engine != "auto"
+        # Whether the engine that produced the transcript is the local one.
+        # The local recogniser is the only one that can translate, so this is
+        # what decides whether a language mismatch can still be fixed.
+        local_engine = engine.name == "whisper"
         self._emit(stage, 0.0, f"Transcribing with {engine.name}")
         try:
             transcript = engine.transcribe(
@@ -525,6 +556,7 @@ class PipelineRunner:
                 duration_s=self.source.duration_s,
                 on_progress=self._stage_progress(stage),
                 cancelled=self._is_cancelled,
+                subtitle_language=target,
             )
         except speech.SpeechCancelled as exc:
             # The job was cancelled, not broken. This is checked before the
@@ -560,7 +592,45 @@ class PipelineRunner:
                 duration_s=self.source.duration_s,
                 on_progress=self._stage_progress(stage),
                 cancelled=self._is_cancelled,
+                subtitle_language=target,
             )
+            local_engine = True
+
+        if not _honours_language(transcript, target):
+            # The engine transcribed the speech but did not write the
+            # captions in the language that was asked for. Only the local
+            # recogniser can translate, so it does the work — and if it is
+            # already the engine that ran, there is nothing left to try and
+            # the transcript stands as it is, with the mismatch recorded.
+            if local_engine:
+                log.warning(
+                    "The transcript is in %r, not the requested %r.", transcript.language, target
+                )
+            else:
+                if pinned:
+                    raise speech.SpeechError(
+                        f"The captions are in {transcript.language or 'an unknown language'}, "
+                        f"not {target}. The external engine transcribes but does not "
+                        "translate — set the subtitle language to the spoken language, or "
+                        "use the local engine in Settings → Transcription."
+                    )
+                log.info(
+                    "The external engine produced %r, not the requested %r; "
+                    "re-transcribing locally so the captions can be written in %r.",
+                    transcript.language,
+                    target,
+                    target,
+                )
+                self._emit(stage, 0.0, "Translating the captions with local Whisper")
+                transcript = LocalWhisperSTT().transcribe(
+                    audio,
+                    self.settings.transcription,
+                    language=self.settings.whisper.language,
+                    duration_s=self.source.duration_s,
+                    on_progress=self._stage_progress(stage),
+                    cancelled=self._is_cancelled,
+                    subtitle_language=target,
+                )
 
         if (
             transcript.source == "whisper"

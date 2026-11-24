@@ -435,6 +435,13 @@ export interface Settings {
     webcam_height_frac?: number
     webcam_position?: LayoutPosition
     webcam_corner_frac?: number
+    /**
+     * The language the subtitles are in. Absent on a server older than M5.5.
+     *
+     * `en` — the default — means English subtitles even when the video is in
+     * another language. `source` keeps the language spoken in the video.
+     */
+    subtitle_language?: string
   }
   /** Absent on a server older than Phase 16. */
   resources?: {

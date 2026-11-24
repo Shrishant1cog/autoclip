@@ -97,6 +97,30 @@ class TestSettings:
         assert body["active_provider"] == "anthropic"
         assert body["whisper"]["model"] == "small"
 
+    def test_the_subtitles_are_in_english_by_default(self, client: TestClient) -> None:
+        """English is the default, so nothing has to be set up for it."""
+        body = client.get("/api/settings").json()
+
+        assert body["export"]["subtitle_language"] == "en"
+
+    def test_the_subtitle_language_can_be_changed(self, client: TestClient) -> None:
+        response = client.put("/api/settings", json={"export": {"subtitle_language": "hi"}})
+
+        assert response.status_code == 200
+        assert response.json()["export"]["subtitle_language"] == "hi"
+        assert client.get("/api/settings").json()["export"]["subtitle_language"] == "hi"
+
+    def test_the_subtitles_can_follow_the_video(self, client: TestClient) -> None:
+        response = client.put("/api/settings", json={"export": {"subtitle_language": "source"}})
+
+        assert response.status_code == 200
+        assert response.json()["export"]["subtitle_language"] == "source"
+
+    def test_a_language_that_is_not_a_language_is_rejected(self, client: TestClient) -> None:
+        response = client.put("/api/settings", json={"export": {"subtitle_language": "klingon"}})
+
+        assert response.status_code == 400
+
     def test_partial_update_leaves_other_sections_alone(self, client: TestClient) -> None:
         client.put("/api/settings", json={"whisper": {"model": "large-v3"}})
 

@@ -34,6 +34,44 @@ const DEFAULT_TRANSCRIPTION = {
   voice_id: '',
 }
 
+/** The languages the subtitles can be in, in the order the settings screen
+ * offers them. `source` means "the language spoken in the video". */
+const SUBTITLE_LANGUAGE_OPTIONS = [
+  'en',
+  'source',
+  'hi',
+  'es',
+  'fr',
+  'de',
+  'pt',
+  'it',
+  'ru',
+  'ar',
+  'id',
+  'tr',
+  'zh',
+  'ja',
+  'ko',
+]
+
+const SUBTITLE_LANGUAGE_LABELS: Record<string, string> = {
+  en: 'English (default)',
+  source: 'Same as the video',
+  hi: 'Hindi',
+  es: 'Spanish',
+  fr: 'French',
+  de: 'German',
+  pt: 'Portuguese',
+  it: 'Italian',
+  ru: 'Russian',
+  ar: 'Arabic',
+  id: 'Indonesian',
+  tr: 'Turkish',
+  zh: 'Chinese',
+  ja: 'Japanese',
+  ko: 'Korean',
+}
+
 export function Settings() {
   const [settings, setSettings] = useState<SettingsData | null>(null)
   const [providers, setProviders] = useState<ProviderStatus[]>([])
@@ -478,6 +516,27 @@ export function Settings() {
           />
           Also write an .srt sidecar
         </label>
+
+        <div className="mt-8 border-t border-ink-800 pt-6">
+          <h3 className="text-sm text-ink-100">Subtitles</h3>
+          <p className="mt-1 max-w-prose text-xs leading-relaxed text-ink-500">
+            English is the default, so a video spoken in another language gets English captions
+            without any setup. Change it whenever you like — the next clip you make uses the
+            language you pick here.
+          </p>
+
+          <div className="mt-4 grid gap-5 sm:grid-cols-2">
+            <Select
+              label="Subtitle language"
+              value={settings.export.subtitle_language ?? 'en'}
+              onChange={(value) =>
+                patch({ export: { ...settings.export, subtitle_language: value } })
+              }
+              options={SUBTITLE_LANGUAGE_OPTIONS}
+              labels={SUBTITLE_LANGUAGE_LABELS}
+            />
+          </div>
+        </div>
 
         <div className="mt-8 border-t border-ink-800 pt-6">
           <h3 className="text-sm text-ink-100">Webcam</h3>

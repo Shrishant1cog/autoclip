@@ -10,12 +10,31 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from ..config import WhisperSettings
 from ..system import GPUInfo, report
+from . import ffmpeg
+from .language import (
+    DEFAULT_SUBTITLE_LANGUAGE,
+    SOURCE_LANGUAGE,
+    SubtitlePlan,
+    normalise_target,
+    plan_subtitles,
+)
 from .transcript import Segment, Transcript, Word
 
 log = logging.getLogger(__name__)
+
+#: How much of the audio the language detector is given.
+#:
+#: Thirty seconds is what Whisper itself looks at when it detects a language,
+#: so the answer here and the answer inside the transcription agree.
+LANGUAGE_DETECT_SECONDS = 30.0
+
+#: Below this probability the detected language is not trusted, and the
+#: recogniser is left to decide for itself.
+LANGUAGE_DETECT_MIN_CONFIDENCE = 0.5
 
 
 class TranscriptionError(RuntimeError):
@@ -89,8 +108,15 @@ def transcribe(
     duration_s: float | None = None,
     on_progress: Callable[[float], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
+    subtitle_language: str = "",
 ) -> Transcript:
     """Transcribe an audio file into a :class:`Transcript` with word timings.
+
+    ``subtitle_language`` is the language the captions are wanted in, not the
+    language the audio is in. The default is English, so a video spoken in
+    another language is translated as it is decoded and every word keeps the
+    timing of the speech it came from. ``source`` keeps the spoken language;
+    any other two-letter code asks for that language.
 
     Preconditions:
         audio is a decodable audio file, ideally 16 kHz mono as produced by
@@ -124,9 +150,23 @@ def transcribe(
     except Exception as exc:
         raise _model_load_error(exc, device, compute_type) from exc
 
+    plan = _plan_for(audio, model, settings=settings, subtitle_language=subtitle_language)
+    log.info(
+        "Transcribing with model=%s device=%s compute_type=%s task=%s language=%s "
+        "(spoken=%s, subtitles in %s)",
+        settings.model,
+        device,
+        compute_type,
+        plan.task,
+        plan.language or "auto",
+        plan.spoken or "unknown",
+        plan.target or "the spoken language",
+    )
+
     segments_iter, info = model.transcribe(
         str(audio),
-        language=settings.language or None,
+        language=plan.language or None,
+        task=plan.task,
         word_timestamps=True,
         vad_filter=True,
         # Trims long silences before decoding, which both speeds things up and
@@ -136,7 +176,8 @@ def transcribe(
 
     total = duration_s or getattr(info, "duration", 0.0) or 0.0
     transcript = Transcript(
-        language=getattr(info, "language", "") or settings.language,
+        language=_subtitle_language_of(plan, info),
+        source_language=_spoken_language_of(plan, info),
         model=settings.model,
         source="whisper",
     )
@@ -182,6 +223,132 @@ def transcribe(
         "Transcribed %d words in %d segments.", len(transcript.words), len(transcript.segments)
     )
     return transcript
+
+
+# --------------------------------------------------------------------------
+# Language
+# --------------------------------------------------------------------------
+
+
+def _plan_for(
+    audio: Path,
+    model: Any,
+    *,
+    settings: WhisperSettings,
+    subtitle_language: str,
+) -> SubtitlePlan:
+    """Decide what the recogniser should do, detecting the spoken language if needed.
+
+    The spoken language is only needed when the captions are wanted in a
+    language that is not the one being spoken. When it is needed and is not
+    already pinned in the settings, the detector is asked for it — one short
+    pass over the opening of the audio, which is what Whisper itself does when
+    it is left to decide.
+    """
+    target = normalise_target(subtitle_language)
+    spoken = (settings.language or "").strip().lower()
+
+    if spoken or target == SOURCE_LANGUAGE:
+        return plan_subtitles(spoken=spoken, target=target)
+
+    detected, probability = detect_spoken_language(model, audio)
+    if detected and probability < LANGUAGE_DETECT_MIN_CONFIDENCE:
+        log.warning(
+            "The language of the audio was only %.0f%% certain (%s); the recogniser "
+            "will decide for itself.",
+            probability * 100,
+            detected,
+        )
+        detected = ""
+
+    return plan_subtitles(spoken=detected, target=target)
+
+
+def detect_spoken_language(model: Any, audio: Path) -> tuple[str, float]:
+    """The language spoken in the audio, as Whisper sees it.
+
+    Returns the language code and the confidence. An empty code means the
+    question could not be answered; it is never a guess.
+    """
+    excerpt = audio_excerpt(audio, LANGUAGE_DETECT_SECONDS)
+    if excerpt is None or len(excerpt) == 0:
+        return "", 0.0
+
+    try:
+        language, probability, _ = model.detect_language(audio=excerpt)
+    except Exception as exc:  # noqa: BLE001 - a detector failure is an answer, not a crash
+        log.warning("Could not detect the language of %s: %s", audio.name, exc)
+        return "", 0.0
+
+    return (language or "").strip().lower(), float(probability or 0.0)
+
+
+def audio_excerpt(audio: Path, seconds: float) -> Any:
+    """The first ``seconds`` of the audio, as 16 kHz mono float samples.
+
+    The recogniser's language detector wants exactly this: one channel of
+    16 kHz floats. Decoding it with ffmpeg means any input the pipeline can
+    handle works, not only the prepared WAV.
+    """
+    import numpy as np
+
+    command = [
+        ffmpeg.ffmpeg_path(),
+        "-hide_banner",
+        "-nostats",
+        *ffmpeg.protocol_args(),
+        "-t",
+        f"{max(1.0, seconds):.3f}",
+        "-i",
+        str(audio),
+        "-f",
+        "f32le",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-",
+    ]
+
+    try:
+        proc = ffmpeg.run_captured_bytes(command)
+    except ffmpeg.FFmpegError as exc:
+        log.warning("Could not read the opening of %s: %s", audio.name, exc)
+        return None
+
+    if proc.returncode != 0:
+        log.warning(
+            "Could not read the opening of %s: %s",
+            audio.name,
+            (proc.stderr or b"").decode("utf-8", "replace").strip()[:300],
+        )
+        return None
+
+    return np.frombuffer(proc.stdout, dtype=np.float32)
+
+
+def _subtitle_language_of(plan: SubtitlePlan, info: Any) -> str:
+    """The language the words are in.
+
+    After a translation the words are English even though the audio was not,
+    and after a plain transcription they are whatever was spoken. The
+    recogniser's own answer wins where there is one, because it is the
+    language of the text it actually produced.
+    """
+    detected = (getattr(info, "language", "") or "").strip().lower()
+    if plan.translated:
+        return DEFAULT_SUBTITLE_LANGUAGE
+    return detected or plan.target or plan.spoken
+
+
+def _spoken_language_of(plan: SubtitlePlan, info: Any) -> str:
+    """The language spoken in the audio.
+
+    The plan's own answer comes first: when the recogniser was pinned to a
+    target language, the language it reports is that target, not the speech.
+    """
+    detected = (getattr(info, "language", "") or "").strip().lower()
+    return plan.spoken or detected
 
 
 # --------------------------------------------------------------------------

@@ -57,8 +57,15 @@ class SpeechEngine(Protocol):
         duration_s: float | None = None,
         on_progress: Callable[[float], None] | None = None,
         cancelled: Callable[[], bool] | None = None,
+        subtitle_language: str = "",
     ):  # -> Transcript; kept untyped to avoid a circular import at module load
-        """Transcribe ``audio`` into a :class:`Transcript`."""
+        """Transcribe ``audio`` into a :class:`Transcript`.
+
+        ``language`` is the language spoken in the audio, when it is known.
+        ``subtitle_language`` is the language the captions are wanted in, which
+        is not the same thing: the default is English, so a video spoken in
+        another language is translated as it is decoded.
+        """
 
 
 def resolve_engine(settings: Settings) -> tuple[SpeechEngine, str | None]:

@@ -18,11 +18,12 @@ import contextlib
 import json
 import logging
 import os
+import re
 import stat
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 from . import paths
 
@@ -55,6 +56,36 @@ YOUTUBE_REFRESH_TOKEN_KEY = "youtube_refresh_token"
 #: Meta app secret for the Instagram Platform. The app id is not a secret and
 #: lives in the settings file; this one goes in the OS keyring.
 INSTAGRAM_APP_SECRET_KEY = "instagram_app_secret"
+
+#: The language the subtitles are in unless the user chooses another one.
+#:
+#: English is the default because that is where the audience is: a Hindi
+#: gaming video with English captions is the normal case, not the exception.
+DEFAULT_SUBTITLE_LANGUAGE = "en"
+
+#: The settings value that means "the language spoken in the video".
+SOURCE_LANGUAGE = "source"
+
+#: The languages the settings screen offers, with the label each one gets.
+#:
+#: Whisper understands a hundred or more; this is the set that is actually
+#: useful for the captions AutoClip makes. The codes are ISO 639-1.
+SUBTITLE_LANGUAGES: tuple[tuple[str, str], ...] = (
+    ("en", "English"),
+    ("hi", "Hindi"),
+    ("es", "Spanish"),
+    ("fr", "French"),
+    ("de", "German"),
+    ("pt", "Portuguese"),
+    ("it", "Italian"),
+    ("ru", "Russian"),
+    ("ar", "Arabic"),
+    ("id", "Indonesian"),
+    ("tr", "Turkish"),
+    ("zh", "Chinese"),
+    ("ja", "Japanese"),
+    ("ko", "Korean"),
+)
 
 
 class ProviderSettings(BaseModel):
@@ -190,6 +221,35 @@ class ExportSettings(BaseModel):
     webcam_position: Literal["top-left", "top-right", "bottom-left", "bottom-right"] = "top-right"
     #: The webcam's share of the output width in the corner layout.
     webcam_corner_frac: float = Field(default=0.38, gt=0.0, le=1.0)
+    #: The language the subtitles are in.
+    #:
+    #: ``en`` — the default — means the captions are in English even when the
+    #: video is in another language: the recogniser translates as it decodes,
+    #: which keeps every word's timing tied to the speech it came from.
+    #: ``source`` keeps the language spoken in the video. Any other ISO 639-1
+    #: code asks for that language.
+    subtitle_language: str = DEFAULT_SUBTITLE_LANGUAGE
+
+    @field_validator("subtitle_language")
+    @classmethod
+    def _check_subtitle_language(cls, value: str) -> str:
+        """Accept ``source`` or a two-letter language code, and nothing else.
+
+        An empty value means "the default", not "no subtitles": the captions
+        are always written, and their language is always a decision somebody
+        made.
+        """
+        code = (value or "").strip().lower()
+        if not code:
+            return DEFAULT_SUBTITLE_LANGUAGE
+        if code == SOURCE_LANGUAGE:
+            return SOURCE_LANGUAGE
+        if not re.fullmatch(r"[a-z]{2}", code):
+            raise ValueError(
+                "The subtitle language must be 'source' or a two-letter language code, "
+                f"not {value!r}."
+            )
+        return code
 
 
 class ResourceSettings(BaseModel):

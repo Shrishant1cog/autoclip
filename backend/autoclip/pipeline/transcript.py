@@ -76,7 +76,16 @@ class Segment:
 class Transcript:
     words: list[Word] = field(default_factory=list)
     segments: list[Segment] = field(default_factory=list)
+    #: The language the words are in — the language of the subtitles.
     language: str = ""
+    #: The language spoken in the audio, when it is known.
+    #:
+    #: It differs from :attr:`language` whenever the captions are a
+    #: translation, which is the usual case: a Hindi video with English
+    #: captions has an English ``language`` and a Hindi ``source_language``.
+    #: Both are recorded so the review screen can say what happened instead of
+    #: leaving the user to guess.
+    source_language: str = ""
     model: str = ""
     #: "whisper" or "youtube".
     source: str = "whisper"
@@ -200,6 +209,7 @@ class Transcript:
     def to_dict(self) -> dict[str, Any]:
         return {
             "language": self.language,
+            "source_language": self.source_language,
             "model": self.model,
             "source": self.source,
             "words": [asdict(w) for w in self.words],
@@ -212,6 +222,7 @@ class Transcript:
             words=[Word(**w) for w in data.get("words", [])],
             segments=[Segment(**s) for s in data.get("segments", [])],
             language=data.get("language", ""),
+            source_language=data.get("source_language", ""),
             model=data.get("model", ""),
             source=data.get("source", "whisper"),
         )

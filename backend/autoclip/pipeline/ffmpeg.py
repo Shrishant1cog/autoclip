@@ -180,6 +180,17 @@ def run_captured(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
         )
 
 
+def run_captured_bytes(command: Sequence[str]) -> subprocess.CompletedProcess[bytes]:
+    """Run a command with the ffmpeg gate held, capturing its output as bytes.
+
+    The same gate as :func:`run_captured`, for the commands whose output is
+    data rather than text — PCM samples, for instance. Decoding through a text
+    pipe would corrupt them.
+    """
+    with resources.ffmpeg_gate.slot():
+        return subprocess.run(command, capture_output=True, check=False)
+
+
 def protocol_args() -> list[str]:
     """The FFmpeg options that restrict what it may open.
 

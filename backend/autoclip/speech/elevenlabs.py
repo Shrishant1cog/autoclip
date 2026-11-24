@@ -80,7 +80,15 @@ class ElevenLabsSTT:
         duration_s: float | None = None,
         on_progress: Callable[[float], None] | None = None,
         cancelled: Callable[[], bool] | None = None,
+        subtitle_language: str = "",
     ) -> Transcript:
+        """Transcribe the audio with Scribe.
+
+        Scribe transcribes; it does not translate. The requested subtitle
+        language is therefore not passed to the service — the runner compares
+        the language that comes back with the one that was asked for and
+        re-transcribes locally when they differ.
+        """
         api_key = get_secret("elevenlabs")
         if not api_key:
             raise SpeechError("No ElevenLabs API key configured. Add one in Settings → Keys.")
